@@ -1,0 +1,12 @@
+{
+  "capabilities": [
+    "storage"
+  ],
+  "id": "agentic26-navigation",
+  "integrity": {
+    "bundle_blake3": "e2c0eef913eaaf90f67e2147c29763e6f5c59111cec860cd0e9719f8cabc241b"
+  },
+  "name": "Agentic26 Navigation",
+  "schema": 1,
+  "version": "0.1.0"
+}

@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""Use the pinned harness without changing the user's global environment."""
+import os
+from pathlib import Path
+import sys
+
+root = Path(__file__).resolve().parents[1]
+workspace = Path(os.environ.get('AGENTIC26_TOOLCHAIN', root.parent / '.octosense-agentic26')).expanduser().resolve()
+harness = workspace / 'OctoScript-App-Design-Flow/tools/octo'
+hub = workspace / 'OctoSense-App-Hub'
+if not harness.is_file():
+    raise SystemExit('Toolchain missing. Run: make bootstrap')
+env = dict(os.environ, OCTOSENSE_APP_HUB=str(hub), OCTO_HUB=str(hub / 'target/release/hub'), OCTO_CARD_HOST=str(hub / 'target/release/card-host'))
+os.execve(sys.executable, [sys.executable, str(harness), *sys.argv[1:]], env)

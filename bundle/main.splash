@@ -1,0 +1,140 @@
+// Navigation development scaffold. No routes, prices or external actions.
+// APIs: pinned OctoScript-App-Design-Flow/docs/SCRIPT-API.md.
+let ink = #x162e35
+let muted = #x5e747b
+let teal = #x06796f
+
+fn valid(origin, destination, minutes, budget){
+    if origin.trim() == "" || destination.trim() == "" {
+        ui.status.set_text("Enter an origin and a destination.")
+        return false
+    }
+    if !regex("^[0-9]+$", "").test(minutes) {
+        ui.status.set_text("Time must be whole minutes (1-1440).")
+        return false
+    }
+    let duration = minutes.to_f64()
+    if !(duration >= 1 && duration <= 1440) {
+        ui.status.set_text("Time must be between 1 and 1440.")
+        return false
+    }
+    if budget != "" {
+        if !regex("^[0-9]+([.][0-9]{1,2})?$", "").test(budget) {
+            ui.status.set_text("Budget must be a non-negative amount.")
+            return false
+        }
+        if !(budget.to_f64() <= 1000000) {
+            ui.status.set_text("Budget is too large for this draft.")
+            return false
+        }
+    }
+    return true
+}
+
+fn restore(){
+    if !fs.exists("trip-draft.json") { return }
+    // is_string/is_object: makepad/platform/script/src/native.rs add_shared.
+    let raw = fs.read("trip-draft.json")
+    if !raw.is_string() {
+        ui.status.set_text("Cannot read draft. Clear to start again.")
+        return
+    }
+    let parsed = raw.parse_json()
+    if !parsed.is_object() {
+        ui.status.set_text("Cannot read draft. Clear to start again.")
+        return
+    }
+    let draft = parsed
+    if draft.schema != 1 || !draft.origin.is_string() || !draft.destination.is_string() || !draft.minutes.is_string() || !draft.budget.is_string() {
+        ui.status.set_text("Cannot read draft. Clear to start again.")
+        return
+    }
+    let origin = "" + draft.origin
+    let destination = "" + draft.destination
+    let minutes = "" + draft.minutes
+    let budget = "" + draft.budget
+    if !valid(origin, destination, minutes, budget) { return }
+    ui.origin.set_text(origin)
+    ui.destination.set_text(destination)
+    ui.minutes.set_text(minutes)
+    ui.budget.set_text(budget)
+    ui.status.set_text("Your saved draft has been restored.")
+}
+
+fn load(){
+    // Missing JSON fields raise an error. Catch at the restoration boundary.
+    // try/fallback: makepad/platform/script/src/vm.rs and heap.rs tests.
+    try { restore() } { ui.status.set_text("Cannot read draft. Clear to start again.") }
+}
+
+fn save(){
+    let origin = ui.origin.text().trim()
+    let destination = ui.destination.text().trim()
+    let minutes = ui.minutes.text().trim()
+    let budget = ui.budget.text().trim()
+    if !valid(origin, destination, minutes, budget) { return }
+    let draft = {schema: 1 origin: origin destination: destination minutes: minutes budget: budget objective: "min_cost"}
+    let data = draft.to_json()
+    if fs.write("trip-draft.json", data) != nil {
+        ui.status.set_text("Could not save. Your inputs are kept.")
+        return
+    }
+    if fs.read("trip-draft.json") != data {
+        ui.status.set_text("Saved draft could not be verified.")
+        return
+    }
+    ui.status.set_text("Draft saved locally and verified.")
+}
+
+fn clear(){
+    if fs.exists("trip-draft.json") {
+        if fs.remove("trip-draft.json") != nil {
+            ui.status.set_text("Could not clear the saved draft.")
+            return
+        }
+    }
+    ui.origin.set_text("")
+    ui.destination.set_text("")
+    ui.minutes.set_text("")
+    ui.budget.set_text("")
+    ui.status.set_text("No saved trip. Start with your constraints.")
+}
+
+start_timeout(0.05, || load())
+
+SolidView{width: Fill height: Fill flow: Down padding: 20 spacing: 8 draw_bg.color: #xf4f7f5
+    Label{text: "NAVIGATION / AGENTIC26" draw_text.color: teal draw_text.text_style: theme.font_bold{font_size: 11}}
+    Label{text: "Go your way." draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 30}}
+    Label{text: "Walk. Transit. Taxi. One journey." draw_text.color: muted draw_text.text_style.font_size: 14}
+    SolidView{width: Fill height: 1 draw_bg.color: #xd3ded9}
+    Label{text: "Start with your constraints" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
+    Label{text: "Origin" draw_text.color: ink draw_text.text_style.font_size: 13}
+    origin := TextInput{width: Fill height: 42 empty_text: "Where are you leaving from?"
+        draw_bg +: {color: #xffffff color_hover: #xffffff color_focus: #xffffff color_empty: #xffffff border_radius: 8.0}
+        draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: muted color_empty_hover: muted}}
+    Label{text: "Destination" draw_text.color: ink draw_text.text_style.font_size: 13}
+    destination := TextInput{width: Fill height: 42 empty_text: "Where do you need to arrive?"
+        draw_bg +: {color: #xffffff color_hover: #xffffff color_focus: #xffffff color_empty: #xffffff border_radius: 8.0}
+        draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: muted color_empty_hover: muted}}
+    Label{text: "Time available / minutes" draw_text.color: ink draw_text.text_style.font_size: 13}
+    minutes := TextInput{width: Fill height: 42 empty_text: "1-1440"
+        draw_bg +: {color: #xffffff color_hover: #xffffff color_focus: #xffffff color_empty: #xffffff border_radius: 8.0}
+        draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: muted color_empty_hover: muted}}
+    Label{text: "Budget cap / CNY (optional)" draw_text.color: ink draw_text.text_style.font_size: 13}
+    budget := TextInput{width: Fill height: 42 empty_text: "Leave blank for no budget cap"
+        draw_bg +: {color: #xffffff color_hover: #xffffff color_focus: #xffffff color_empty: #xffffff border_radius: 8.0}
+        draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: muted color_empty_hover: muted}}
+    Label{text: "Goal: lowest cost within your time limit" draw_text.color: teal draw_text.text_style.font_size: 13}
+    View{width: Fill height: Fit flow: Right spacing: 10
+        ButtonFlat{text: "Save draft" width: 170 height: 42 on_click: || save()
+            draw_bg +: {color: teal color_focus: teal color_hover: #x098d80 color_down: #x055f57 border_size: 0.0 border_radius: 10.0}
+            draw_text +: {color: #xffffff color_focus: #xffffff color_hover: #xffffff color_down: #xffffff}}
+        ButtonFlat{text: "Clear draft" width: Fill height: 42 on_click: || clear()
+            draw_text +: {color: ink color_focus: ink color_hover: ink color_down: ink}}
+    }
+    status := Label{width: Fill text: "No saved trip. Start with your constraints." draw_text.color: muted draw_text.text_style.font_size: 12}
+    View{width: Fill height: Fill}
+    SolidView{width: Fill height: 1 draw_bg.color: #xd3ded9}
+    Label{text: "Route planning is not connected yet." draw_text.color: ink draw_text.text_style.font_size: 12}
+    Label{text: "Local draft only. No location or network access." draw_text.color: muted draw_text.text_style.font_size: 11}
+}

@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "subtitle": "Local trip constraints for a multimodal journey",
+  "description": "Development scaffold: enter an origin, destination, time budget and optional spending cap. Validate, save and restore a local trip draft. Route optimization, live traffic, navigation and Agent execution are not implemented.",
+  "category": "travel",
+  "keywords": [
+    "navigation",
+    "multimodal",
+    "trip",
+    "development"
+  ],
+  "screenshots": [
+    "screenshots/01-main.png"
+  ],
+  "icon": "assets/icon.svg",
+  "platforms": [
+    "macos"
+  ],
+  "publisher": {
+    "name": "Replace with your publisher name",
+    "support": "https://example.com/support",
+    "privacy_policy_url": "https://example.com/privacy"
+  },
+  "release_notes": "Initial local development scaffold. Publisher metadata remains a placeholder.",
+  "age_rating": "all",
+  "license": "Apache-2.0"
+}

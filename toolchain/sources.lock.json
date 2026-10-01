@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "verified_date": "2026-10-01",
+  "repositories": {
+    "OctoScript-App-Design-Flow": {
+      "url": "https://github.com/OctoSense-org/OctoScript-App-Design-Flow.git",
+      "revision": "e08517254d9b2c316352eec4f959810d9ad22d40"
+    },
+    "OctoSense-App-Hub": {
+      "url": "https://github.com/OctoSense-org/OctoSense-App-Hub.git",
+      "revision": "b3602e86bc3bfb7202e1b315542f50e7b1f27a15"
+    },
+    "makepad": {
+      "url": "https://github.com/OctoSense-org/makepad.git",
+      "revision": "1f3b1dedfbb81424eb8dbf69e5e2c634fa73dc54"
+    },
+    "octoscript-makepad": {
+      "url": "https://github.com/OctoSense-org/Octoscript-Makepad.git",
+      "revision": "cb66de073469063abeb2a5ab2a2bbf3cdb365745"
+    },
+    "octoscript": {
+      "url": "https://github.com/OctoSense-org/Octoscript.git",
+      "revision": "dbd48cfb799551c11e30970c393777d29644a605"
+    }
+  }
+}

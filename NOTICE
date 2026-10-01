@@ -1,0 +1,11 @@
+agentic26 Navigation development scaffold
+
+This product includes an adapted script-app template and agent instructions from:
+OctoScript-App-Design-Flow
+Copyright 2026 The OctoSense Authors
+https://github.com/OctoSense-org/OctoScript-App-Design-Flow
+Licensed under the Apache License, Version 2.0.
+
+The template has been modified into a local trip-constraint draft application.
+The toolchain repositories are downloaded separately, retain their own notices,
+and are identified in toolchain/sources.lock.json.
