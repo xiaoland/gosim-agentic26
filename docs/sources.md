@@ -19,15 +19,30 @@
 
 Project 中 ChatGPT 给出的架构/赛事解释是二手材料。“最晚出发”是对“最慢”的建议解释，尚未替用户定案。讨论中的票价、时间、地点均不作为真实服务数据。本仓库不复制整个私有聊天或其他会话内容。
 
-用户于 2026-10-01 指定初赛演示：“40 分钟内到机场，预算 50，尽量便宜。”机场和货币需要由上下文补全，并要求通过操作用户手机上的既有应用完成任务，不自行接入地图、打车、地铁查询、日程、提醒等服务。这是本项目的用户约束，不宣称为赛事要求。具体目标手机与应用尚待确定。
+用户于 2026-10-01 指定初赛演示：“40 分钟内到机场，预算 50，尽量便宜。”机场和货币需要由上下文补全。当前演示城市确定为深圳；用户撤回仅操作手机既有应用、禁止直接接入服务的限制，选择使用比赛官方工具链搭建可直接调用服务的 Navigation Agent。最新指示是先继续方案和计划，需要的服务后续由用户准备，当前不进入产品实现。
 
 ## 已知技术边界
 
-锁定版本的文档说明 card-host 不提供 host services，普通 Hub script app 的宿主 Agent 能力仍存在实现缺口。只验证本机 macOS arm64 原生 card-host；Rinx、手机、定位、地图、实时交通、模型调用尚未验证。上游 AI-SERVICES.md 的技术状态主要记录于 2026-09-27，接入时应重新核对代码。
+本仓库锁定的 card-host 不提供 host services；目前只验证 macOS arm64 原生草稿开发闭环，Rinx／OctoSense shell、手机、定位、地图和模型调用均未验证。锁定 AI-SERVICES.md 主要记录 2026-09-27 状态，不能据此断言较新官方宿主没有 Agent 服务。
 
 2026-10-01 为机场演示复核了[初赛交付要求](https://github.com/gosimfoundation/hackathon-agenticapp26/blob/main/docs/competition-schedule.md#初赛需求成立作品能跑)与[按作品形态交付](https://github.com/gosimfoundation/hackathon-agenticapp26/blob/main/docs/app-hub-submission.md#按作品形态交付)：需可运行原型、实际操作及可核验结果，并展示失败或空状态；提交形态与宿主、平台、依赖和启动说明需要匹配。桌面控制手机的实验不能自行当作已经验证赛事宿主集成。
 
-[Android UI Automator 官方文档](https://developer.android.com/training/testing/other-components/ui-automator)说明可在应用进程外与用户及系统应用交互，并取得控件和截图。这是候选操作技术的依据，不是本仓库或任意地图应用已可用的证据；手机系统、应用页面可读性和真实操作仍须逐一验证。
+2026-10-01 为服务接入方案核对了以下固定源码，尚未构建或运行该组合，也未替换本仓库锁文件：
+
+- [官方课程分工](https://github.com/gosimfoundation/hackathon-agenticapp26/blob/main/docs/curriculum.md#八个项目各自负责什么)：octos 是运行时内核，octoscode／OctoLoop 用于开发协作与审查；按选题组合项目，不要求接齐全部工具。
+- [OctoSense Cargo.toml](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/Cargo.toml)：本次调查提交 d405d5c，配套 octos ae230ce 和 App Hub 58c3c8a，实施时必须沿用宿主兼容组合。
+- [AI 宿主注册](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/crates/ai-host/src/lib.rs)与[应用 peer](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/crates/ai-host/src/contained.rs)：已注册 model 与 octos，当前 shipped 策略默认等待用户同意；不能照搬旧说明中默认关闭的状态。
+- [脚本应用工具执行器](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/crates/shell/src/host_tools/script_apps.rs)和 [News 工具示例](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/news/bundle/tools.json)：读取经准入检查的 tools.json，host-service 工具走服务调用与结果队列；脚本内实现的工具不能直接视为可执行。Navigation 服务及其权限仍需本项目实现和实测。
+
+## 深圳服务候选
+
+2026-10-01 的文档核对支持首选高德 Web 服务进行接口验证，尚未发起带 Key 的实际请求：
+
+- [路径规划 2.0](https://lbs.amap.com/api/webservice/guide/api/newroute)列出公共交通、步行和驾车查询，以及时间、费用和出租车估价字段；公交结果可描述打车路段。字段是否返回及深圳具体路线是否可用仍需实测，不能据此保证存在符合 40 分钟／50 元的混合方案。地图出租车估价不等于某网约车平台的实时可下单报价。
+- [基础服务配额](https://lbs.amap.com/pages/base_service_price)按账户认证和服务类别区分，不能假定新建未认证账户即可调用全部接口；准备阶段需确认 Web 服务 Key 的相关权限和配额，不预先购买未确认需要的套餐。
+- [地图 URI](https://lbs.amap.com/api/uri-api/guide/travel/route)按单一 mode 查询路线，不能据此承诺保留任意公交接打车方案；导航交接须分段处理或另行验证。
+
+首轮行程来源可采用明确标注的演示文件，由工具在运行时读取；它只证明上下文读取，不证明在线日历或航班服务接入。天气、提醒、在线日历及网约车实时报价服务是否增加，由演示必需能力和接口实测决定。
 
 ## 开发协作方法来源
 
