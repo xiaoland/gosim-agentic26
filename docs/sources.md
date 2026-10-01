@@ -44,13 +44,13 @@ Project 中 ChatGPT 给出的架构/赛事解释是二手材料。“最晚出�
 
 应用模型由用户指定，不再是待选提供方。[MiniMax M3 官方页面](https://www.minimaxi.com/models/text/m3)使用模型标识 `MiniMax-M3`；[OpenAI 兼容接口文档](https://platform.minimax.cn/docs/api-reference/text-openai-api)列出该模型和函数工具支持，国内平台 Base URL 为 `https://api.minimax.cn/v1`。本机配置采用此地址，其他地区账户应使用所属平台的地址；不自行改为文档示例中的其他模型。
 
-原生 Function Call 多轮需要按提供方协议回传完整 assistant 消息和工具结果。这个 API 能力不能直接等同于 `model.complete` 的能力；后者只暴露结构化单次调用。尚未使用用户账户请求 M3，也未验证宿主实际选中 M3；后续实验须同时确认配置、实际请求模型和工具结果往返。
+原生 Function Call 多轮需要按提供方协议回传完整 assistant 消息和工具结果。这个 API 能力不能直接等同于 `model.complete` 的能力；后者只暴露结构化单次调用。2026-10-01 已通过隔离脚本使用本机配置完成两次真实请求：返回模型均为 `MiniMax-M3`，模型调用只读探针工具后，根据回传的随机标记继续回答。尚未验证官方宿主与 OctoScript 实际使用 M3；预检条件归[任务包](../tasks/capability-boundary/packet.md#服务预检证据)。
 
 ## 深圳服务候选
 
-2026-10-01 的文档核对支持首选高德 Web 服务进行接口验证，尚未发起带 Key 的实际请求：
+2026-10-01 已完成文档核对及带 Key 的隔离接口验证，地点、驾车、公共交通和步行查询均成功，条件与范围归[任务包](../tasks/capability-boundary/packet.md#服务预检证据)：
 
-- [路径规划 2.0](https://lbs.amap.com/api/webservice/guide/api/newroute)列出公共交通、步行和驾车查询，以及时间、费用和出租车估价字段；公交结果可描述打车路段。字段是否返回及深圳具体路线是否可用仍需实测，不能据此保证存在符合 40 分钟／50 元的混合方案。地图出租车估价不等于某网约车平台的实时可下单报价。
+- [路径规划 2.0](https://lbs.amap.com/api/webservice/guide/api/newroute)列出公共交通、步行和驾车查询，以及时间、费用和出租车估价字段。实际深圳响应已出现公交候选中的 taxi 路段、换乘总费用与耗时；不能据此保证存在符合 40 分钟／50 元的混合方案。地图出租车估价不等于某网约车平台的实时可下单报价。
 - [基础服务配额](https://lbs.amap.com/pages/base_service_price)按账户认证和服务类别区分，不能假定新建未认证账户即可调用全部接口；准备阶段需确认 Web 服务 Key 的相关权限和配额，不预先购买未确认需要的套餐。
 - [地图 URI](https://lbs.amap.com/api/uri-api/guide/travel/route)按单一 mode 查询路线，不能据此承诺保留任意公交接打车方案；导航交接须分段处理或另行验证。
 

@@ -28,7 +28,7 @@ GOSIM Agentic App 2026 参赛开发仓库，主场景为 Navigation，实现方�
 
 本机路径：`~/Development/agentic26`。依赖源码位于同级 `.octosense-agentic26/`，不放入参赛仓库。macOS Apple Silicon 为当前验证目标；需要 Git、Rust stable、Python 3.9+ 和可用图形会话。初次安装下载依赖并编译，需要网络与数 GB 磁盘空间。
 
-本机服务配置约定放在 Git 忽略的 `.env`：`AMAP_API_KEY` 为高德 Web 服务 Key，`MINIMAX_API_KEY`、`MINIMAX_BASE_URL` 和 `MINIMAX_MODEL` 为应用模型配置，模型值固定为 `MiniMax-M3`。当前只创建了本机配置文件，启动工具与应用尚未读取它；后续凭据经宿主或服务端使用，不复制进 `bundle/`。该配置不改变开发助手使用的模型。
+本机服务配置约定放在 Git 忽略的 `.env`：`AMAP_API_KEY` 为高德 Web 服务 Key，`MINIMAX_API_KEY`、`MINIMAX_BASE_URL` 和 `MINIMAX_MODEL` 为应用模型配置，模型值固定为 `MiniMax-M3`。已通过隔离脚本验证 M3 工具往返及高德地点、驾车、公共交通和步行接口；正式启动工具与应用尚未读取该文件。后续凭据经宿主或服务端使用，不复制进 `bundle/`。该配置不改变开发助手使用的模型，预检证据归[当前任务](tasks/capability-boundary/packet.md#服务预检证据)。
 
 ```sh
 cd ~/Development/agentic26
