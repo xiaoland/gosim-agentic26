@@ -14,6 +14,7 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[1]
 OCTO = [sys.executable, str(ROOT / 'tools/octo')]
 APP_ID = 'agentic26-navigation'
+ERROR_PATTERN = r'^.*(?:\[E\]|splash:[0-9]+:|refused|on_render closure failed|callback error).*$'
 
 
 def main():
@@ -69,14 +70,18 @@ def main():
         # load() runs after the first frame; wait for its short startup timer.
         time.sleep(0.15)
 
-    def stop():
+    def stop(log_name=None):
         nonlocal running
         if running:
             request('/quit')
             running = False
             log = work / 'data/card-host.log'
             assert log.is_file(), f'Missing runtime log: {log}'
-            logs.append(log.read_text())
+            text = log.read_text()
+            if log_name:
+                (work / log_name).write_text(text)
+            else:
+                logs.append(text)
             for _ in range(30):
                 with socket.socket() as sock:
                     if sock.connect_ex(('127.0.0.1', port)) != 0:
@@ -117,6 +122,40 @@ def main():
         for field in ('origin', 'destination', 'minutes', 'budget'):
             assert find(lambda w: w['i'] == field and w['ty'] == 'TextInput')['val'] == saved[field]
         print('PASS: all constraints survive restart')
+        stop()
+        # Exercise edit -> runtime failure -> log location -> repair in the copy.
+        main_script = work / 'bundle/main.splash'
+        source = main_script.read_text()
+        fault = '    ui.debug_missing_method()\n'
+        edited = source.replace('text: "Go your way."', 'text: "Edit loop verified."', 1)
+        broken = edited.replace('fn save(){\n', 'fn save(){\n' + fault, 1)
+        main_script.write_text(broken)
+        start()
+        find(lambda w: w['ty'] == 'Label' and w.get('t') == 'Edit loop verified.')
+        status('Your saved draft has been restored.')
+        button('Save draft')
+        status('Your saved draft has been restored.')
+        assert json.loads(draft.read_text()) == saved
+        runtime_log = json.loads(request('/log', n=100))['l']
+        fault_line = broken.splitlines().index(fault.rstrip('\n')) + 1
+        # The pinned storage-only host prepends three lines to main.splash.
+        reported_line = fault_line + 3
+        assert any(re.search(r'splash:\d+:' + str(reported_line) + r':\d+', line)
+                   and 'debug_missing_method' in line for line in runtime_log), runtime_log
+        (work / 'fault-log.json').write_text(json.dumps(runtime_log, indent=2))
+        (work / 'fault-tree.txt').write_bytes(request('/d'))
+        stop(log_name='fault.log')
+        fault_errors = re.findall(ERROR_PATTERN, (work / 'fault.log').read_text(), re.M)
+        assert fault_errors and all('debug_missing_method' in line for line in fault_errors), fault_errors
+        main_script.write_text(edited)
+        start()
+        find(lambda w: w['ty'] == 'Label' and w.get('t') == 'Edit loop verified.')
+        status('Your saved draft has been restored.')
+        button('Save draft')
+        status('Draft saved locally and verified.')
+        assert json.loads(draft.read_text()) == saved
+        main_script.write_text(source)
+        print(f'PASS: source edit loaded; callback error located at main.splash:{fault_line}; repair preserves saved state')
         fill('budget', '')
         button('Save draft')
         assert json.loads(draft.read_text())['budget'] == ''
@@ -145,9 +184,9 @@ def main():
     finally:
         stop()
     (work / 'combined.log').write_text('\n'.join(logs))
-    problems = re.findall(r'^.*(?:\[E\]|splash:[0-9]+:|refused|on_render closure failed|callback error).*$', '\n'.join(logs), re.M)
+    problems = re.findall(ERROR_PATTERN, '\n'.join(logs), re.M)
     assert not problems, problems
-    print(f'PASS: no script/runtime errors; native evidence: {work}')
+    print(f'PASS: no unexpected script/runtime errors; native evidence: {work}')
 
 
 if __name__ == '__main__':

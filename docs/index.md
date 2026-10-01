@@ -18,7 +18,7 @@
 
 ## 当前任务
 
-[能力层项目初始化](../tasks/initialization/packet.md)保存本轮授权、范围、状态和下一步；此入口不重复 packet 的进度。后续非简单任务建立自己的 packet，在这里增加有效导航。
+[本地开发与调试闭环](../tasks/local-development/packet.md)保存当前任务的授权、验证与恢复点；[能力层项目初始化](../tasks/initialization/packet.md)保留已完成的初始化与源码发布依据。此入口不重复 packet 的进度。后续非简单任务建立自己的 packet，在这里增加有效导航。
 
 ## 采用的 SVC 范围
 
