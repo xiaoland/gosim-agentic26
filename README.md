@@ -48,6 +48,8 @@ make check         # 截图变更后重新盖摘要
 
 依照 [App Hub 开发指引](https://github.com/OctoSense-org/OctoSense-App-Hub/blob/main/docs/FIRST-APP.md)，本仓库使用它推荐的 OctoScript script-app 模板，保留独立应用仓库；不会修改 Hub 的 catalog/index/artifacts。
 
-`listing.json` 的发布者、支持和隐私网址目前保留明确占位值，不伪造身份/链接。正式发布前由作者补齐并审核；当前只声明经过本机验证的 macOS，不宣称手机可用。此仓库尚未配置 GitHub origin，也没有执行推送、签名或赛事提交。
+源码仓库：[xiaoland/gosim-agentic26](https://github.com/xiaoland/gosim-agentic26)。源码发布与 Hub 上架、赛事提交是不同步骤。
+
+`listing.json` 的发布者、支持和隐私网址目前保留明确占位值，不伪造身份/链接。正式发布应用前由作者补齐并审核；当前只声明经过本机验证的 macOS，不宣称手机可用。应用尚未签名或提交比赛。
 
 许可证：Apache-2.0。模板来源与归属见 `NOTICE`；精确版本见锁文件。
