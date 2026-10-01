@@ -12,3 +12,4 @@ __pycache__/
 *.pyc
 .deps/
 work/
+AGENTS.local.md
