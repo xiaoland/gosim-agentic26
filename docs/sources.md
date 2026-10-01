@@ -13,6 +13,8 @@
 
 官网要求可运行作品、公开 Apache-2.0 源码、固定宿主版本、启动说明和真实任务证据。Rinx 是主要基线，作品需在注明版本的 OctoSense 或 Rinx 环境验收。Hub 检查是包预检，不替代运行/交互/Agent 任务核验，也不代表比赛录取或验收；当前无需等待上架。此仓库目前仅完成开发初始化。
 
+用户补充“初赛代码只要求 octoscript 的应用”，本项目据此收敛交付范围。[公开赛程固定版本](https://github.com/gosimfoundation/hackathon-agenticapp26/blob/cc56fa42bcff23ec0df51e91191b0e283458a970/docs/competition-schedule.md#初赛需求成立作品能跑)也明确初赛不以 Rust 或 ROM 开发为门槛；可运行原型、操作结果、失败或空状态与复现材料的要求仍然保留。该证据不要求本项目新增原生宿主服务。
+
 ## 用户需求与二手讨论
 
 已通过用户 Chrome 登录会话阅读 Project《比赛赛道说明》，并以本聊天中用户直接提供的产品描述为需求依据：限定时间内组合步行、公交、地铁、打车，最低费用到达，后续考虑疲劳和速度。
@@ -20,6 +22,8 @@
 Project 中 ChatGPT 给出的架构/赛事解释是二手材料。“最晚出发”是对“最慢”的建议解释，尚未替用户定案。讨论中的票价、时间、地点均不作为真实服务数据。本仓库不复制整个私有聊天或其他会话内容。
 
 用户于 2026-10-01 指定初赛演示：“40 分钟内到机场，预算 50，尽量便宜。”机场和货币需要由上下文补全。当前演示城市确定为深圳；用户撤回仅操作手机既有应用、禁止直接接入服务的限制，选择使用比赛官方工具链搭建可直接调用服务的 Navigation Agent。最新指示是先继续方案和计划，需要的服务后续由用户准备，当前不进入产品实现。
+
+用户进一步明确：应用模型使用 MiniMax M3；mock/demo 也要分别保留日历、笔记等来源，不能预先合成为一个行程背景文件。用户已要求创建本地 `.env`，由其填入高德、MiniMax 等配置；创建配置文件不代表接入或运行验证完成。
 
 ## 已知技术边界
 
@@ -32,7 +36,15 @@ Project 中 ChatGPT 给出的架构/赛事解释是二手材料。“最晚出�
 - [官方课程分工](https://github.com/gosimfoundation/hackathon-agenticapp26/blob/main/docs/curriculum.md#八个项目各自负责什么)：octos 是运行时内核，octoscode／OctoLoop 用于开发协作与审查；按选题组合项目，不要求接齐全部工具。
 - [OctoSense Cargo.toml](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/Cargo.toml)：本次调查提交 d405d5c，配套 octos ae230ce 和 App Hub 58c3c8a，实施时必须沿用宿主兼容组合。
 - [AI 宿主注册](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/crates/ai-host/src/lib.rs)与[应用 peer](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/crates/ai-host/src/contained.rs)：已注册 model 与 octos，当前 shipped 策略默认等待用户同意；不能照搬旧说明中默认关闭的状态。
-- [脚本应用工具执行器](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/crates/shell/src/host_tools/script_apps.rs)和 [News 工具示例](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/news/bundle/tools.json)：读取经准入检查的 tools.json，host-service 工具走服务调用与结果队列；脚本内实现的工具不能直接视为可执行。Navigation 服务及其权限仍需本项目实现和实测。
+- [脚本应用工具执行器](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/crates/shell/src/host_tools/script_apps.rs)和 [News 工具示例](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/news/bundle/tools.json)：读取经准入检查的 tools.json，host-service 工具走服务调用与结果队列；声明 implemented_by 为 app 不代表该执行器已经能执行脚本工具。该限制不禁止 OctoScript 自行调用脚本函数。此原生工具集成路径暂不作为初赛前置。
+- [model.complete 参数与选择逻辑](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/ai-providers/host-service/src/complete/mod.rs)及[请求封装](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/ai-providers/host-service/src/complete/wire.rs)：只接受 task、input、schema、class、allow_urls；拒绝额外字段。它按宿主提供方顺序与 fast／strong 分类选模型，可能尝试其他提供方；应用不能通过该接口直接指定 M3。返回经 schema 校验的 JSON，没有原生工具调用或历史透传，但应用侧可另行实现有界的结构化动作循环。具体可行性尚未实测。
+- [当前锁定 SCRIPT-API](https://github.com/OctoSense-org/OctoScript-App-Design-Flow/blob/e08517254d9b2c316352eec4f959810d9ad22d40/docs/SCRIPT-API.md#network)记录 `net.http_request` 的 HTTPS 请求及 `fs` 的应用隔离存储访问。接口存在不等于模型凭据通道或多源文件导入已实现；网络主机声明及权限仍须满足。
+
+## MiniMax M3
+
+应用模型由用户指定，不再是待选提供方。[MiniMax M3 官方页面](https://www.minimaxi.com/models/text/m3)使用模型标识 `MiniMax-M3`；[OpenAI 兼容接口文档](https://platform.minimax.cn/docs/api-reference/text-openai-api)列出该模型和函数工具支持，国内平台 Base URL 为 `https://api.minimax.cn/v1`。本机配置采用此地址，其他地区账户应使用所属平台的地址；不自行改为文档示例中的其他模型。
+
+原生 Function Call 多轮需要按提供方协议回传完整 assistant 消息和工具结果。这个 API 能力不能直接等同于 `model.complete` 的能力；后者只暴露结构化单次调用。尚未使用用户账户请求 M3，也未验证宿主实际选中 M3；后续实验须同时确认配置、实际请求模型和工具结果往返。
 
 ## 深圳服务候选
 
@@ -42,7 +54,7 @@ Project 中 ChatGPT 给出的架构/赛事解释是二手材料。“最晚出�
 - [基础服务配额](https://lbs.amap.com/pages/base_service_price)按账户认证和服务类别区分，不能假定新建未认证账户即可调用全部接口；准备阶段需确认 Web 服务 Key 的相关权限和配额，不预先购买未确认需要的套餐。
 - [地图 URI](https://lbs.amap.com/api/uri-api/guide/travel/route)按单一 mode 查询路线，不能据此承诺保留任意公交接打车方案；导航交接须分段处理或另行验证。
 
-首轮行程来源可采用明确标注的演示文件，由工具在运行时读取；它只证明上下文读取，不证明在线日历或航班服务接入。天气、提醒、在线日历及网约车实时报价服务是否增加，由演示必需能力和接口实测决定。
+首轮演示背景分别使用日历文件、笔记和设备位置记录，由工具在运行时独立读取、关联并保留依据；不提供预合并的行程背景答案。它只证明多源上下文处理，不证明在线日历、笔记账户或定位接入。天气、提醒、在线日历及网约车实时报价服务是否增加，由演示必需能力和接口实测决定。
 
 ## 开发协作方法来源
 
