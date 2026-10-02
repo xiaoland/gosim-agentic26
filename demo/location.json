@@ -1,0 +1,11 @@
+{
+  "id": "device-location-demo",
+  "source": "simulated-device-location",
+  "mock": true,
+  "sampled_at": "{{SOURCE_TIME}}",
+  "sampled_at_unix": {{SOURCE_EPOCH}},
+  "name": "宝安大仟里室外步道（模拟）",
+  "longitude": 113.872299,
+  "latitude": 22.569704,
+  "coordinate_system": "GCJ-02"
+}

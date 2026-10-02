@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "subtitle": "Local trip constraints for a multimodal journey",
-  "description": "Development scaffold: enter an origin, destination, time budget and optional spending cap. Validate, save and restore a local trip draft. Route optimization, live traffic, navigation and Agent execution are not implemented.",
+  "subtitle": "一句话关联多源背景，比较机场出行方案",
+  "description": "深圳 Navigation 开发原型：MiniMax M3 选择工具，分别读取模拟日历、笔记与设备位置，再查询高德交通候选。确定性代码核对时限、预算和路线端点，用户确认后保存并读回 Trip。来源明确标注为模拟，在线费用与耗时为估计；不表示已经开始导航或保证实际到达。",
   "category": "travel",
   "keywords": [
     "navigation",
@@ -21,7 +21,7 @@
     "support": "https://example.com/support",
     "privacy_policy_url": "https://example.com/privacy"
   },
-  "release_notes": "Initial local development scaffold. Publisher metadata remains a placeholder.",
+  "release_notes": "增加一句话任务、多源依据、在线交通比较与 Trip 确认读回。macOS arm64 真实公共交通与打车接地铁任务已确认读回，公共交通 Trip 重启恢复通过；发布者信息保留占位。",
   "age_rating": "all",
   "license": "Apache-2.0"
 }

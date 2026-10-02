@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "octosense": {
+    "url": "https://github.com/OctoSense-org/OctoSense.git",
+    "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
+    "cargo_lock_sha256": "b89ff117a6adca8341e428d6c7254e96f52c02109a1c49b00c142aa5d06560cd",
+    "runtime_patches_lock_sha256": "a7f726767849b371706ebc8098d3d2350051fd0548658d662bd1334a5ba33095"
+  },
+  "app_hub_revision": "58c3c8aed8fc811a16d67c5f784a8a44214ff876",
+  "octos_revision": "ae230ce04d57f3c29cf6c2518e5956a86c07d788",
+  "runtime": {
+    "octoscript_makepad": "e0df0b5177f9cb0d8ad0ad0225d40ebcf8389a1b",
+    "makepad_base": "e29a0eaa68781231eb9ec582e5f02648c6dad7e9",
+    "makepad_patched_tree": "e9520ccb3740f3af8629d981d06d7e53aad48c06",
+    "octoscript": "dbd48cfb799551c11e30970c393777d29644a605"
+  },
+  "build": {
+    "package": "octosense",
+    "binary": "octosense",
+    "default_features": false,
+    "features": ["app-hub"]
+  },
+  "model": "MiniMax-M3",
+  "platform_verified": "macOS arm64"
+}

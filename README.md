@@ -10,7 +10,7 @@ GOSIM Agentic App 2026 参赛开发仓库，主场景为 Navigation，实现方�
 
 直接服务接入已获用户允许，不再要求所有数据与操作经过手机既有应用。首轮先接任务必需的服务；天气、提醒、手机自动化和运行时动态生成工具不作为前置，避免扩展到完整出行服务平台。
 
-初赛演示城市为深圳，输入是一句“40 分钟内到机场，预算 50，尽量便宜。”系统需要从已授权、有来源的行程、位置和偏好补全机场、币种和出发位置。当前按用户要求先做方案和计划；具体补全规则、官方运行时接入与验收建议见[当前任务](tasks/capability-boundary/packet.md)，尚未实现。
+初赛演示城市为深圳，输入是一句“40 分钟内到机场，预算 50，尽量便宜。”系统需要从已授权、有来源的行程、位置和偏好补全机场、币种和出发位置。真实公共交通任务已完成确认、读回与重启恢复，另有真实混合任务完成确认读回；补全规则、完成证据及剩余边界归[当前任务](tasks/capability-boundary/packet.md)。
 
 演示背景也按实际来源分别提供：日历文件、笔记和设备位置记录。Agent 在运行时关联这些资料，形成带依据的出行约束；不预先把目的地、偏好和起点整理为一个“行程背景文件”。演示数据与真实在线服务结果分别标注。
 
@@ -18,62 +18,44 @@ GOSIM Agentic App 2026 参赛开发仓库，主场景为 Navigation，实现方�
 
 ## 当前能力
 
-当前只有供开发调试使用的本地出行约束草稿：填写起点、终点、可用分钟数和可选费用上限，校验后保存、重启恢复或清空。空地点、非法数字、非正时间和负预算会报错；存储损坏时显示错误并允许清空重建。应用只使用 `storage`，保存的是用户输入。它由官方 My Notes 模板改写，通过 card-host 运行，不是官方 Navigation 示例或完整 OctoSense 系统。
+当前应用提供一句话任务入口。MiniMax M3 选择工具，分别读取模拟日历、笔记和设备位置，关联机场与航站楼，再查询高德地点、公共交通与驾车数据。确定性代码检查费用、剩余时间和实际路线端点，比较供应商返回的完整候选；用户确认后保存并读回 Trip。已在官方 stock OctoSense 的 macOS arm64 宿主完成真实操作：M3 七轮约 21 秒，补全深圳宝安机场 T3 国内出发与人民币，选中供应商估价 ¥3、1403 秒（约 24 分钟）的公共交通路线，确认、写入读回及重启恢复均通过。随后从宝安大仟里室外步道的独立模拟位置运行相同指令，M3 七轮约 30 秒，选中打车接地铁的完整混合候选：¥19、2063 秒（界面约 35 分钟），确认读回通过；同场公共交通 ¥5、3086 秒，超过期限。
 
-跨应用取信息、偏好学习、路线求解器、自然语言 Agent、地图/交通数据、导航执行和 Rinx 集成都尚未实现。技术提案见 [架构草案](docs/architecture.md)，实际验证见 [验证记录](docs/verification.md)。
+这不是官方 Navigation 示例，而是从官方 My Notes 模板演进的应用。当前仅验证 macOS arm64。日历、笔记和位置是明确标注的模拟来源，地图与模型使用在线服务；尚未接通真实账户、GPS、导航执行、持续重规划或长期偏好学习。费用与耗时是供应商估计，推荐仅表示已核实候选中的最低估价，不保证实际到达或成交价。两次真实任务分别验证公共交通和混合候选，驾车费用均保持未知。混合费用直接使用供应商完整候选总价；综合耗时包含供应商等车估计，叫车等待未单独核实。未知价格、过期与端点等边界另经隔离原生检查。全程打车缺少候车数据时只作对照。首轮支持数字分钟数与“预算”金额；无法识别的硬约束需要澄清，不能由模型自行放宽。
 
-开发指引见 [AGENTS.md](AGENTS.md)，知识归属和当前任务见 [文档导航](docs/index.md)。开发侧仅采用 SVC 的文档知识层与 task packet，不依赖完整 SVC CLI；它们不是应用中的用户记忆能力。
+开发指引见 [AGENTS.md](AGENTS.md)，知识归属和当前任务见 [文档导航](docs/index.md)。仅采用 SVC 的文档知识层与 task packet；它们不是应用中的用户记忆能力。
 
 ## 开始开发
 
-本机路径：`~/Development/agentic26`。依赖源码位于同级 `.octosense-agentic26/`，不放入参赛仓库。macOS Apple Silicon 为当前验证目标；需要 Git、Rust stable、Python 3.9+ 和可用图形会话。初次安装下载依赖并编译，需要网络与数 GB 磁盘空间。
+macOS Apple Silicon 是当前验证目标，需要 Git、Rust stable、Python 3.9+ 和可用图形会话。依赖源码放在仓库同级的忽略目录，不进入参赛包；首次编译需要网络与数 GB 磁盘空间。
 
-本机服务配置约定放在 Git 忽略的 `.env`：`AMAP_API_KEY` 为高德 Web 服务 Key，`MINIMAX_API_KEY`、`MINIMAX_BASE_URL` 和 `MINIMAX_MODEL` 为应用模型配置，模型值固定为 `MiniMax-M3`。已通过隔离脚本验证 M3 工具往返及高德地点、驾车、公共交通和步行接口；正式启动工具与应用尚未读取该文件。后续凭据经宿主或服务端使用，不复制进 `bundle/`。该配置不改变开发助手使用的模型，预检证据归[当前任务](tasks/capability-boundary/packet.md#服务预检证据)。
+在 Git 忽略的 `.env` 配置 `AMAP_API_KEY`、`MINIMAX_API_KEY`、`MINIMAX_BASE_URL` 和 `MINIMAX_MODEL=MiniMax-M3`。高德使用 Web 服务 Key，当前模型地址固定为 `https://api.minimax.cn/v1`。启动器生成隔离宿主 profile 和应用私有配置，权限为 0600；凭据不进入 `bundle/`、Git、模型输入或日志。受信任的本地应用在运行时读取高德与 M3 Key，具体边界见[架构说明](docs/architecture.md#宿主集成)。
 
 ```sh
 cd ~/Development/agentic26
-make bootstrap     # 获取固定源码版本并构建 hub + card-host；本机已执行
-make doctor
-make dev           # 显示原生窗口，首帧就绪后返回，打印 PID 和日志路径
-# make run         # 也可在前台运行，日志写到终端，Ctrl-C 退出
+make agent-bootstrap   # 构建固定版本的官方 OctoSense desktop
+make agent-doctor      # 检查版本、配置及打包边界，不请求在线服务
+make agent-init-demo   # 重置独立模拟来源及时间；会关闭本启动器的实例
+make agent-dev         # 显示正式应用窗口
 ```
 
-日常调试使用 `make dev`，窗口保持运行，终端可以继续执行下列命令。自动检查使用 `make run-hidden`，它提供相同的交互接口，但不显示或抢占窗口。
+`agent-init-demo` 将日历航班设为两小时后，并生成独立笔记与带当前时间的位置记录。默认位置为宝安大仟里室外步道的模拟坐标，曾在上述真实查询中返回可行混合候选；实时结果可能变化。三份模板在 `demo/`，运行数据在 `.local-state/agent/` 的应用 jail 中；普通启动保留已编辑的来源。位置过期会阻止规划，重新生成演示数据应明确执行初始化命令。
 
 ```sh
-make logs          # 当前实例的最近 100 行日志
-make tree          # widget tree，含控件 ID、类型和矩形位置
-make shot          # 真实截图 → build/debug.png，不覆盖上架截图
-curl --fail --silent --show-error http://127.0.0.1:8146/snap
+make agent-status
+make agent-tree
+make agent-logs
+make agent-shot SHOT=build/debug.png
+make agent-stop
+make agent-hidden      # 相同接口，隐藏窗口，用于原生交互验收
+make smoke             # 隔离数据与离线合成响应的行为检查
+make check             # Hub 包预检；不替代真实任务验收
 ```
 
-修改 `bundle/main.splash` 后需要重启，没有自动热重载。先查看 `/s` 的 PID，确认与启动输出一致，再退出该实例；重启会重新加载代码并计算包摘要。
+修改应用后重新执行 `agent-dev` 或 `agent-hidden`。官方系统应用在编译时嵌入，启动器会重新打包、增量编译，并核对实际挂载源码，不能靠重启旧二进制加载新脚本。启动器只关闭它自己管理的实例。调试接口、运行版本和目录说明见[工具链说明](toolchain/README.md)。
 
-```sh
-curl --fail --silent --show-error http://127.0.0.1:8146/s
-curl --fail --silent --show-error http://127.0.0.1:8146/quit
-make dev
-make logs
-make shot
-```
+旧 `make bootstrap`、`make doctor`、`make dev` 与 `make run-hidden` 仍保留为 App Hub card-host 路径，适合不需要宿主模型服务的隔离实验；完整 Navigation 使用上面的 `agent-*` 命令。两条工具链分别由 `toolchain/sources.lock.json` 与 `toolchain/agent-runtime.lock.json` 锁定，不修改个人全局模型配置或上游 Rust 源码。
 
-应用数据保存在 `.local-state/agentic26-navigation/`，重启不清空草稿。后台日志为 `.local-state/card-host.log`，每次启动会覆盖，定位失败前应先保留日志。窗口出现和包被准入不证明回调成功；检查日志、实际点击并读回保存结果。
-
-```sh
-rg -n '\[E\]|splash:[0-9]+:|refused|on_render closure failed|callback error' .local-state/card-host.log
-make smoke         # 隔离 bundle、端口和数据，交互、修改、故障定位、修复及状态恢复
-make check         # Hub 基础预检；当前仍有未签名和发布者占位提示
-```
-
-当前固定宿主的回调错误形如 `splash:<id>:74:29`；只使用 `storage` 的本应用在源码前有三行 prelude，因此对应 `main.splash:71:29`。加载时的语法错误使用另一种位置格式，不能套用此偏移；查锁定版本的 [Errors and the log](https://github.com/OctoSense-org/OctoScript-App-Design-Flow/blob/e08517254d9b2c316352eec4f959810d9ad22d40/docs/SCRIPT-API.md#errors-and-the-log)。新增能力或升级运行时后需要重新验证位置映射。
-
-`make smoke` 只在 `build/smoke/run-*/` 的副本中改标题并注入一个错误回调，断言日志位置、修复后的保存和重启恢复。预期故障留在 `fault.log`、`fault-log.json` 与 `fault-tree.txt`；其余会话汇总在 `combined.log`，不得含意外运行错误。每个实例由测试自行关闭。最近一次实测见 [本地开发任务](tasks/local-development/packet.md)。
-
-`PORT=其他端口 make dev` 可以换端口，`logs`、`tree` 和 `shot` 必须使用相同 PORT。端口冲突时启动会拒绝继续；确认归属后再处理已有实例。换端口不会自动隔离数据，并行实验须使用 `python3 tools/octo run bundle --hidden --detach --port 8147 --app-data build/dev-8147` 显式隔离。
-
-上架截图另用 `make shot SHOT=bundle/screenshots/01-main.png`，实际查看后执行 `make check` 更新摘要。发布签名后的包不应使用此开发流程。
-
-默认工具链位置是仓库同级的 `.octosense-agentic26/`。所有命令接受环境变量 `AGENTIC26_TOOLCHAIN=/absolute/path/to/workspace`，该目录里仍保持官方要求的五个 sibling checkouts。bootstrap 校验版本，遇到其他源码修改会拒绝继续，不会自动 reset。开发二进制固定输出到 Hub 自己的 `target/`，不依赖全局 Cargo 配置。
+真实截图必须来自当前应用并查看后再更新 `bundle/screenshots/01-main.png`。包编辑后执行 `make check` 更新摘要；签名后的包不能直接沿用此编辑流程。历史初始化证据见[验证记录](docs/verification.md)，当前行为的验收证据见[任务包](tasks/capability-boundary/packet.md)。
 
 ## 参赛与上架
 

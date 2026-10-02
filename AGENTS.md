@@ -41,7 +41,7 @@ README.md     产品需求、当前能力、开发操作与参赛交付说明
 
 ## 应用开发与验收
 
-官方工具链在仓库同级 `.octosense-agentic26/`，版本归 `toolchain/sources.lock.json`。使用 `make bootstrap`、`make doctor`、`make run`、`make smoke` 和 `make check`；实际命令与环境见 [README](README.md)。
+原 card-host 工具链在仓库同级 `.octosense-agentic26/`，版本归 `toolchain/sources.lock.json`；正式 Navigation 使用独立 `.octosense-agentic26-host-bridge/`，版本归 `toolchain/agent-runtime.lock.json`。使用 `make agent-bootstrap`、`make agent-doctor`、`make agent-init-demo` 与 `make agent-dev`／`make agent-hidden`，停止实例使用 `make agent-stop`；`make smoke` 和 `make check` 分别检查行为与应用包。旧 card-host 命令保留用于隔离实验，实际命令与环境见 [README](README.md)。
 
 修改应用前按需查官方 [QUICKSTART](https://github.com/OctoSense-org/OctoScript-App-Design-Flow/blob/main/docs/QUICKSTART.md)、[SCRIPT-API](https://github.com/OctoSense-org/OctoScript-App-Design-Flow/blob/main/docs/SCRIPT-API.md) 与 [CAPABILITIES](https://github.com/OctoSense-org/OctoScript-App-Design-Flow/blob/main/docs/CAPABILITIES.md)。不能凭文档中的概念演示或清单声明虚构已实现的宿主 API；核对目标版本源码并实际调用。
 
