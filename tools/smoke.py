@@ -24,6 +24,7 @@ CHECK = r'''
 let smoke_checks = []
 let smoke_reply_mode = "late"
 let smoke_last_model_input = nil
+let smoke_last_system = ""
 fn smoke_batch_start(){ smoke_reply_mode = "batch" start_task() }
 fn smoke_identity_start(){ smoke_reply_mode = "wrong_model" start_task() }
 let smoke_protocol_responses = 0
@@ -47,6 +48,8 @@ fn smoke_model_data(action, model){
 }
 fn smoke_minimax_request(task, input, schema, token, record, done){
     smoke_last_model_input = input.to_json().parse_json()
+    smoke_last_system = task
+    fs.write("smoke-last-input.json", {task: task input: smoke_last_model_input token: token}.to_json())
     fs.write("smoke-send-started.json", {synthetic: true token: token}.to_json())
     if smoke_reply_mode == "protocol_once" || smoke_reply_mode == "protocol_repeat" {
         let mode = smoke_reply_mode
@@ -101,6 +104,80 @@ fn smoke_minimax_request(task, input, schema, token, record, done){
         fs.write("smoke-late.json", {phase: phase run_id: run_id}.to_json())
     })
 }
+fn smoke_airports(){
+    observations = [] model_requests = [] decisions = []
+    let config_original = fs.read("private-config.json")
+    let original_request = request_text let original_limits = user_limits.to_json().parse_json()
+    let original_received = received_at let original_deadline = arrive_by
+    fs.write("private-config.json", {location_mode: "live"}.to_json())
+    let origin = position_record.to_json().parse_json()
+    origin.id = "synthetic-live-position" origin.mock = false origin.accuracy_m = 35 origin.sampled_at_unix = time_now()
+    origin.city = "广州市" origin.citycode = "020" origin.adcode = "440113" origin.currency = "CNY"
+    position_record = origin constraints = nil destination_record = nil poi_records = [] candidates = [] chosen = nil used_tools = []
+    source_records.retain(fn(source){ return source.kind != "location" })
+    source_records.push({id: origin.id kind: "location" source: "synthetic-corelocation" mock: false raw: origin.to_json()})
+    source_snapshots.retain(fn(snapshot){ return snapshot.kind != "location" && snapshot.path != "demo/location.json" })
+    source_snapshots.push({kind: "location" raw: origin.to_json()})
+    smoke_check("真实模式不能把模拟深圳机票绑定为实际目的地", !set_constraints(smoke_params()) && constraint_error.search("模拟") >= 0 && constraints == nil)
+    let airport_state = navigation_tool_state()
+    smoke_check("模型真实状态显示来源mock等级和机场发现动作", airport_state.location_mode == "live" && airport_state.source_records[0].mock == true && airport_state.available_actions.to_json().search("discover_airports") >= 0 && airport_state.available_actions.to_json().search("set_constraints") < 0)
+    smoke_location_mode = "airports" phase = "running"
+    let before_bad = smoke_location_map_calls
+    discover_airports({budget_cents: 1}, run_id)
+    smoke_check("机场发现拒绝模型金额且保留用户40分钟50元", phase == "failed" && constraints == nil && smoke_location_map_calls == before_bad && user_limits.to_json() == original_limits.to_json())
+    phase = "running" run_id += 1
+    let action = model_action(smoke_model_data({next_action: "discover_airports" reason: "根据真实城市查机场" parameters: {}}, "MiniMax-M3"))
+    smoke_check("模型协议可表达机场发现", action != nil)
+    dispatch(action, run_id)
+    smoke_check("实际机场发现查询绑定真实城市类型并保留固定硬约束", smoke_city_params.search("&city=020&citylimit=false&extensions=all&children=1") == 0 && smoke_city_params.search("&types=150104") >= 0 && constraints.inferred == true && constraints.minutes == 40 && constraints.budget_cents == 5000 && arrive_by == original_deadline)
+    smoke_check("机场候选只保留实际机场类别并优先合法入口坐标", poi_records.len() == 3 && poi_records[0].id == "airport-a" && poi_records[0].coordinate_basis == "entr_location" && poi_records[0].longitude == 113.814610 && poi_records[1].coordinate_basis == "location" && poi_records[1].parent == "airport-a")
+    smoke_check("伪造ID非机场与明确暂停营业POI均不能选", !select_destination({poi_id: "unqueried"}, "合成未查询") && !select_destination({poi_id: "hotel"}, "合成非机场") && !select_destination({poi_id: "closed"}, "合成已关闭") && destination_error.search("暂停营业") >= 0 && destination_record == nil)
+    let inference_reason = "当前城市的机场查询返回该候选，暂按机场入口规划"
+    smoke_check("机场选择保存可解释推断且不伪造机票引用或航站楼", select_destination({poi_id: "airport-a"}, inference_reason) && constraints.airport == "合成客运机场A" && constraints.terminal == "" && constraints.departure_scene == "" && !field_present(constraints, "event_id") && !field_present(constraints, "citations") && constraints.inference.reason == inference_reason && constraints.inference.location_source == origin.id && constraints.inference.poi_id == destination_record.id && !constraints.inference.terminal_verified)
+    smoke_check("推断结果明确假设来源与航站楼未核实", result_text().search("暂按 合成客运机场A") >= 0 && result_text().search("未读取真实机票，航站楼未确定") >= 0 && result_text().search(inference_reason) >= 0)
+    let calls_before_repeat = smoke_location_map_calls
+    discover_airports({}, run_id)
+    smoke_check("形成约束后不能重复机场请求或覆盖选择", phase == "failed" && smoke_location_map_calls == calls_before_repeat && destination_record.id == "airport-a")
+    phase = "running"
+    add_candidates(fs.read("smoke-transit.json").parse_json(), fs.read("smoke-driving.json").parse_json(), received_at, received_at, "smoke-inferred-routes")
+    transit_count = 1 driving_done = true
+    present_results("合成推断机场比较")
+    confirm_trip()
+    let inferred_trip = fs.read("trip.json").parse_json()
+    smoke_check("推断与理由随真实确认写入并读回Trip", phase == "confirmed" && inferred_trip.constraints.inferred == true && inferred_trip.constraints.inference.reason == inference_reason && inferred_trip.destination.id == "airport-a" && inferred_trip.constraints.terminal == "")
+    fs.remove("trip.json") saved_trip = nil
+    step_count = 12 automatic_seconds = 180 protocol_retry_count = 1
+    let correction_token = run_id
+    ui.sentence.set_text("改到另一座机场")
+    query_task()
+    smoke_check("结果修正续原任务硬约束并重新请求有效位置", phase == "running" && received_at == original_received && arrive_by == original_deadline && user_limits.to_json() == original_limits.to_json() && constraints == nil && destination_record == nil && candidates.len() == 0 && position_record == nil && navigation_tool_state().available_source_tools.to_json().search("read_location") >= 0)
+    smoke_check("用户修正开启新自动阶段并隔离旧回调", run_id > correction_token && step_count == 1 && automatic_seconds == 0 && protocol_retry_count == 0 && smoke_last_model_input.clarifications[smoke_last_model_input.clarifications.len() - 1] == "改到另一座机场")
+    smoke_check("实际模型请求只有短目标边界没有固定读源或查询攻略", smoke_last_system.len() < 600 && smoke_last_system.search("先提交") < 0 && smoke_last_model_input.tool_state.available_actions.to_json().search("discover_airports") < 0)
+    cancel_task() phase = "running" position_record = origin constraints = nil used_tools = []
+    position_record.currency = nil
+    let before_missing_currency = smoke_location_map_calls
+    discover_airports({}, run_id)
+    smoke_check("无真实计价依据不能发现机场或借用模拟币种", phase == "failed" && constraints == nil && smoke_location_map_calls == before_missing_currency)
+    phase = "running" position_record.currency = "CNY" position_record.sampled_at_unix = time_now() - 61
+    discover_airports({}, run_id)
+    smoke_check("无有效真实定位不能查询或回退模拟机场", phase == "failed" && constraints == nil && smoke_location_map_calls == before_missing_currency)
+    phase = "running" position_record.sampled_at_unix = time_now() smoke_location_mode = "airport_empty" used_tools = []
+    discover_airports({}, run_id)
+    smoke_check("没有机场候选明确来源不足不退回模拟机票", phase == "failed" && poi_records.len() == 0 && destination_record == nil && constraints.airport == "")
+    phase = "failed" ui.sentence.set_text("80分钟内到机场，预算80元")
+    query_task()
+    smoke_check("完整分钟预算指令启动新行程而非覆盖旧约束", phase == "running" && user_limits.minutes == 80 && user_limits.budget_cents == 8000 && request_text == "80分钟内到机场，预算80元" && replies.len() == 0 && received_at > original_received)
+    cancel_task()
+    fs.write("private-config.json", config_original)
+    received_at = original_received arrive_by = original_deadline user_limits = original_limits request_text = original_request
+    constraints = nil destination_record = nil candidates = [] chosen = nil used_tools = [] replies = []
+    phase = "running" smoke_location_mode = "valid"
+    smoke_sources()
+    let before_demo = smoke_location_map_calls
+    discover_airports({}, run_id)
+    smoke_check("显式演示保持引用路线且不改为真实机场推断", phase == "failed" && constraints == nil && smoke_location_map_calls == before_demo && set_constraints(smoke_params()) && constraints.inferred == false && constraints.destination_query == "深圳宝安国际机场 T3 国内出发")
+    cancel_task() phase = "running" constraints = nil step_count = 0 automatic_seconds = 0
+}
 fn smoke_prepare(){
     smoke_checks = []
     received_at = time_now() arrive_by = received_at + 2400 phase = "running" run_id += 1
@@ -117,6 +194,19 @@ fn smoke_prepare(){
     escapedQuote.citations[0].quote = "SUMMARY:深圳出发航班\\nLOCATION:深圳宝安国际机场"
     smoke_check("真实B失败中的字面反斜杠n引用仍被拒绝", !set_constraints(escapedQuote) && constraints == nil)
     let p = smoke_params()
+    let incomplete = smoke_params() incomplete.destination_query = "深圳宝安国际机场 T3 航站楼"
+    smoke_check("模型漏出发区域时依据已引用笔记形成完整目的地", set_constraints(incomplete) && constraints.destination_query == "深圳宝安国际机场 T3 国内出发")
+    constraints = nil
+    incomplete.destination_query = "深圳宝安国际机场 T3 国际出发"
+    smoke_check("模型明确矛盾的出发区域仍拒绝", !set_constraints(incomplete) && constraint_error.search("出发区域") >= 0 && constraints == nil)
+    let absent = smoke_params() absent.note_id = nil
+    smoke_check("缺少引用字段有具体诊断而非类型异常", !set_constraints(absent) && constraint_error.search("引用") >= 0 && constraint_error.search("尚未查询") >= 0)
+    smoke_check("坏引用诊断不泄露来源正文且保留原预算", !set_constraints(escapedQuote) && constraint_error.search("来源引用无效") >= 0 && user_limits.budget_cents == 5000)
+    absent = smoke_params() absent.citations[0].quote = "SUMMARY:深圳出发航班\nLOCATION:深圳宝安国际机场"
+    smoke_check("真实跨行引用也不允许", !set_constraints(absent))
+    let fresh = position_record.sampled_at_unix position_record.sampled_at_unix = received_at - 1000
+    smoke_check("过期位置诊断明确尚未查询路线", !set_constraints(smoke_params()) && constraint_error.search("过期") >= 0 && constraint_error.search("尚未查询") >= 0)
+    position_record.sampled_at_unix = fresh
     let relaxed = smoke_params() relaxed.minutes = 90 relaxed.budget_cents = 10000
     smoke_check("模型不能把原句40/50改成90/100", !set_constraints(relaxed) && constraints == nil && arrive_by == received_at + 2400)
     smoke_check("标准DTSTART驱动当前事件且截止从首次指令起算", set_constraints(p) && arrive_by == received_at + 2400)
@@ -202,15 +292,29 @@ fn smoke_prepare(){
     driving_done = false
     query_transit({strategy: 3}, run_id)
     let state_after_three = navigation_tool_state()
-    smoke_check("公交0与3后状态只剩8且驾车未完成", state_after_three.queried_transit_strategies.to_json() == [0 3].to_json() && state_after_three.remaining_transit_strategies.to_json() == [8].to_json() && !state_after_three.driving_done && !state_after_three.can_present)
+    smoke_check("公交0与3后状态保留其它普通策略且驾车未完成", state_after_three.queried_transit_strategies.to_json() == [0 3].to_json() && state_after_three.remaining_transit_strategies.to_json() == [1 2 4 5 7 8].to_json() && !state_after_three.driving_done && !state_after_three.can_present)
+    observations = []
     next_action(run_id)
-    smoke_check("实际模型发送边界包含确定性工具状态", smoke_last_model_input != nil && smoke_last_model_input.tool_state.to_json() == state_after_three.to_json())
+    smoke_check("实际模型发送边界包含确定性工具状态", smoke_last_model_input != nil && smoke_last_model_input.tool_state.queried_transit_strategies.to_json() == state_after_three.queried_transit_strategies.to_json() && smoke_last_model_input.tool_state.remaining_transit_strategies.to_json() == state_after_three.remaining_transit_strategies.to_json() && smoke_last_model_input.tool_state.available_actions.to_json() == state_after_three.available_actions.to_json() && smoke_last_model_input.tool_state.source_records.to_json() == state_after_three.source_records.to_json() && smoke_last_model_input.tool_state.destination.id == state_after_three.destination.id && !smoke_last_model_input.tool_state.driving_done && !smoke_last_model_input.tool_state.can_present)
     let calls_before_eight = smoke_location_map_calls
     query_transit({strategy: 8}, run_id)
-    smoke_check("第三种合法策略8可派发而非两次上限", transit_count == 3 && smoke_location_map_calls == calls_before_eight + 1 && smoke_city_params.search("&strategy=8") >= 0 && navigation_tool_state().remaining_transit_strategies.len() == 0)
+    smoke_check("第三种合法策略8可派发而非两次上限", transit_count == 3 && smoke_location_map_calls == calls_before_eight + 1 && smoke_city_params.search("&strategy=8") >= 0 && navigation_tool_state().remaining_transit_strategies.to_json() == [1 2 4 5 7].to_json())
+    let calls_before_economy = smoke_location_map_calls
+    query_transit({strategy: 1}, run_id)
+    smoke_check("最经济策略1实际派发且其它未查策略保留", transit_count == 4 && smoke_location_map_calls == calls_before_economy + 1 && smoke_city_params.search("&strategy=1") >= 0 && navigation_tool_state().remaining_transit_strategies.to_json() == [2 4 5 7].to_json())
+    let calls_before_unsupported = smoke_location_map_calls
+    query_transit({strategy: 1}, run_id)
+    smoke_check("经济策略重复请求零派发", phase == "failed" && smoke_location_map_calls == calls_before_unsupported)
+    phase = "running"
+    query_transit({strategy: 6}, run_id)
+    smoke_check("未取得地铁站POI时策略6零派发且原因明确", phase == "failed" && smoke_location_map_calls == calls_before_unsupported && ui.status.text().search("地铁站POI") >= 0)
+    phase = "running"
+    query_transit({strategy: 1.5}, run_id)
+    smoke_check("小数策略参数无效且零派发", phase == "failed" && smoke_location_map_calls == calls_before_unsupported && ui.status.text().search("参数无效") >= 0)
+    phase = "running"
     let calls_before_repeat = smoke_location_map_calls
     query_transit({strategy: 3}, run_id)
-    smoke_check("重复策略3拒绝且没有额外地图派发", phase == "failed" && transit_count == 3 && smoke_location_map_calls == calls_before_repeat)
+    smoke_check("重复策略3拒绝且没有额外地图派发", phase == "failed" && transit_count == 4 && smoke_location_map_calls == calls_before_repeat)
     phase = "running"
     present_results("合成检查：未查询驾车不得提前展示")
     smoke_check("驾车未查询时不能提前present", phase == "failed" && !navigation_tool_state().can_present)
@@ -290,18 +394,24 @@ fn smoke_prepare(){
     let late = route_recheck(modernChoice, boundaryBase + 101, boundaryBase + 1000, 5000)
     fs.write("smoke-deadline.json", {limit: limit late: late chosen: cheapest boundaryBase: boundaryBase received_at: received_at}.to_json())
     smoke_check("确认时期限边界计入已耗时间", limit.passed && !late.passed && late.reason == "超过到达期限")
+    let unknownLate = modernChoice.to_json().parse_json()
+    unknownLate.price_cents = nil unknownLate.duration_seconds = 1001 unknownLate.endpoint_complete = false
+    let unknownCheck = route_recheck(unknownLate, boundaryBase, boundaryBase + 1000, 5000)
+    smoke_check("未知价格仍报告已知超时与末段缺失而不称超预算", !unknownCheck.passed && unknownCheck.reason.search("费用未知") >= 0 && unknownCheck.reason.search("超过到达期限") >= 0 && unknownCheck.reason.search("末段未核实") >= 0 && unknownCheck.reason.search("超过预算") < 0)
+    let overBoth = modernChoice.to_json().parse_json() overBoth.price_cents = 5001 overBoth.duration_seconds = 1001
+    smoke_check("同候选超预算与超时同时说明", route_reason(overBoth, boundaryBase, boundaryBase + 1000, 5000).search("超过预算；超过到达期限") >= 0)
     smoke_check("过期交通需要重新查询", !route_recheck(cheapest, received_at + 301, arrive_by, 5000).passed)
     smoke_check("金额和耗时未知不转成零", route_cents("") == nil && route_cents("-1") == nil && route_cents("1.234") == nil && route_cents("50.25") == 5025 && route_cents("167772.17") == 16777217 && route_seconds(nil) == nil)
     synthetic.route.transits[0].cost = {duration: "900"}
     let missing = route_candidates(synthetic, nil, received_at, arrive_by, 5000, received_at)
-    smoke_check("缺价候选明确排除", missing[0].price_cents == nil && !missing[0].feasible && missing[0].reason == "费用未知")
+    smoke_check("缺价候选明确排除", missing[0].price_cents == nil && !missing[0].feasible && missing[0].reason.search("费用未知") >= 0 && missing[0].reason.search("超过预算") < 0)
     let bad_terminal = [{walking: {destination: "113.813339,22.624422" steps: [{polyline: {polyline: "113.813339,22.624422"}}]}}]
     smoke_check("机场站出口不能当国内出发终点", route_endpoint_gap(route_terminal(bad_terminal), "113.814610,22.625128") > 25)
     let boarding = [{walking: {steps: [{polyline: {polyline: "113.814609,22.624996"}}]} bus: {buslines: [{name: "合成未结束乘车"}]}}]
     smoke_check("上车前walking不能证明最终到达", route_terminal(boarding) == nil)
     let driving = fs.read("smoke-driving.json").parse_json()
     let taxi = route_candidates(nil, driving, received_at, arrive_by, 5000, received_at)
-    smoke_check("全程出租车候车未知而非零", !taxi[0].feasible && !taxi[0].waiting_included && taxi[0].reason == "出租车候车时间未知")
+    smoke_check("全程出租车候车未知而非零", !taxi[0].feasible && !taxi[0].waiting_included && taxi[0].reason.search("出租车候车时间未知") >= 0)
     let mismatched = fs.read("smoke-transit.json").parse_json()
     mismatched.route.origin = "113.890000,22.580000"
     mismatched.route.destination = "113.820000,22.630000"
@@ -326,6 +436,19 @@ fn smoke_prepare(){
     destination_record = {id: "synthetic-airport" name: "合成验收终点" longitude: 113.814610 latitude: 22.625128 city: "深圳市" citycode: "0755" adcode: "440306" currency: "CNY"}
     transit_count = 1 driving_done = true request_text = "合成响应离线验收：40分钟内到机场，预算50。"
     observations.push({tool: "smoke-injected-map" observed_at: time_now() data: "明确合成的公共交通、混合与出租车响应，不是在线查询"})
+    phase = "failed"
+    smoke_check("失败后保留候选及完整理由和路线摘要", result_text().search("比较未完成，仅已有结果") >= 0 && result_text().search("方案 1") >= 0 && result_text().search("公共交通") >= 0 && result_text().search("步行") >= 0)
+    phase = "asking" answer_text = "请补充出发区域" ui.sentence.set_text("预算50元")
+    let replyCount = replies.len() let clarifyStart = received_at let clarifyDeadline = arrive_by
+    query_task()
+    smoke_check("查询在asking中进入澄清而不重置首次期限", replies.len() == replyCount + 1 && received_at == clarifyStart && arrive_by == clarifyDeadline)
+    cancel_task() phase = "running"
+    smoke_sources() set_constraints(p)
+    smoke_airports()
+    smoke_sources() set_constraints(p)
+    destination_record = {id: "synthetic-airport" name: "合成验收终点" longitude: 113.814610 latitude: 22.625128 city: "深圳市" citycode: "0755" adcode: "440306" currency: "CNY"}
+    candidates = [] add_candidates(synthetic, driving, received_at, received_at, "smoke-injected-map")
+    transit_count = 1 driving_done = true
     present_results("离线合成响应验收；本窗口不证明在线路线成功。")
     fs.write("smoke-checks.json", smoke_checks.to_json())
 }
@@ -362,6 +485,17 @@ fn smoke_location_cancel(args){
 }
 fn smoke_amap_request(path, params, token, done){
     smoke_location_map_calls += 1
+    if smoke_location_mode == "airports" || smoke_location_mode == "airport_empty" {
+        if path != "/v3/place/text" { fail_task("机场检查拒绝非地点路径") return }
+        smoke_city_params = params
+        let pois = [{id: "airport-a" name: "合成客运机场A" typecode: "150104" type: "机场相关;飞机场" location: "113.900000,22.700000" entr_location: "113.814610,22.625128" parent: [] cityname: "广州市" citycode: "020" adcode: "440114" pname: "广东省"}
+            {id: "airport-b" name: "合成客运机场B T2" typecode: "150104" type: "机场相关;飞机场" location: "121.327000,31.197000" entr_location: "invalid" parent: "airport-a" cityname: "上海市" citycode: "021" adcode: "310105" pname: "上海市"}
+            {id: "hotel" name: "机场酒店" typecode: "100100" location: "113.800000,22.600000" cityname: "广州市" citycode: "020" adcode: "440114" pname: "广东省"}
+            {id: "closed" name: "合成机场(暂停营业)" typecode: "150104" location: "113.800000,22.600000" cityname: "广州市" citycode: "020" adcode: "440114" pname: "广东省"}]
+        if smoke_location_mode == "airport_empty" { pois = [pois[2]] }
+        done({status: "1" pois: pois})
+        return
+    }
     if smoke_location_mode == "city_contract" {
         if path == "/v3/place/text" {
             smoke_check("目的地搜索用实际城市偏好且不限制跨城并请求元数据", params.search("&city=0571&citylimit=false&extensions=all") == 0)
@@ -490,9 +624,7 @@ def main():
     source = source.replace(cancel_call, 'smoke_location_cancel(args)')
     source = source.replace('amap_request("/' , 'smoke_amap_request("/')
     source = source.replace('    minimax_request(', '    smoke_minimax_request(', 1)
-    assert source.count('Label{text: "NAVIGATION"') == 1, '离线截图标记入口已变化；需调整smoke'
     source = source.replace(anchor, CHECK + LOCATION_CHECK + '\nstart_timeout(0.05, || restore_trip())')
-    source = source.replace('Label{text: "NAVIGATION"', 'Label{text: "NAVIGATION / 离线合成响应验收"')
     (bundle / 'main.splash').write_text(source)
     jail = work / 'data' / APP_ID
     jail.mkdir(parents=True)
@@ -560,6 +692,14 @@ def main():
         x, y, width, height = widget['r']
         request('/click', x=x + width / 2, y=y + height / 2, wait=1)
 
+    def confirm():
+        widget = find(lambda w: w['ty'] == 'TextInput' and w['i'] == 'sentence')
+        x, y, width, height = widget['r']
+        request('/click', x=x + width / 2, y=y + height / 2, wait=1)
+        request('/key', c='KeyA', cmd=1, wait=1)
+        request('/text', text='确认', wait=1)
+        button('查询')
+
     def start():
         nonlocal running
         subprocess.run([*OCTO, 'run', str(bundle), '--app-data', str(work / 'data'), '--port', str(port), '--hidden', '--detach'], cwd=ROOT, check=True)
@@ -584,7 +724,7 @@ def main():
             raise AssertionError('本次card-host未释放端口')
 
     def inject_callback(function, previous='cancel_task'):
-        widget = find(lambda w: w['ty'] == 'Button' and w.get('t') == '取消')
+        widget = find(lambda w: w['ty'] == 'Button' and w.get('t') == '终止')
         x, y, width, height = widget['r']
         # 仍通过真实按钮回调调用注入入口，避免依赖脚本控制台/非公开宿主接口。
         current = (bundle / 'main.splash').read_text()
@@ -595,14 +735,15 @@ def main():
 
     try:
         start()
-        button('规划新行程')
+        assert sorted(w['t'] for w in widgets() if w['ty'] == 'Button') == ['查询', '终止']
+        button('查询')
         # 应用现在以timer进入模型请求；必须确认发送已开始才覆盖迟到回调。
         for _ in range(40):
             if (jail / 'smoke-send-started.json').is_file():
                 break
             time.sleep(.05)
         assert (jail / 'smoke-send-started.json').is_file(), '合成模型发送未进入'
-        button('取消')
+        button('终止')
         time.sleep(1.1)
         assert status() == '任务已取消', status()
         late = json.loads((jail / 'smoke-late.json').read_text())
@@ -671,7 +812,7 @@ def main():
             path = jail / relative
             original = path.read_text()
             path.write_text(original + '\n')
-            button('确认并保存 Trip')
+            confirm()
             assert not (jail / 'trip.json').exists(), f'来源变化后仍确认旧Trip: {relative}'
             assert '未通过' in status() or '重新规划' in status() or '变化' in status(), status()
             failure_paths.append({'source_changed': relative, 'status': status(), 'trip_written': False})
@@ -679,9 +820,9 @@ def main():
                 (work / 'source-changed-snap.json').write_bytes(request('/snap'))
                 subprocess.run([*OCTO, 'shot', str(port), str(work / 'source-changed.png')], check=True)
             path.write_text(original)
-            button('取消')  # 隔离副本中此按钮现在调用smoke_prepare，建立新的合成proposal。
+            button('终止')  # 隔离副本中此按钮现在调用smoke_prepare，建立新的合成proposal。
         print('PASS: proposal后日历/笔记/位置分别变化均阻止旧Trip确认')
-        button('确认并保存 Trip')
+        confirm()
         assert status() == 'Trip 已确认并读回；尚未开始导航', status()
         trip = json.loads((jail / 'trip.json').read_text())
         assert trip['schema'] == 2 and trip['state'] == 'confirmed'
@@ -694,7 +835,31 @@ def main():
         start()
         assert status() == '已读回确认的 Trip；尚未开始导航', status()
         assert json.loads((jail / 'trip.json').read_text()) == trip
-        print(f'PASS: {len(checks)}条来源/金额/期限/终点边界与Trip确认读回、重启恢复')
+        legacy_trip = json.loads(json.dumps(trip))
+        legacy_trip['constraints'].pop('inferred', None)
+        legacy_trip.pop('user_limits', None)
+        stop()
+        (jail / 'trip.json').write_text(json.dumps(legacy_trip, ensure_ascii=False))
+        start()
+        assert status() == '已读回确认的 Trip；尚未开始导航', status()
+        assert json.loads((jail / 'trip.json').read_text()) == legacy_trip
+        widget = find(lambda w: w['ty'] == 'TextInput' and w['i'] == 'sentence')
+        x, y, width, height = widget['r']
+        request('/click', x=x + width / 2, y=y + height / 2, wait=1)
+        request('/key', c='KeyA', cmd=1, wait=1)
+        request('/text', text='改到另一机场', wait=1)
+        button('查询')
+        resumed = json.loads((jail / 'smoke-last-input.json').read_text())['input']
+        assert resumed['received_at'] == trip['received_at']
+        assert resumed['explicit_user_limits']['minutes'] == trip['constraints']['minutes']
+        assert resumed['explicit_user_limits']['budget_cents'] == trip['constraints']['budget_cents']
+        assert resumed['clarifications'][-1] == '改到另一机场'
+        assert 'read_location' in resumed['tool_state']['available_source_tools']
+        assert resumed['tool_state']['destination'] is None
+        audit = json.loads((jail / 'agent-run.json').read_text())
+        assert audit['arrive_by'] == trip['arrive_by'] and audit['state'] == 'running'
+        assert json.loads((jail / 'trip.json').read_text()) == legacy_trip
+        print(f'PASS: {len(checks)}条边界及新旧schema2确认读回、重启与保留期限的用户修正')
         stop()
         (jail / 'trip.json').write_text('{broken json')
         start()
