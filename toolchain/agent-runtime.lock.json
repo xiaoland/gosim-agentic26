@@ -18,8 +18,27 @@
     "package": "octosense",
     "binary": "octosense",
     "default_features": false,
-    "features": ["app-hub"]
+    "features": [
+      "app-hub"
+    ]
   },
   "model": "MiniMax-M3",
-  "platform_verified": "macOS arm64"
+  "platform_verified": "macOS arm64",
+  "location_overlays": {
+    "octosense": {
+      "url": "https://github.com/OctoSense-org/OctoSense.git",
+      "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
+      "patch": "toolchain/patches/octosense-location.patch",
+      "patch_sha256": "95dd2bbba3e9642370fed39a2d153ef64b304c28d29ef4857bfa6dff7c84c8a1",
+      "tree": "45c3633964a0ade85394acd1ed949363752f8eba",
+      "cargo_lock_sha256": "ecb3e7990d402207dac51f41a6305d45f0bda44f6cde2f2a7816379c18fceb68"
+    },
+    "app_hub": {
+      "url": "https://github.com/OctoSense-org/OctoSense-App-Hub.git",
+      "revision": "58c3c8aed8fc811a16d67c5f784a8a44214ff876",
+      "patch": "toolchain/patches/app-hub-location-replier.patch",
+      "patch_sha256": "909ae10db99e64cf888f39b4173c5e59f5969e05fbd3fa4bcce28015913e6482",
+      "tree": "9dca73bc50ebad12b57d5c8b0f71d915b8de773f"
+    }
+  }
 }

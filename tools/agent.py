@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import shlex
 import shutil
@@ -127,7 +128,8 @@ def no_secrets(data, values, label):
 def host_env(hidden=False):
     env = dict(os.environ)
     for name in ('MAKEPAD_HOME', 'MAKEPAD_WM_ROOT', 'MAKEPAD_WM_THEME', 'MAKEPAD_REMOTE', 'MAKEPAD_HIDE_WINDOWS',
-                 'OCTOS_APP_CORE_BIN', 'OCTOSENSE_HUB', 'OCTOSENSE_HUB_ANCHOR', 'MINIMAX_API_KEY', 'AMAP_API_KEY'):
+                 'OCTOS_APP_CORE_BIN', 'OCTOSENSE_HUB', 'OCTOSENSE_HUB_ANCHOR', 'MINIMAX_API_KEY', 'AMAP_API_KEY',
+                 'FAKE_GPS_FILE', 'FAKE_GPS_MS'):
         env.pop(name, None)
     env.update(OCTOSENSE_HOME=str(HOME_DIR), OCTOSENSE_APP_DATA=str(HOME_DIR / 'apps'),
                OCTOS_APP_CORE_DIR=str(CORE), OCTOSENSE_LLM_VAULT='file', OCTOSENSE_MAIL_VAULT='file',
@@ -137,13 +139,42 @@ def host_env(hidden=False):
     return env
 
 
+def verify_overlay(source, spec):
+    require(output('git', 'rev-parse', 'HEAD', cwd=source) == spec['revision'], '定位补丁的上游版本不符。')
+    patch = (ROOT / spec['patch']).resolve()
+    require(patch.is_relative_to(ROOT / 'toolchain/patches')
+            and hashlib.sha256(patch.read_bytes()).hexdigest() == spec['patch_sha256'], '定位补丁摘要不符。')
+    require(not output('git', 'diff', '--name-only', cwd=source)
+            and not output('git', 'ls-files', '--others', '--exclude-standard', cwd=source),
+            '定位工具链有未审核改动，拒绝构建。')
+    require(output('git', 'write-tree', cwd=source) == spec['tree'], '定位工具链源码树与固定补丁不符。')
+
+
+def apply_overlay(source, spec):
+    require(output('git', 'rev-parse', 'HEAD', cwd=source) == spec['revision'], '定位补丁的上游版本不符。')
+    patch = (ROOT / spec['patch']).resolve()
+    require(hashlib.sha256(patch.read_bytes()).hexdigest() == spec['patch_sha256'], '定位补丁摘要不符。')
+    tree = output('git', 'write-tree', cwd=source)
+    if tree != spec['tree']:
+        require(tree == output('git', 'rev-parse', 'HEAD^{tree}', cwd=source)
+                and not output('git', 'status', '--porcelain', cwd=source), '保留未知工具链修改；请选择新的 AGENTIC26_AGENT_TOOLCHAIN。')
+        command('git', 'apply', '--check', patch, cwd=source)
+        command('git', 'apply', '--index', patch, cwd=source)
+    verify_overlay(source, spec)
+
+
 def verify_source():
     require(SOURCE.is_dir(), '请先运行 make agent-bootstrap。')
     spec = LOCK['octosense']
     require(output('git', 'rev-parse', 'HEAD') == spec['revision'], '隔离 OctoSense 版本与 agent-runtime.lock.json 不符。')
-    require(not output('git', 'status', '--porcelain', '--untracked-files=no'), '隔离官方源码有改动，拒绝构建。')
-    for name, key in [('Cargo.lock', 'cargo_lock_sha256'), ('runtime-patches.lock.json', 'runtime_patches_lock_sha256')]:
-        require(hashlib.sha256((SOURCE / name).read_bytes()).hexdigest() == spec[key], f'官方 {name} 摘要不符。')
+    overlays = LOCK['location_overlays']
+    require(overlays['octosense']['revision'] == spec['revision']
+            and overlays['app_hub']['revision'] == LOCK['app_hub_revision'], '定位补丁与固定上游版本不符。')
+    verify_overlay(SOURCE, overlays['octosense'])
+    verify_overlay(SOURCE / '.sources/app-hub', overlays['app_hub'])
+    for name, expected in [('Cargo.lock', overlays['octosense']['cargo_lock_sha256']),
+                           ('runtime-patches.lock.json', spec['runtime_patches_lock_sha256'])]:
+        require(hashlib.sha256((SOURCE / name).read_bytes()).hexdigest() == expected, f'官方 {name} 摘要不符。')
     checked = subprocess.run([sys.executable, str(SOURCE / 'tools/setup.py'), '--check'], cwd=SOURCE,
                              capture_output=True, text=True)
     require(checked.returncode == 0, '官方 setup --check 未通过；请运行 agent-bootstrap 查看源码问题。')
@@ -229,6 +260,7 @@ def build(values):
     require(packed_manifest == expected_manifest, '官方 system-app 清单与当前源码不符。')
     metadata['bundle_blake3'] = packed_manifest['integrity']['bundle_blake3']
     metadata['host_revision'] = LOCK['octosense']['revision']
+    metadata['host_overlay_tree'] = LOCK['location_overlays']['octosense']['tree']
     (BUILD / 'build.json').write_bytes(json_bytes(metadata))
     print('当前源码 SHA-256:', metadata['source_sha256'], flush=True)
     return metadata
@@ -244,6 +276,15 @@ def bootstrap():
         command('git', 'fetch', '--depth', '1', 'origin', LOCK['octosense']['revision'])
         command('git', 'checkout', '--detach', 'FETCH_HEAD')
     require(output('git', 'rev-parse', 'HEAD') == LOCK['octosense']['revision'], '隔离源码版本不符；请选择新的 AGENTIC26_AGENT_TOOLCHAIN。')
+    hub = SOURCE / '.sources/app-hub'
+    if not hub.exists():
+        spec = LOCK['location_overlays']['app_hub']
+        command('git', 'init', hub, cwd=TOOLCHAIN)
+        command('git', 'remote', 'add', 'origin', spec['url'], cwd=hub)
+        command('git', 'fetch', '--depth', '1', 'origin', spec['revision'], cwd=hub)
+        command('git', 'checkout', '--detach', 'FETCH_HEAD', cwd=hub)
+    apply_overlay(hub, LOCK['location_overlays']['app_hub'])
+    apply_overlay(SOURCE, LOCK['location_overlays']['octosense'])
     command(sys.executable, SOURCE / 'tools/setup.py', '--no-hub', '--cache', ROOT.parent / '.octosense-agentic26')
     build(env_values(required=False))
 
@@ -255,7 +296,7 @@ def jail_path():
     return HOME_DIR / 'apps' / (app_id if app_id.startswith('os.') else 'os.' + app_id)
 
 
-def configure(values, jail):
+def configure(values, jail, location_mode="live"):
     now = datetime.now(timezone.utc).isoformat()
     profile = {'id': '_main', 'name': 'Navigation MiniMax-M3', 'enabled': True, 'created_at': now, 'updated_at': now,
                'config': {'llm': {'primary': {'family_id': 'minimax-cn', 'model_id': LOCK['model'],
@@ -264,7 +305,8 @@ def configure(values, jail):
     write_private(CORE / 'profiles/_main.json', json_bytes(profile))
     write_private(jail / 'private-config.json', json_bytes({
         'amap_api_key': values['AMAP_API_KEY'], 'minimax_api_key': values['MINIMAX_API_KEY'],
-        'minimax_base_url': values['MINIMAX_BASE_URL'], 'minimax_model': LOCK['model']
+        'minimax_base_url': values['MINIMAX_BASE_URL'], 'minimax_model': LOCK['model'],
+        'location_mode': location_mode
     }))
 
 
@@ -344,18 +386,37 @@ def stop():
     print('已关闭本启动器的宿主实例。')
 
 
-def start(hidden):
+def packaged_host():
+    # 本机实测裸二进制未完成授权；包内运行成功触发授权并取得定位样本。
+    contents = STATE / 'app/OctoSense Navigation.app/Contents'
+    private_dir(contents / 'MacOS')
+    info = plistlib.loads((BINARY.parent / 'Info.plist').read_bytes())
+    require(info.get('CFBundleIdentifier') == 'dev.makepad.octosense'
+            and info.get('NSLocationWhenInUseUsageDescription'), '官方宿主缺少定位应用身份或用途说明。')
+    info.update(CFBundleExecutable=BINARY.name, CFBundlePackageType='APPL')
+    executable = contents / 'MacOS' / BINARY.name
+    require(not executable.is_symlink(), '私有宿主可执行文件不能是符号链接。')
+    # 使用独立文件，后续 cargo 构建不会覆盖正在运行的宿主。
+    shutil.copyfile(BINARY, executable)
+    executable.chmod(0o700)
+    write_private(contents / 'Info.plist', plistlib.dumps(info))
+    return executable
+
+
+def start(hidden, demo=False):
     values = env_values()
     jail = jail_path()
-    require(all((jail / 'demo' / rel).is_file() for rel in ('calendar.ics', 'notes/ticket.md', 'location.json')),
+    sources = ('calendar.ics', 'notes/ticket.md', 'location.json') if demo else ('calendar.ics', 'notes/ticket.md')
+    require(all((jail / 'demo' / rel).is_file() for rel in sources),
             '模拟来源尚未初始化；先运行 make agent-init-demo。')
-    stop()
     metadata = build(values)
-    configure(values, jail)
+    stop()
+    executable = packaged_host()
+    configure(values, jail, "demo" if demo else "live")
     private_dir(STATE / 'logs')
     log = STATE / 'logs' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '.log')
     with log.open('wb') as stream:
-        proc = subprocess.Popen([str(BINARY), '--remote', '--test-action', 'launch-' + metadata['runtime_id'].removeprefix('os.')],
+        proc = subprocess.Popen([str(executable), '--remote', '--test-action', 'launch-' + metadata['runtime_id'].removeprefix('os.')],
                                 cwd=STATE, env=host_env(hidden), stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
     log.chmod(0o600)
     try:
@@ -391,12 +452,13 @@ def doctor():
     values = env_values()
     bundle_files(values)
     require(BINARY.is_file(), '缺少官方宿主二进制；运行 make agent-bootstrap。')
-    print('固定官方源码、运行时补丁、MiniMax-M3 单 provider/无 fallback 配置及 bundle 凭据边界通过；未调用外部服务。')
+    print('固定官方源码、定位覆盖补丁、运行时补丁、MiniMax-M3 单 provider/无 fallback 配置及 bundle 凭据边界通过；未调用外部服务。')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('bootstrap', 'doctor', 'init-demo', 'dev', 'hidden', 'stop', 'status', 'tree', 'logs', 'shot'))
+    parser.add_argument('--demo', action='store_true', help='明确使用模拟定位；默认请求系统实时定位。')
     parser.add_argument('--output', type=Path, default=BUILD / 'screenshot.png')
     args = parser.parse_args()
     if args.action == 'bootstrap':
@@ -406,7 +468,7 @@ def main():
     elif args.action == 'init-demo':
         init_demo()
     elif args.action in ('dev', 'hidden'):
-        start(args.action == 'hidden')
+        start(args.action == 'hidden', demo=args.demo)
     elif args.action == 'stop':
         stop()
     else:

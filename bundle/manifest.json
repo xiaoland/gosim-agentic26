@@ -1,11 +1,12 @@
 {
   "capabilities": [
     "storage",
-    "net"
+    "net",
+    "location"
   ],
   "id": "agentic26-navigation",
   "integrity": {
-    "bundle_blake3": "ea23c50425ee32135abe97c0facfe835078a76462cd48013e342b05104725b69"
+    "bundle_blake3": "85c1bf724cc8f2de9a09280dfdd83cb97a4d2e17f2ee07a2f117e2a49bdea2f5"
   },
   "name": "Agentic26 Navigation",
   "network": {
@@ -15,5 +16,5 @@
     ]
   },
   "schema": 1,
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

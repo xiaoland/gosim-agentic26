@@ -10,7 +10,7 @@ path dependencies 不一致，Cargo 拒绝构建。按官方 QUICKSTART 的不�
 `hub.Cargo.lock`。bootstrap 仅允许用它替换原始上游锁文件或相同的已有
 锁文件；其他本地改动会被拒绝。随后使用 `--locked` 构建。
 
-没有修改上游 Rust 源码，也没有升级本机 Rust。初次验证环境为 macOS
+原 card-host 初始化没有修改上游 Rust 源码，也没有升级本机 Rust；正式 Navigation 的定位补丁见下文。初次验证环境为 macOS
 arm64、rustc/cargo 1.93.0、Python 3.12.10（以 verification.md 实测为准）。
 构建依赖遵从各自许可证；本仓库的 Apache-2.0 不重新许可外部依赖。
 
@@ -42,11 +42,11 @@ make agent-dev
 这条路径是本地开发加载方式；正式外部安装仍走官方签名 catalog。
 
 `agent-init-demo` 明确重置三份互相独立的模拟来源，将模板时间替换为当前东八区时间，
-航班设为两小时后；`agent-dev` 和 `agent-hidden` 保留已编辑的数据。
+航班设为两小时后；`agent-dev` 和 `agent-hidden` 保留已编辑的日历与笔记，默认位置模式为 live；`make agent-demo` 明确使用模拟位置，模拟位置过期需重新 `agent-init-demo`。
 私有数据在 `.local-state/agent/`：官方宿主的 `octos/profiles/_main.json` 保留单个 M3 provider，
 兼容 `model.complete` 探针；当前应用通过 stock `net.http_request` 直接调用 M3 和高德。
 仅这个应用的 jail 内 `private-config.json` 提供 `amap_api_key`、`minimax_api_key`、
-`minimax_base_url`、`minimax_model` 四个运行时字段。
+`minimax_base_url`、`minimax_model` 与 `location_mode` 运行时字段。
 目录权限为 0700、这两个文件为 0600；两份配置不进入应用包、Git 或启动参数。
 模型配置固定一个 MiniMax-M3 provider，fallbacks 为空；其它模型配置会被拒绝。
 M3 地址只允许已实测的 `api.minimax.cn` HTTPS 主机、默认或 443 端口和 `/v1` 路径，
@@ -70,3 +70,11 @@ localhost 端口。`.local-state/agent/session.json` 记录 PID、端口、进�
 固定官方宿主已实测 M3 两次回调：先选读文件工具，再回传请求后独立读取的随机 nonce；
 高德真实参数失败与网络策略拒绝均未在 host log、远程 log、snapshot 或 tree 中出现精确 key。
 当前 Navigation 已完成 M3 七轮约 21 秒、在线公共交通选择、确认保存读回及 stock 重启恢复；该基线没有混合候选；补充真实任务以七轮约 30 秒完成 ¥19／2063 秒的打车接地铁方案确认读回。完整条件、失败状态与源码版本对应关系见任务包，不以模型探针代替业务证据。
+
+## 实时定位宿主补丁
+
+用户已批准在固定官方源码上补齐 macOS CoreLocation 的一次性 `location.get` 服务。补丁保存在 `toolchain/patches/`，基版本、补丁 SHA、应用后的 Git tree 与 Cargo.lock 摘要均由 `agent-runtime.lock.json` 校验；未知工具链修改不自动 reset，也不以放宽 dirty 检查来接受。应用源码仍只在 `bundle/`，Rust 补丁不进入应用包；需要这组宿主补丁的实时定位功能不能宣称在未修改的 stock 宿主已可用。
+
+默认 `agent-dev`／`agent-hidden` 使用真实位置；启动器清除假 GPS 注入环境。`agent-demo` 明确使用演示位置，不是实时定位失败后的自动兜底。真实位置来自有权限的前台应用一次请求，宿主取消、关闭或切换应用后停止采集；当前前台判断指宿主内部选中应用，不等于已验证系统窗口失焦策略。系统授权由用户选择，不能由启动器修改 macOS 定位权限。
+
+正式启动器将已锁定构建复制到隔离目录的 `OctoSense Navigation.app/Contents/MacOS/octosense`，补齐 executable、package type 与定位用途 plist，直接执行包内二进制。该启动方式已观察到系统定位授权和真实样本；`open` 的 LaunchServices 启动仍未验证成功，本地包装不含签名或发布承诺。

@@ -1,0 +1,28 @@
+diff --git a/crates/appstore/src/services.rs b/crates/appstore/src/services.rs
+index 3c0db2e..19b35fb 100644
+--- a/crates/appstore/src/services.rs
++++ b/crates/appstore/src/services.rs
+@@ -120,6 +120,15 @@ fn queue_reply(heap_key: usize, req_id: u64, result: Result<String, String>) {
+ }
+ 
+ impl Replier {
++    /// The runner's request identity, for owner-scoped cancellation.
++    pub fn request_id(&self) -> u64 { self.req_id }
++
++    /// Whether the original isolate is still waiting. Device services use
++    /// this to stop acquisition when the runner cancels or closes the heap.
++    pub fn is_pending(&self) -> bool {
++        with_pending(|pending| pending.contains_key(&(self.heap_key, self.req_id)))
++    }
++
+     /// Answer the request. An answer after the request timed out, or after
+     /// its isolate closed, or a second answer, goes nowhere.
+     pub fn send(self, result: Result<Value, String>) {
+@@ -595,6 +604,7 @@ mod tests {
+         dispatch(call("closing.read"), 7104, 2, &mut Host::default());
+         held.lock().unwrap().pop().unwrap().send(Ok(Value::Null)); // answered, not yet taken
+         cancel_heap(7104);
++        assert!(!held.lock().unwrap()[0].is_pending());
+         assert!(take_replies_for(&[7104]).is_empty(), "a queued answer goes with the isolate");
+         held.lock().unwrap().pop().unwrap().send(Ok(Value::Null));
+         expire_pending(later(DEFAULT_TIMEOUT + Duration::from_secs(1)), |h| h == 7104);

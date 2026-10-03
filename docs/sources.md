@@ -58,10 +58,18 @@ Project 中 ChatGPT 给出的架构/赛事解释是二手材料。“最晚出�
 
 机场查询还观察到 POI 吸附差异：`route.destination` 可能保留请求坐标，实际末段却停在地铁出口。不得仅靠该字段判断到达航站楼；必须核对实际末段 polyline 与任务终点，坐标匹配仍不证明楼层、安检或实际抵达。
 
-首轮演示背景分别使用日历文件、笔记和设备位置记录，由工具在运行时独立读取、关联并保留依据；不提供预合并的行程背景答案。它只证明多源上下文处理，不证明在线日历、笔记账户或定位接入。天气、提醒、在线日历及网约车实时报价服务是否增加，由演示必需能力和接口实测决定。
+首轮演示背景分别使用日历文件、笔记和设备位置记录，由工具在运行时独立读取、关联并保留依据；不提供预合并的行程背景答案。这些模拟文件只证明多源上下文处理，不证明在线日历或笔记账户接入；默认设备定位另依下节宿主补丁读取。天气、提醒、在线日历及网约车实时报价服务是否增加，由演示必需能力和接口实测决定。
+
+## 设备定位接入依据
+
+2026-10-02 核对官方 [location 能力](https://github.com/OctoSense-org/OctoScript-App-Design-Flow/blob/main/docs/CAPABILITIES.md)及锁定运行时源码：grant 允许读取 `sys.gps`，但 macOS 的 Apple LocationUpdate 尚未接到正式应用，现有 GPS 缓存不含原始采样时间。实时定位需要本地宿主补丁，不把清单许可或接口示例当成已通过定位验收。具体补丁与验证归[当前任务](../tasks/capability-boundary/packet.md#实时定位接入)。
+
+Apple 平台事件明确使用 WGS84，并携带系统采样时间与精度；路线请求不能直接把该坐标标为高德坐标。[高德坐标转换](https://developer.amap.com/api/webservice/guide/api/convert)支持 `coordsys=gps`，输入经度在前、纬度在后，最多六位小数；[逆地理编码](https://developer.amap.com/api/webservice/guide/api/georegeo)提供城市名称、编码和行政区信息，用于核实实际起点城市。原始设备样本及转换服务来源分别保留，不以转换完成时刻代替采样时间。
 
 ## 开发协作方法来源
 
 [xiaoland/svc](https://github.com/xiaoland/svc) 本次采用版本为 Corpus 15.0.0，commit `4fe4c66ac4deb35209069c00b1bbdc1b22aae3af`。仅采用 `corpus/specs/` 的知识归属和 `corpus/task-packet/` 的任务控制语义，固定入口见 [知识导航](index.md)；未安装完整 CLI，也未引入其它模块。上游模板按需参考，项目说明与实际任务包由本仓库维护。
 
 `../factory26/AGENTS.md` 是本轮用户指定的本地参考，读取于 2026-10-01。只借鉴知识回流、非简单任务的 packet、授权追溯和有界协作原则；其专属实验规则、模型与预算配置、自主提交授权和测试禁令不转移到本仓库。
+
+2026-10-03 核对[搜索 POI](https://developer.amap.com/api/webservice/guide/api-advanced/search)与[路径规划 2.0](https://developer.amap.com/api/webservice/guide/api/newroute)：地点查询使用 `citylimit=false` 与 `extensions=all`，目的地城市来自 POI，公交请求使用独立的 `city1`／`city2` 及 `ad1`／`ad2`。逆地理编码的直辖市 `city` 可为空，只有北京、上海、天津、重庆可取其省级名称；不能一般性地把省名当作城市。深圳实测不证明其他城市均可返回路线，服务拒绝或信息不完整仍保留失败。

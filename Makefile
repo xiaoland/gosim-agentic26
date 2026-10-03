@@ -47,3 +47,8 @@ agent-logs:
 	$(AGENT) logs
 agent-shot:
 	$(AGENT) shot --output "$(SHOT)"
+
+# 明确切换为模拟定位；普通 agent-dev 使用系统定位。
+.PHONY: agent-demo
+agent-demo:
+	$(AGENT) dev --demo

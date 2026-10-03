@@ -1,0 +1,476 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index b1c26f5..4a48adb 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -7461,7 +7461,6 @@ dependencies = [
+ [[package]]
+ name = "octosense-app-hub"
+ version = "0.1.0"
+-source = "git+https://github.com/OctoSense-org/OctoSense-App-Hub?rev=58c3c8aed8fc811a16d67c5f784a8a44214ff876#58c3c8aed8fc811a16d67c5f784a8a44214ff876"
+ dependencies = [
+  "base64 0.22.1",
+  "blake3",
+@@ -7477,7 +7476,6 @@ dependencies = [
+ [[package]]
+ name = "octosense-app-hub-app"
+ version = "0.1.0"
+-source = "git+https://github.com/OctoSense-org/OctoSense-App-Hub?rev=58c3c8aed8fc811a16d67c5f784a8a44214ff876#58c3c8aed8fc811a16d67c5f784a8a44214ff876"
+ dependencies = [
+  "makepad-app-module",
+  "makepad-widgets",
+@@ -7505,7 +7503,6 @@ dependencies = [
+ [[package]]
+ name = "octosense-app-policy"
+ version = "0.1.0"
+-source = "git+https://github.com/OctoSense-org/OctoSense-App-Hub?rev=58c3c8aed8fc811a16d67c5f784a8a44214ff876#58c3c8aed8fc811a16d67c5f784a8a44214ff876"
+ dependencies = [
+  "makepad-widgets",
+  "octosense-app-contract",
+@@ -7526,7 +7523,6 @@ dependencies = [
+ [[package]]
+ name = "octosense-appstore"
+ version = "0.1.0"
+-source = "git+https://github.com/OctoSense-org/OctoSense-App-Hub?rev=58c3c8aed8fc811a16d67c5f784a8a44214ff876#58c3c8aed8fc811a16d67c5f784a8a44214ff876"
+ dependencies = [
+  "makepad-app-module",
+  "makepad-widgets",
+diff --git a/Cargo.toml b/Cargo.toml
+index c699a22..ade2e4d 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -268,3 +268,10 @@ ruma = { git = "https://github.com/project-robius/ruma.git", branch = "tsp" }
+ # -i octos-core` still sees one octos source.
+ [patch.crates-io]
+ nix = { git = "https://github.com/octos-org/octos.git", rev = "18fcd3f16e527d2b601d7ae244f056fb711bb6b8" }
++
++# Navigation local overlay: cancel-aware one-shot location service.
++[patch."https://github.com/OctoSense-org/OctoSense-App-Hub"]
++octosense-app-hub = { path = ".sources/app-hub/crates/app-hub" }
++octosense-app-hub-app = { path = ".sources/app-hub/crates/app-hub-app" }
++octosense-app-policy = { path = ".sources/app-hub/crates/app-policy" }
++octosense-appstore = { path = ".sources/app-hub/crates/appstore" }
+diff --git a/crates/shell/src/apps.rs b/crates/shell/src/apps.rs
+index 2c43980..5290cff 100644
+--- a/crates/shell/src/apps.rs
++++ b/crates/shell/src/apps.rs
+@@ -159,6 +159,7 @@ fn register_host_services() {
+     static ONCE: std::sync::Once = std::sync::Once::new();
+     ONCE.call_once(|| {
+         crate::glance::register();
++        crate::location::register();
+         let demo = std::env::var("MAKEPAD_APP_CONFIG")
+             .ok()
+             .and_then(|text| makepad_strict_json::parse(text.as_bytes()).ok())
+diff --git a/crates/shell/src/lib.rs b/crates/shell/src/lib.rs
+index 6c0ecc1..107d50b 100644
+--- a/crates/shell/src/lib.rs
++++ b/crates/shell/src/lib.rs
+@@ -68,6 +68,8 @@ pub mod tile;
+ pub mod wm_reply;
+ pub mod ext;
+ pub mod glance;
++#[cfg(any(feature = "app-hub", native_mobile))]
++pub mod location;
+ pub mod glance_card;
+ pub mod glance_panel;
+ pub mod system_chat;
+@@ -5859,6 +5861,15 @@ impl App {
+         // or draw, or in a call the shell made — is contained by now; show
+         // it closed and free it before the next event (module_host.rs).
+         self.contain_module_faults(cx);
++        #[cfg(any(feature = "app-hub", native_mobile))]
++        {
++            let foreground = self.state.as_ref().and_then(|state| {
++                let client = state.layout.focused_client()?;
++                let launch_id = &state.clients.get(&client)?.app;
++                location::foreground_app(launch_id, &apps::card_apps())
++            });
++            location::pump(cx, event, foreground.as_deref());
++        }
+         // A quit that waited on instances asking the person goes ahead once
+         // the last of them confirmed (or failed and has nothing left to ask).
+         if self.take_quit_ready() {
+diff --git a/crates/shell/src/location.rs b/crates/shell/src/location.rs
+new file mode 100644
+index 0000000..1582244
+--- /dev/null
++++ b/crates/shell/src/location.rs
+@@ -0,0 +1,378 @@
++//! One-shot, foreground-only CoreLocation access for contained scripts.
++//! Coordinates are delivered only through the original runner replier;
++//! this service neither reads nor writes the process-wide GPS cache.
++use makepad_widgets::makepad_platform::event::{LocationErrorEvent, LocationUpdateEvent};
++use makepad_widgets::makepad_platform::SignalToUI;
++use makepad_widgets::{Cx, Event, Timer};
++use octosense_appstore::services::{HostService, Replier, ServiceCall, ServiceHost};
++use serde_json::{json, Value};
++use std::sync::Mutex;
++use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
++
++#[derive(Clone, Copy, Debug)]
++struct Limits {
++    timeout_ms: u64,
++    max_age: f64,
++    max_accuracy: f64,
++}
++impl Limits {
++    fn parse(args: &Value) -> Result<Self, &'static str> {
++        let object = args.as_object().ok_or("invalid_arguments")?;
++        if object
++            .keys()
++            .any(|key| !["timeout_ms", "max_age_seconds", "max_accuracy_m"].contains(&key.as_str()))
++        {
++            return Err("invalid_arguments");
++        }
++        let timeout_ms = match object.get("timeout_ms") {
++            Some(v) => v.as_u64().ok_or("invalid_arguments")?,
++            None => 15000,
++        };
++        let max_age = match object.get("max_age_seconds") {
++            Some(v) => v.as_f64().ok_or("invalid_arguments")?,
++            None => 60.0,
++        };
++        let max_accuracy = match object.get("max_accuracy_m") {
++            Some(v) => v.as_f64().ok_or("invalid_arguments")?,
++            None => 100.0,
++        };
++        if timeout_ms == 0
++            || timeout_ms > 15000
++            || !max_age.is_finite()
++            || !(0.0..=60.0).contains(&max_age)
++            || !max_accuracy.is_finite()
++            || max_accuracy <= 0.0
++            || max_accuracy > 100.0
++        {
++            return Err("invalid_arguments");
++        }
++        Ok(Self {
++            timeout_ms,
++            max_age,
++            max_accuracy,
++        })
++    }
++    fn check(&self, fix: &LocationUpdateEvent, now: f64) -> Result<(), &'static str> {
++        if !fix.lat.is_finite()
++            || !(-90.0..=90.0).contains(&fix.lat)
++            || !fix.lon.is_finite()
++            || !(-180.0..=180.0).contains(&fix.lon)
++            || !fix.accuracy_m.is_finite()
++            || fix.accuracy_m <= 0.0
++            || !fix.time.is_finite()
++            || fix.time <= 0.0
++            || fix.time > now + 1.0
++        {
++            return Err("unavailable");
++        }
++        if now - fix.time > self.max_age {
++            return Err("stale_fix");
++        }
++        if fix.accuracy_m > self.max_accuracy {
++            return Err("accuracy_insufficient");
++        }
++        Ok(())
++    }
++}
++
++struct Request {
++    app: String,
++    reply: Replier,
++    limits: Limits,
++    deadline: Instant,
++    last_failure: &'static str,
++    cancelled: bool,
++    started: bool,
++    timer: Timer,
++}
++static REQUEST: Mutex<Option<Request>> = Mutex::new(None);
++fn failure(code: &str) -> Value {
++    json!({"success": false, "code": code})
++}
++
++struct LocationService;
++impl HostService for LocationService {
++    fn family(&self) -> &'static str {
++        "location"
++    }
++    // The UI timer enforces the requested limit and returns a stable code.
++    // The registry remains a final backstop if the UI stops pumping.
++    fn timeout(&self, _call: &ServiceCall) -> Duration {
++        Duration::from_secs(16)
++    }
++    fn call(&mut self, call: ServiceCall, reply: Replier, _host: &mut dyn ServiceHost) {
++        if call.from_sheet || !call.may_prompt {
++            reply.send(Ok(failure("background_not_allowed")));
++            return;
++        }
++        if call.method() == "cancel" {
++            let Some(id) = call
++                .args
++                .as_object()
++                .filter(|o| o.len() == 1)
++                .and_then(|o| o.get("request_id"))
++                .and_then(Value::as_u64)
++                .filter(|id| *id > 0)
++            else {
++                reply.send(Ok(failure("invalid_arguments")));
++                return;
++            };
++            let mut pending = REQUEST.lock().unwrap();
++            let cancelled = pending.as_mut().is_some_and(|request| {
++                if request.app == call.app_id && request.reply.request_id() == id {
++                    request.cancelled = true;
++                    true
++                } else {
++                    false
++                }
++            });
++            reply.send(Ok(json!({"success": true, "cancelled": cancelled})));
++            SignalToUI::set_ui_signal();
++            return;
++        }
++        if call.method() != "get" {
++            reply.send(Ok(failure("invalid_arguments")));
++            return;
++        }
++        let limits = match Limits::parse(&call.args) {
++            Ok(limits) => limits,
++            Err(code) => {
++                reply.send(Ok(failure(code)));
++                return;
++            }
++        };
++        #[cfg(not(target_os = "macos"))]
++        {
++            let _ = limits;
++            reply.send(Ok(failure("unavailable")));
++            return;
++        }
++        #[cfg(target_os = "macos")]
++        {
++            let mut pending = REQUEST.lock().unwrap();
++            if pending.is_some() {
++                reply.send(Ok(failure("busy")));
++                return;
++            }
++            *pending = Some(Request {
++                app: call.app_id,
++                reply,
++                limits,
++                deadline: Instant::now() + Duration::from_millis(limits.timeout_ms),
++                last_failure: "timeout",
++                cancelled: false,
++                started: false,
++                timer: Timer::default(),
++            });
++            SignalToUI::set_ui_signal();
++        }
++    }
++}
++
++/// Location belongs to an admitted card, whether or not it declares an agent.
++pub(crate) fn foreground_app(launch_id: &str, cards: &[crate::clients::AppDef]) -> Option<String> {
++    cards
++        .iter()
++        .find(|app| app.id == launch_id)
++        .and_then(|app| crate::apps::card_manifest_id(app).map(str::to_string))
++}
++
++pub fn register() {
++    octosense_appstore::services::register_host_service(Box::new(LocationService));
++}
++
++/// Run after the shell delivered the event to its modules: a new request
++/// can start here, and a heap closed during this event stops here too.
++pub fn pump(cx: &mut Cx, event: &Event, foreground: Option<&str>) {
++    let mut pending = REQUEST.lock().unwrap();
++    let Some(request) = pending.as_mut() else {
++        return;
++    };
++    let mut result = None;
++    let cancelled = !request.reply.is_pending();
++    if !cancelled {
++        if request.cancelled {
++            result = Some(failure("cancelled"));
++        } else if foreground != Some(request.app.as_str()) || matches!(event, Event::Shutdown) {
++            result = Some(failure("background_not_allowed"));
++        } else if Instant::now() >= request.deadline {
++            result = Some(failure(request.last_failure));
++        } else if request.started {
++            match event {
++                Event::LocationUpdate(fix) => {
++                    let now = SystemTime::now()
++                        .duration_since(UNIX_EPOCH)
++                        .unwrap_or_default()
++                        .as_secs_f64();
++                    match request.limits.check(fix, now) {
++                        Ok(()) => {
++                            result = Some(json!({"success": true, "lat": fix.lat, "lon": fix.lon,
++                            "accuracy_m": fix.accuracy_m, "sampled_at": fix.time,
++                            "coordinate_system": "WGS84", "source": "corelocation"}))
++                        }
++                        Err(code) => request.last_failure = code,
++                    }
++                }
++                Event::LocationError(LocationErrorEvent::PermissionDenied) => {
++                    result = Some(failure("permission_denied"))
++                }
++                Event::LocationError(LocationErrorEvent::Unavailable(_)) => {
++                    result = Some(failure("unavailable"))
++                }
++                _ => {}
++            }
++        } else {
++            request.started = true;
++            request.timer = cx.start_interval(0.1);
++            cx.start_location_updates();
++        }
++    }
++    if cancelled || result.is_some() {
++        let request = pending.take().unwrap();
++        if request.started {
++            cx.stop_location_updates();
++            cx.stop_timer(request.timer);
++        }
++        if let Some(result) = result {
++            request.reply.send(Ok(result));
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn fix() -> LocationUpdateEvent {
++        LocationUpdateEvent {
++            lon: 114.0,
++            lat: 22.5,
++            accuracy_m: 8.0,
++            time: 1000.0,
++            altitude_m: None,
++            speed_mps: None,
++            heading_deg: None,
++        }
++    }
++    #[test]
++    fn foreground_identity_uses_card_admission_not_agent_declarations() {
++        let row = |id: &str, args: Vec<String>| crate::clients::AppDef {
++            id: id.into(),
++            label: "No agent or tools declared".into(),
++            bin: "card".into(),
++            package: String::new(),
++            dir: String::new(),
++            manifest: None,
++            args,
++            policy: crate::clients::LaunchPolicy::OrFocus,
++            target_dir: None,
++        };
++        let mut cards = vec![
++            row("navigation", vec!["--system=os.navigation".into()]),
++            row("hub:org.example.trip", vec![]),
++        ];
++        assert_eq!(
++            foreground_app("navigation", &cards).as_deref(),
++            Some("os.navigation")
++        );
++        assert_eq!(
++            foreground_app("hub:org.example.trip", &cards).as_deref(),
++            Some("org.example.trip")
++        );
++        cards.push(row("unadmitted", vec![]));
++        assert!(foreground_app("unadmitted", &cards).is_none());
++        assert!(foreground_app("org.example.trip", &cards).is_none());
++    }
++    struct TestHost;
++    impl ServiceHost for TestHost {
++        fn open_sheet(&mut self, _: String) {}
++        fn close_sheet(&mut self) {}
++    }
++    #[test]
++    fn a_cancelled_heap_stops_acquisition_and_receives_no_late_result() {
++        use octosense_appstore::services::{cancel_heap, dispatch, take_replies_for};
++        register();
++        let call = |may_prompt| ServiceCall {
++            app_id: "os.navigation-test".into(),
++            service: "location.get".into(),
++            args: json!({}),
++            from_sheet: false,
++            may_prompt,
++            host_dir: std::env::temp_dir(),
++        };
++        dispatch(call(false), 0x4e4156, 1, &mut TestHost);
++        assert!(REQUEST.lock().unwrap().is_none());
++        assert!(take_replies_for(&[0x4e4156])[0]
++            .2
++            .as_ref()
++            .unwrap()
++            .contains("background_not_allowed"));
++        dispatch(call(true), 0x4e4156, 2, &mut TestHost);
++        let mut cx = Cx::new(Box::new(|_, _| {}));
++        pump(&mut cx, &Event::Signal, Some("os.navigation-test"));
++        assert!(REQUEST.lock().unwrap().as_ref().unwrap().started);
++        cancel_heap(0x4e4156);
++        pump(&mut cx, &Event::Signal, Some("os.navigation-test"));
++        assert!(REQUEST.lock().unwrap().is_none());
++
++        pump(
++            &mut cx,
++            &Event::LocationUpdate(fix()),
++            Some("os.navigation-test"),
++        );
++        assert!(take_replies_for(&[0x4e4156]).is_empty());
++        dispatch(call(true), 0x4e4156, 3, &mut TestHost);
++        let cancel = |app: &str, request_id| ServiceCall {
++            app_id: app.into(),
++            service: "location.cancel".into(),
++            args: json!({"request_id":request_id}),
++            from_sheet: false,
++            may_prompt: true,
++            host_dir: std::env::temp_dir(),
++        };
++        dispatch(cancel("another-app", 3), 0x4e4157, 4, &mut TestHost);
++        assert!(!REQUEST.lock().unwrap().as_ref().unwrap().cancelled);
++        dispatch(cancel("os.navigation-test", 2), 0x4e4156, 5, &mut TestHost);
++        assert!(!REQUEST.lock().unwrap().as_ref().unwrap().cancelled);
++        dispatch(cancel("os.navigation-test", 3), 0x4e4156, 6, &mut TestHost);
++        assert!(REQUEST.lock().unwrap().as_ref().unwrap().cancelled);
++        pump(&mut cx, &Event::Signal, Some("os.navigation-test"));
++        assert!(REQUEST.lock().unwrap().is_none());
++        assert!(take_replies_for(&[0x4e4156])
++            .iter()
++            .any(|r| r.1 == 3 && r.2.as_ref().unwrap().contains("cancelled")));
++        cancel_heap(0x4e4157);
++        dispatch(call(true), 0x4e4156, 7, &mut TestHost);
++        REQUEST.lock().unwrap().as_mut().unwrap().deadline = Instant::now();
++        pump(&mut cx, &Event::Signal, Some("os.navigation-test"));
++        assert!(REQUEST.lock().unwrap().is_none());
++        assert!(take_replies_for(&[0x4e4156])[0]
++            .2
++            .as_ref()
++            .unwrap()
++            .contains("timeout"));
++    }
++    #[test]
++    fn only_bounded_parameters_and_system_fixes_are_accepted() {
++        let limits = Limits::parse(&json!({})).unwrap();
++        assert!(Limits::parse(&json!({"timeout_ms":15001})).is_err());
++        assert!(Limits::parse(&json!({"max_age_seconds":61})).is_err());
++        assert!(Limits::parse(&json!({"max_accuracy_m":101})).is_err());
++        assert!(Limits::parse(&json!({"max_accuracy_m":0})).is_err());
++        assert!(Limits::parse(&json!({"source":"demo"})).is_err());
++        assert!(Limits::parse(
++            &json!({"timeout_ms":5000,"max_age_seconds":20,"max_accuracy_m":25})
++        )
++        .is_ok());
++        assert!(limits.check(&fix(), 1001.0).is_ok());
++        assert_eq!(limits.check(&fix(), 1061.0), Err("stale_fix"));
++        let mut bad = fix();
++        bad.accuracy_m = 101.0;
++        assert_eq!(limits.check(&bad, 1001.0), Err("accuracy_insufficient"));
++        bad = fix();
++        bad.time = 0.0;
++        assert_eq!(limits.check(&bad, 1001.0), Err("unavailable"));
++        bad = fix();
++        bad.lat = f64::NAN;
++        assert_eq!(limits.check(&bad, 1001.0), Err("unavailable"));
++    }
++}
