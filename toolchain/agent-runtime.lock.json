@@ -59,5 +59,13 @@
       "patch_sha256": "e7abd656d4f7e7571a44c6ca82deb679597f3a777f04bd8abbb5b84150986714",
       "tree": "05877184f329252cc58b28227bb68ec1bfde4e71"
     }
+  },
+  "font_document_overlay": {
+    "url": "https://github.com/OctoSense-org/OctoSense-App-Hub.git",
+    "revision": "58c3c8aed8fc811a16d67c5f784a8a44214ff876",
+    "base_tree": "05877184f329252cc58b28227bb68ec1bfde4e71",
+    "patch": "toolchain/patches/app-hub-font-document-gate.patch",
+    "patch_sha256": "8c664bb45b7141b01ba8b7b7bf25c08cc6b2649eb86d63c5223975f0b51dc740",
+    "tree": "ff3b0289267b4ef5b20cc35a077075e74238989e"
   }
 }

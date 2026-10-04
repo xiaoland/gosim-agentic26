@@ -134,7 +134,8 @@ def host_env(hidden=False):
         env.pop(name, None)
     env.update(OCTOSENSE_HOME=str(HOME_DIR), OCTOSENSE_APP_DATA=str(HOME_DIR / 'apps'),
                OCTOS_APP_CORE_DIR=str(CORE), OCTOSENSE_LLM_VAULT='file', OCTOSENSE_MAIL_VAULT='file',
-               OCTOSENSE_SECRETS='file', OCTOSENSE_SYSTEM_APPS=str(SELECTION))
+               OCTOSENSE_SECRETS='file', OCTOSENSE_SYSTEM_APPS=str(SELECTION),
+               MAKEPAD_BUNDLE_NAME='OctoSense', MAKEPAD_BUNDLE_IDENTIFIER='dev.makepad.octosense')
     if hidden:
         env['MAKEPAD_HIDE_WINDOWS'] = '1'
     return env
@@ -176,7 +177,11 @@ def verify_source():
     for name, source in [('octosense', SOURCE), ('app_hub', SOURCE / '.sources/app-hub')]:
         require(maps[name]['base_tree'] == overlays[name]['tree'], 'Maps 覆盖补丁的定位基线不符。')
         require(hashlib.sha256((ROOT / overlays[name]['patch']).read_bytes()).hexdigest() == overlays[name]['patch_sha256'], '定位基线补丁摘要不符。')
-        verify_overlay(source, maps[name])
+        overlay = LOCK.get('font_document_overlay', maps[name]) if name == 'app_hub' else maps[name]
+        if name == 'app_hub' and 'font_document_overlay' in LOCK:
+            require(overlay['base_tree'] == maps[name]['tree'], '字体文档覆盖补丁的 Maps 基线不符。')
+            require(hashlib.sha256((ROOT / maps[name]['patch']).read_bytes()).hexdigest() == maps[name]['patch_sha256'], 'Maps 基线补丁摘要不符。')
+        verify_overlay(source, overlay)
     for name, expected in [('Cargo.lock', maps['octosense']['cargo_lock_sha256']),
                            ('runtime-patches.lock.json', spec['runtime_patches_lock_sha256'])]:
         require(hashlib.sha256((SOURCE / name).read_bytes()).hexdigest() == expected, f'官方 {name} 摘要不符。')
@@ -326,7 +331,7 @@ def build(values):
     metadata['bundle_blake3'] = metadata['system_apps']['navigation']['bundle_blake3']
     metadata['host_revision'] = LOCK['octosense']['revision']
     metadata['host_overlay_tree'] = LOCK['maps_overlays']['octosense']['tree']
-    metadata['hub_overlay_tree'] = LOCK['maps_overlays']['app_hub']['tree']
+    metadata['hub_overlay_tree'] = LOCK.get('font_document_overlay', LOCK['maps_overlays']['app_hub'])['tree']
     metadata['host_binary_sha256'] = hashlib.sha256(BINARY.read_bytes()).hexdigest()
     (BUILD / 'build.json').write_bytes(json_bytes(metadata))
     print('当前源码 SHA-256:', metadata['source_sha256'], flush=True)
@@ -351,9 +356,14 @@ def bootstrap():
         command('git', 'fetch', '--depth', '1', 'origin', spec['revision'], cwd=hub)
         command('git', 'checkout', '--detach', 'FETCH_HEAD', cwd=hub)
     for name, source in [('app_hub', hub), ('octosense', SOURCE)]:
-        if output('git', 'write-tree', cwd=source) != LOCK['maps_overlays'][name]['tree']:
-            apply_overlay(source, LOCK['location_overlays'][name])
-        apply_overlay(source, LOCK['maps_overlays'][name])
+        maps = LOCK['maps_overlays'][name]
+        final = LOCK.get('font_document_overlay', maps) if name == 'app_hub' else maps
+        tree = output('git', 'write-tree', cwd=source)
+        if tree != final['tree']:
+            if tree != maps['tree']:
+                apply_overlay(source, LOCK['location_overlays'][name])
+            apply_overlay(source, maps)
+        apply_overlay(source, final)
     command(sys.executable, SOURCE / 'tools/setup.py', '--no-hub', '--cache', ROOT.parent / '.octosense-agentic26')
     build(env_values(required=False))
 
@@ -460,9 +470,12 @@ def packaged_host():
     contents = STATE / 'app/OctoSense Navigation.app/Contents'
     private_dir(contents / 'MacOS')
     info = plistlib.loads((BINARY.parent / 'Info.plist').read_bytes())
-    require(info.get('CFBundleIdentifier') == 'dev.makepad.octosense'
-            and info.get('NSLocationWhenInUseUsageDescription'), '官方宿主缺少定位应用身份或用途说明。')
-    info.update(CFBundleExecutable=BINARY.name, CFBundlePackageType='APPL')
+    require(info.get('NSLocationWhenInUseUsageDescription'), '官方宿主缺少定位用途说明。')
+    # Makepad writes this sidecar into a shared target profile. Another package's
+    # build script can overwrite it without invalidating our cached executable.
+    # The wrapper owns its bundle identity; match the pinned OctoSense config.
+    info.update(CFBundleIdentifier='dev.makepad.octosense', CFBundleName='OctoSense',
+                CFBundleDisplayName='OctoSense', CFBundleExecutable=BINARY.name, CFBundlePackageType='APPL')
     executable = contents / 'MacOS' / BINARY.name
     require(not executable.is_symlink(), '私有宿主可执行文件不能是符号链接。')
     # 使用独立文件，后续 cargo 构建不会覆盖正在运行的宿主。
@@ -530,10 +543,10 @@ def doctor():
     metadata = json.loads((BUILD / 'build.json').read_bytes())
     require(metadata['source_sha256'] == source_digest(bundle_files(values))
             and metadata['host_overlay_tree'] == LOCK['maps_overlays']['octosense']['tree']
-            and metadata['hub_overlay_tree'] == LOCK['maps_overlays']['app_hub']['tree']
+            and metadata['hub_overlay_tree'] == LOCK.get('font_document_overlay', LOCK['maps_overlays']['app_hub'])['tree']
             and metadata['host_binary_sha256'] == hashlib.sha256(BINARY.read_bytes()).hexdigest(),
             '构建记录、应用源码或宿主二进制已改变；运行 make agent-build。')
-    print('固定官方源码、定位与 Maps 窄选点覆盖补丁、运行时补丁、MiniMax-M3 单 provider/无 fallback 配置及 Navigation／固定官方 Maps、Mail 包和选择、凭据边界通过；未调用外部服务。')
+    print('固定官方源码、定位与 Maps 窄选点覆盖补丁、字体文档 gate 覆盖、运行时补丁、MiniMax-M3 单 provider/无 fallback 配置及 Navigation／固定官方 Maps、Mail 包和选择、凭据边界通过；未调用外部服务。')
 
 
 def check():

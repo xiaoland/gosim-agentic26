@@ -1,0 +1,82 @@
+diff --git a/crates/app-hub/src/gate.rs b/crates/app-hub/src/gate.rs
+index d923446..111f243 100644
+--- a/crates/app-hub/src/gate.rs
++++ b/crates/app-hub/src/gate.rs
+@@ -308,7 +308,10 @@ fn list_files(root: &Path) -> Result<Vec<std::path::PathBuf>, String> {
+ /// textual check by necessity; it is a gate, not the runtime's enforcement.
+ fn external_references(root: &Path, manifest: &AppManifest) -> Result<Vec<String>, String> {
+     let mut found = Vec::new();
+-    for file in list_files(root)? {
++    let files = list_files(root)?;
++    let has_font = files.iter().any(|file| file.parent() == Some(Path::new("assets/fonts"))
++        && matches!(file.extension().and_then(|s| s.to_str()), Some("otf" | "ttf")));
++    for file in files {
+         // The two metadata files carry URLs on purpose (a support page, a
+         // privacy policy); nothing loads them. Their own asset paths are
+         // checked by the listing rules.
+@@ -327,6 +330,9 @@ fn external_references(root: &Path, manifest: &AppManifest) -> Result<Vec<String
+             found.extend(script_references(&file, &text, manifest));
+             continue;
+         }
++        // Plain font sidecars contain attribution links, not fetch targets.
++        // Executable/agent files and embedded resource markup stay checked.
++        if has_font && font_document(&file, &text) { continue; }
+         if !matches!(extension.as_str(), "card" | "json" | "l0" | "octoscript" | "txt" | "md") {
+             continue;
+         }
+@@ -341,6 +347,18 @@ fn external_references(root: &Path, manifest: &AppManifest) -> Result<Vec<String
+     Ok(found)
+ }
+ 
++/// Only plain font sidecars qualify. Local {{assets}} examples remain valid.
++fn font_document(file: &Path, text: &str) -> bool {
++    if file.parent() != Some(Path::new("assets/fonts"))
++        || !matches!(file.file_name().and_then(|s| s.to_str()), Some("OFL.txt" | "LICENSE.txt" | "LICENSE.md" | "README.md")) { return false; }
++    let compact: String = text.chars().filter(|c| !c.is_whitespace()).flat_map(char::to_lowercase).collect();
++    if compact.contains('<') || ["![", "url(", "@import"].iter().any(|s| compact.contains(s)) { return false; }
++    !compact.split("http_resource(").skip(1).any(|part| {
++        let call = part.split(')').next().unwrap_or("");
++        ["http://", "https://", "file://", "../"].iter().any(|s| call.contains(s))
++    })
++}
++
+ /// A script app fetches what it declares (ADR 0004): an `https://` address
+ /// may name only a host in the manifest's `network.hosts`, or any public host
+ /// when the app is granted `images` (pictures) or `web` (a web view). Plain
+@@ -447,6 +465,36 @@ mod tests {
+         let _ = std::fs::remove_dir_all(&dir);
+     }
+ 
++    #[test]
++    fn font_sidecar_links_are_documents_but_embedded_resources_still_refuse() {
++        let dir = std::env::temp_dir().join(format!("gate-font-doc-{}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&dir);
++        std::fs::create_dir_all(dir.join("assets/fonts")).unwrap();
++        let manifest = AppManifest::parse(&serde_json::json!({
++            "schema":1,"id":"dev.example.font","version":"1.0.0","name":"Font",
++            "integrity":{"bundle_blake3":""},"capabilities":[]
++        }).to_string()).unwrap();
++        let readme = dir.join("assets/fonts/README.md");
++        std::fs::write(dir.join("assets/fonts/OFL.txt"), "Copyright https://author.example; license http://license.example").unwrap();
++        std::fs::write(&readme, "Source https://source.example\nhttp_resource(\"{{assets}}/assets/fonts/local.otf\")").unwrap();
++        assert!(!external_references(&dir, &manifest).unwrap().is_empty(), "no adjacent font");
++        std::fs::write(dir.join("assets/fonts/local.otf"), b"font fixture").unwrap();
++        assert!(external_references(&dir, &manifest).unwrap().is_empty());
++        std::fs::write(dir.join("main.splash"), "Label{text_style: http_resource(\"https://undeclared.example/font.otf\")}").unwrap();
++        assert!(external_references(&dir, &manifest).unwrap().iter().any(|s| s.contains("undeclared.example")));
++        std::fs::remove_file(dir.join("main.splash")).unwrap();
++        for resource in ["![remote](https://undeclared.example/a.png)", "<IMG SRC=\"https://undeclared.example/a.png\">",
++            "<script src=\"https://undeclared.example/code.js\"></script>", "url (https://undeclared.example/a.png)",
++            "http_resource ( \"https://undeclared.example/font.otf\" )"] {
++            std::fs::write(&readme, resource).unwrap();
++            assert!(!external_references(&dir, &manifest).unwrap().is_empty(), "{resource}");
++        }
++        std::fs::write(&readme, "Source https://source.example").unwrap();
++        std::fs::write(dir.join("README.md"), "Source https://unrelated.example").unwrap();
++        assert!(external_references(&dir, &manifest).unwrap().iter().any(|s| s.contains("unrelated.example")));
++        let _ = std::fs::remove_dir_all(&dir);
++    }
++
+     #[test]
+     fn a_store_bundle_may_not_take_a_system_app_id() {
+         let dir = std::env::temp_dir().join(format!("gate-os-id-{}", std::process::id()));

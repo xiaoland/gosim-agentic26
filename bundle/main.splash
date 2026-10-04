@@ -185,6 +185,8 @@ fn route_recheck(selected, nowTs, deadlineTs, budgetCents){
 }
 
 // 模型只解释意图并决定下一步；地点、费用与可行性来自工具和确定性检查。
+let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource("{{assets}}/assets/fonts/NavigationSans-Regular.otf") asc: 0.0 desc: 0.0}}}
+let NavBold = theme.font_bold{font_family: FontFamily{latin := FontMember{res: http_resource("{{assets}}/assets/fonts/NavigationSans-Regular.otf") asc: 0.0 desc: 0.0}}}
 let ink = #x162e35
 let muted = #x5e747b
 let teal = #x06796f
@@ -300,7 +302,7 @@ fn static_map_params(candidate){
     if paths.len() > 0 { let encoded = [] for path in paths { encoded.push("4,0x345D4A,1,,:" + path) } params += "&paths=" + text_join(encoded, "|").url_encode() }
     return {params: params markers: markers paths: paths omitted: omitted}
 }
-fn map_target_id(){ if picker_open && picker_preview_poi != nil { return "preview:" + picker_preview_poi.id } return viewed_route_id }
+fn map_target_id(){ if picker_open && picker_preview_poi != nil { return "preview:" + picker_preview_poi.id } if interface_map_ref == "destination" && destination_record != nil { return "destination:" + destination_record.id } let route = ui_route(interface_map_ref) if route != nil { return route.id } return viewed_route_id }
 fn map_result_current(token, request, route_id){ return token == run_id && request == map_request_id && route_id == map_target_id() }
 fn accept_map_bytes(bytes, token, request, route_id){
     if !map_result_current(token, request, route_id) { return }
@@ -346,7 +348,7 @@ fn image_is_png(bytes){
     return bytes.is_array() && bytes.len() >= 33 && bytes.len() <= 2097152 && bytes[0] == 137 && bytes[1] == 80 && bytes[2] == 78 && bytes[3] == 71 && bytes[4] == 13 && bytes[5] == 10 && bytes[6] == 26 && bytes[7] == 10
 }
 fn view_route(id){
-    for candidate in candidates { if candidate.id == id { viewed_route_id = id load_route_map(candidate) render_content() return } }
+    for candidate in candidates { if candidate.id == id { viewed_route_id = id load_interface_map() render_content() return } }
 }
 fn confirm_viewed(){
     if phase != "proposal" { show_status("当前结果尚不能确认") return }
@@ -435,6 +437,8 @@ let maps_previous_phase = "idle"
 fn cancel_maps_pick(){
     if pending_maps_pick != nil { let ticket = pending_maps_pick pending_maps_pick = nil try { host.request("maps.cancel", {request_id: ticket.request_id}, fn(r){}) } { } }
 }
+// Maps取消未改变业务对象；新渲染事件使用当前标识，旧已排队事件仍被拒绝。
+fn restore_maps_interface(){ if phase == maps_previous_phase && phase != "running" { interface_run = run_id interface_error = "" } }
 fn maps_place_picker(){
     if user_limits == nil { show_status("请先提供分钟数与预算，再选择目的地") return }
     cancel_maps_pick() cancel_pending_location()
@@ -442,6 +446,7 @@ fn maps_place_picker(){
     if phase == "running" { automatic_seconds += time_now() - loop_started_at }
     if task_timer != nil { stop_timer(task_timer) task_timer = nil }
     run_id += 1 picker_request += 1 picker_open = false phase = "picking"
+    stop_interface()
     let token = run_id let hint = "机场"
     if destination_record != nil { hint = destination_record.name }
     show_status("请在 Maps 搜索并选择目的地；原截止仍计时")
@@ -459,7 +464,7 @@ fn maps_place_picker(){
                 let text = "Maps 未能完成选点；原目标与结果保留，可使用本应用地点搜索"
                 if code == "cancelled" || code == "closed" { text = "Maps 选点已取消；原目标与结果保留" }
                 elif code == "timeout" { text = "Maps 选点超时；原目标与结果保留" }
-                show_status(text) render_content() return
+                restore_maps_interface() show_status(text) render_content() return
             }
             if !route_get(data, "name").is_string() || data.name.trim() == "" || !route_get(data, "lat").is_number() || !route_get(data, "lon").is_number() || data.coordinate_system != "WGS84" || data.source != "octosense.maps.search" || !data.selected_at.is_number() || data.selected_at > time_now() + 30 || time_now() - data.selected_at > 300 || !(abs(data.lat) <= 90 && abs(data.lon) <= 180) {
                 phase = "failed" show_status("Maps 返回的地点来源或坐标无效，未采用") render_content() return
@@ -479,8 +484,8 @@ fn maps_place_picker(){
                 })
             })
         })
-        if !ticket.request_id.is_number() && pending_maps_pick == ticket { pending_maps_pick = nil phase = maps_previous_phase if phase == "running" { phase = "cancelled" } show_status("宿主尚不支持 Maps 选点；可使用本应用地点搜索") }
-    } { pending_maps_pick = nil phase = maps_previous_phase if phase == "running" { phase = "cancelled" } show_status("宿主拒绝 Maps 选点；可使用本应用地点搜索") }
+        if !ticket.request_id.is_number() && pending_maps_pick == ticket { pending_maps_pick = nil phase = maps_previous_phase if phase == "running" { phase = "cancelled" } restore_maps_interface() show_status("宿主尚不支持 Maps 选点；可使用本应用地点搜索") }
+    } { pending_maps_pick = nil phase = maps_previous_phase if phase == "running" { phase = "cancelled" } restore_maps_interface() show_status("宿主拒绝 Maps 选点；可使用本应用地点搜索") }
     render_content()
 }
 
@@ -542,9 +547,9 @@ fn note_value(raw, key){
     for line in raw.split("\n") { if line.search(prefix) == 0 { return line.strip_prefix(prefix).trim() } }
     return ""
 }
-fn show_status(text){ ui.status.set_text(text) }
+fn show_status(text){ runtime_status = text render_content() }
 fn save_audit(){
-    let record = {schema: 1 state: phase received_at: received_at arrive_by: arrive_by steps: step_count protocol_retry_count: protocol_retry_count automatic_seconds: automatic_seconds model: "MiniMax-M3" model_transport: "direct-net-thinking-disabled" model_requests: model_requests decisions: decisions observations: observations}
+    let record = {schema: 1 state: phase received_at: received_at arrive_by: arrive_by steps: step_count protocol_retry_count: protocol_retry_count automatic_seconds: automatic_seconds model: "MiniMax-M3" model_transport: "direct-net-thinking-disabled" model_requests: model_requests decisions: decisions observations: observations interface_requests: interface_requests interface_error: interface_error interface_revision: interface_revision interface: interface_nodes}
     try { fs.write("agent-run.json", record.to_json()) } { show_status("任务记录保存失败，详情仍保留在当前窗口") }
 }
 fn remember_source(path, raw){
@@ -560,7 +565,7 @@ fn sources_current(){
     }
     return position_current(position_record)
 }
-fn render_content(){ ui.content.render() }
+fn render_content(){ ui.content.render() ui.control.render() }
 fn fail_task(text){
     cancel_pending_location()
     if phase == "running" { automatic_seconds += time_now() - loop_started_at }
@@ -569,6 +574,7 @@ fn fail_task(text){
     show_status(text)
     save_audit()
     render_content()
+    request_interface()
 }
 fn observe(tool, data){
     observations.push({tool: tool observed_at: time_now() data: data})
@@ -584,7 +590,7 @@ fn ask_user(question){
     if task_timer != nil { stop_timer(task_timer) task_timer = nil }
     phase = "asking" answer_text = question
     show_status("需要补充一项信息；最初到达期限仍计时")
-    save_audit() render_content()
+    save_audit() render_content() request_interface()
 }
 fn current_task(token){ return token == run_id && phase == "running" }
 fn read_text(path){
@@ -1193,6 +1199,7 @@ fn present_results(reason){
     if task_timer != nil { stop_timer(task_timer) task_timer = nil }
     save_audit()
     render_content()
+    request_interface()
 }
 fn read_source_tool(name, token, done){
     if !once(name) { fail_task("来源工具不能重复读取") return }
@@ -1322,30 +1329,30 @@ fn request_stage(record, stage){
     if stage == "before_net" || stage == "response_entry" || stage == "model_action" { save_audit() }
 }
 fn model_request_timeout(waiting, record, token){
-    if waiting.settled || !current_task(token) { return }
+    if waiting.settled || !request_current(token, record) { return }
     waiting.settled = true
     if route_get(record, "dispatch_returned") == true {
         request_finished(record, "response_timeout")
-        fail_task("等待模型响应超时，请稍后重新查询")
+        request_failed(record, "等待模型响应超时，请稍后重新查询")
     } else {
         request_finished(record, "dispatch_incomplete")
-        fail_task("本机模型请求派发未完成，远端状态未知，请重新查询")
+        request_failed(record, "本机模型请求派发未完成，远端状态未知，请重新查询")
     }
 }
 fn minimax_request(task, input, schema, token, record, done){
     request_stage(record, "entry")
     let config = read_text("private-config.json")
-    if config == nil { request_finished(record, "config_error") fail_task("本机尚未配置模型服务") return }
+    if config == nil { request_finished(record, "config_error") request_failed(record, "本机尚未配置模型服务") return }
     let private = nil
-    try { private = config.parse_json() } { request_finished(record, "config_error") fail_task("本机模型配置无效") return }
+    try { private = config.parse_json() } { request_finished(record, "config_error") request_failed(record, "本机模型配置无效") return }
     request_stage(record, "config_read")
     let key = route_get(private, "minimax_api_key")
     if route_get(private, "minimax_base_url") != "https://api.minimax.cn/v1" || route_get(private, "minimax_model") != "MiniMax-M3" || !key.is_string() || key.trim() == "" || regex("[\r\n]", "").test(key) {
-        request_finished(record, "config_error") fail_task("本机模型配置无效") return
+        request_finished(record, "config_error") request_failed(record, "本机模型配置无效") return
     }
-    let body = {model: "MiniMax-M3" stream: false thinking: {type: "disabled"} max_completion_tokens: 1536
-        messages: [{role: "system" content: task + "请只调用next_action一次提交动作。"} {role: "user" content: input.to_json()}]
-        tools: [{type: "function" function: {name: "next_action" description: "提交一个经过执行器检查的下一步动作" parameters: schema}}] tool_choice: "auto"}
+    let body = {model: "MiniMax-M3" stream: false thinking: {type: "disabled"} max_completion_tokens: if route_get(record, "kind") == "interface" { 2048 } else { 1536 }
+        messages: [{role: "system" content: task + if route_get(record, "kind") == "interface" { "请只调用next_action一次提交组件组合。" } else { "请只调用next_action一次提交动作。" }} {role: "user" content: input.to_json()}]
+        tools: [{type: "function" function: {name: "next_action" description: if route_get(record, "kind") == "interface" { "提交引用当前事实与现有动作的原生组件组合" } else { "提交一个经过执行器检查的下一步动作" } parameters: schema}}] tool_choice: "auto"}
     request_stage(record, "body_object")
     let serialized_body = body.to_json()
     request_stage(record, "body_json")
@@ -1356,7 +1363,7 @@ fn minimax_request(task, input, schema, token, record, done){
     request_stage(record, "before_net")
     // 准备与审计已完成；派发入口重新取得宿主的单入口预算。
     start_timeout(0.01, || {
-        if !current_task(token) || waiting.settled { return }
+        if !request_current(token, record) || waiting.settled { return }
         let timer = start_timeout(40, || model_request_timeout(waiting, record, token))
         record.dispatch_started_at = time_now()
         try {
@@ -1365,41 +1372,41 @@ fn minimax_request(task, input, schema, token, record, done){
             on_response: |res| {
                 if waiting.settled { return }
                 waiting.settled = true stop_timer(timer) record.http_status = res.status_code request_finished(record, "returned") request_stage(record, "response_entry")
-                if !current_task(token) { return }
+                if !request_current(token, record) { return }
                 try {
-                    if res.status_code != 200 { record.state = "http_error" fail_task("模型服务未能完成请求，请稍后重试") return }
+                    if res.status_code != 200 { record.state = "http_error" request_failed(record, "模型服务未能完成请求，请稍后重试") return }
                     let response_text = res.body.to_string()
                     // 宿主每次入口64ms：响应解析与动作执行各用独立timer入口。
                     start_timeout(0.01, || {
-                        if !current_task(token) { return }
+                        if !request_current(token, record) { return }
                         try {
                             let data = response_text.parse_json()
                             request_stage(record, "response_json")
                             start_timeout(0.01, || {
-                                if !current_task(token) { return }
+                                if !request_current(token, record) { return }
                                 try {
                                     let usage = route_get(data, "usage")
                                     record.meta = {prompt_tokens: route_get(usage, "prompt_tokens") completion_tokens: route_get(usage, "completion_tokens") total_tokens: route_get(usage, "total_tokens")}
                                     record.protocol = model_protocol(data)
                                     request_stage(record, "model_action")
                                     done(data)
-                                } { record.state = "invalid_response" fail_task("模型响应格式无效，请重新规划") }
+                                } { record.state = "invalid_response" request_failed(record, "模型响应格式无效，请重新规划") }
                             })
-                        } { record.state = "invalid_response" fail_task("模型响应格式无效，请重新规划") }
+                        } { record.state = "invalid_response" request_failed(record, "模型响应格式无效，请重新规划") }
                     })
-                } { record.state = "invalid_response" fail_task("模型响应格式无效，请重新规划") }
+                } { record.state = "invalid_response" request_failed(record, "模型响应格式无效，请重新规划") }
             }
             on_error: |err| {
                 if waiting.settled { return }
                 waiting.settled = true stop_timer(timer) request_finished(record, "network_error")
-                if current_task(token) { fail_task("模型网络请求失败，请稍后重试") }
+                if request_current(token, record) { request_failed(record, "模型网络请求失败，请稍后重试") }
             }
         }
         record.dispatch_returned = true record.dispatch_returned_at = time_now()
         request_stage(record, "after_net")
     } {
         waiting.settled = true stop_timer(timer) request_finished(record, "request_rejected")
-        if current_task(token) { fail_task("本机模型请求派发未完成，远端状态未知，请重新查询") }
+        if request_current(token, record) { request_failed(record, "本机模型请求派发未完成，远端状态未知，请重新查询") }
         }
     })
 }
@@ -1469,11 +1476,16 @@ fn next_action(token){
                 }
                 request_record.state = "invalid_response" fail_task("模型响应不符合本次动作约定，请重新规划") return
             }
-            dispatch(action, token)
+            // 响应审计与动作派发分开入口，避免同一64ms内重复序列化完整审计。
+            start_timeout(0.01, || {
+                if !current_task(token) { return }
+                try { dispatch(action, token) } { request_record.state = "invalid_response" fail_task("模型动作缺少必要字段") }
+            })
         } { request_record.state = "invalid_response" fail_task("模型响应缺少必要字段") }
     })
 }
 fn start_task(){
+    invalidate_interface()
     cancel_maps_pick()
     let text = ui.sentence.text().trim()
     if text == "" { show_status("请用一句话说明行程、时限与预算") return }
@@ -1489,6 +1501,7 @@ fn start_task(){
     task_timer = start_timeout(180, || { if current_task(token) { fail_task("本次规划达到时间上限") } })
     save_audit()
     render_content()
+    request_interface()
     start_timeout(0.01, || next_action(token))
 }
 fn clarify(){ clarify_current_task(false) }
@@ -1501,6 +1514,7 @@ fn clarify_current_task(preserve_destination){
     if correction && declaration == "unsupported" { show_status("当前任务保持原预算币种；更改币种请提供完整分钟数与预算的新行程指令") return }
     // 普通补充可以纠正地点；旧选择仍作为来源保留，不自动重施为硬约束。
     if !preserve_destination { pending_user_poi = nil }
+    invalidate_interface()
     replies.push(text)
     let updated_limits = explicit_limits(text)
     if updated_limits != nil && !correction { user_limits = updated_limits }
@@ -1527,9 +1541,12 @@ fn clarify_current_task(preserve_destination){
     if remaining <= 0 { fail_task("本次自动规划已用完180秒预算") return }
     task_timer = start_timeout(remaining, || { if current_task(token) { fail_task("本次自动规划达到180秒上限") } })
     render_content()
+    request_interface()
     next_action(run_id)
 }
 fn cancel_task(){
+    cancelled_input = ui.sentence.text().trim()
+    stop_interface()
     cancel_maps_pick()
     cancel_pending_location()
     run_id += 1 phase = "cancelled" picker_request += 1 invalidate_map()
@@ -1552,7 +1569,7 @@ fn confirm_trip(){
         if fs.read("trip.json") != data { show_status("行程保存后核验未通过，请重试") return }
         let back = fs.read("trip.json").parse_json()
         if back.schema != 2 || back.state != "confirmed" || back.selected_route.id != chosen.id { show_status("行程确认状态无法验证") return }
-        saved_trip = back phase = "confirmed" show_status("行程已确认；尚未开始导航") save_audit() render_content()
+        saved_trip = back phase = "confirmed" show_status("行程已确认；尚未开始导航") save_audit() render_content() request_interface()
     } { show_status("行程保存或核验失败，方案仍保留") }
 }
 fn restore_trip(){
@@ -1581,7 +1598,7 @@ fn restore_trip(){
         received_at = trip.received_at arrive_by = trip.arrive_by request_text = trip.request candidates = [chosen] viewed_route_id = chosen.id phase = "confirmed"
         ui.sentence.set_text(trip.request)
         if !route_recheck(chosen, time_now(), arrive_by, constraints.budget_cents).passed || !sources_current() { show_status("已恢复历史行程；数据已过期或需重新检查") } else { show_status("已恢复确认的行程；尚未开始导航") }
-        render_content()
+        render_content() request_interface()
     } { show_status("本地行程无法读取，请重新规划") }
 }
 fn money_text(cents){ if cents == nil { return "费用未知" } return "¥" + (cents / 100) }
@@ -1718,71 +1735,405 @@ fn result_text(){
     if phase == "confirmed" { text += "\n行程已保存，重启可恢复；尚未开始导航。" }
     return text.trim()
 }
-start_timeout(0.05, || restore_trip())
-SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.color: #xf7f7f7
-    sentence := TextInput{width: Fill height: 48 on_return: || query_task() text: "40 分钟内到机场，预算 50，尽量便宜。" empty_text: "描述行程、纠正地点或修改预算"
-        draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: muted}}
-    View{width: Fill height: Fit flow: Right spacing: 10
-        ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "查询" width: 120 height: 36 on_click: || query_task()}
-        ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "终止" width: 90 height: 36 on_click: || cancel_task()}
+// 展示协议与业务动作分离。模型只提交有边界的组件树，不能提交脚本或事实数值。
+let runtime_status = ""
+let interface_nodes = []
+let interface_map_ref = ""
+let cancelled_input = ""
+let interface_revision = 0
+let interface_run = 0
+let interface_inflight = false
+let interface_error = ""
+let interface_validation_code = ""
+let interface_requests = []
+fn request_current(token, record){
+    if route_get(record, "kind") == "interface" { return token == run_id && record.revision == interface_revision && interface_inflight }
+    return current_task(token)
+}
+fn request_failed(record, text){
+    if route_get(record, "kind") == "interface" { interface_inflight = false interface_error = text render_content() save_audit() }
+    else { fail_task(text) }
+}
+fn stop_interface(){ interface_revision += 1 interface_inflight = false render_content() }
+fn invalidate_interface(){ stop_interface() interface_nodes = [] interface_map_ref = "" interface_error = "" }
+fn shell_busy(){ return phase == "running" || phase == "picking" || interface_inflight }
+fn shell_action(){
+    if phase == "running" || phase == "picking" { cancel_task() }
+    elif interface_inflight { stop_interface() interface_error = "界面生成已停止；当前行程仍保留" render_content() }
+    elif phase == "cancelled" && ui.sentence.text().trim() == cancelled_input { resume_task() }
+    else { query_task() }
+}
+fn ui_available_actions(){
+    let actions = []
+    if phase == "proposal" { actions.push("confirm_viewed") }
+    if phase == "cancelled" { actions.push("continue") }
+    if candidates.len() > 0 { actions.push("expand_routes") actions.push("collapse_routes") }
+    if user_limits != nil { actions.push("open_place_picker") actions.push("open_conditions") actions.push("maps_pick") }
+    return actions
+}
+// 模型只选择当前可用原语；事实、对象引用与动作参数由应用兑现。
+fn ui_components(){
+    let result = ["status" "origin" "destination" "limits" "sources" "comparison" "answer" "confirmation"]
+    if candidates.len() > 0 { result.push("routes") }
+    for candidate in candidates { result.push("route:" + candidate.id) }
+    if viewed_route() != nil { result.push("route:viewed") }
+    for action in ui_available_actions() { result.push("action:" + action) }
+    if user_limits != nil { result.push("place_picker") result.push("conditions") }
+    return result
+}
+fn ui_map_targets(){
+    let result = []
+    for candidate in candidates { result.push(candidate.id) }
+    if viewed_route() != nil { result.push("viewed") }
+    if destination_record != nil { result.push("destination") }
+    return result
+}
+fn interface_schema(){
+    return {type: "object" additionalProperties: false required: ["sections"]
+        description: "按sections顺序组合原生界面；每节决定标题、row横向或column纵向、items内容及顺序。最多12节，每节1至12个原语；转换总节点最多36：column为1容器+非空title+items；无title的row为1容器+items；有title的row为2容器+title+items。必须sources；可选根map只插入一张地图并另计1节点。routes是完整可展开候选列表且支持本地查看，无需复制逐条资料；map.target=viewed跟随查看，路线ID固定绑定；section为从0开始的sections下标；单容器含标题与地图最多12项。"
+        properties: {map: {type: "object" additionalProperties: false required: ["target" "section"] properties: {target: {type: "string" enum: ui_map_targets()} section: {type: "integer" minimum: 0 maximum: 11}}} sections: {type: "array" minItems: 1 maxItems: 12 items: {type: "object" additionalProperties: false required: ["flow" "title" "items"] properties: {
+            flow: {type: "string" enum: ["row" "column"]}
+            title: {type: "string" maxLength: 240 description: "本节标题，可为空；事实由items引用原生原语"}
+            items: {type: "array" minItems: 1 maxItems: 12 items: {type: "string" enum: ui_components()}}
+        }}}}}
+}
+fn ui_component_node(component){
+    if component == "row" || component == "column" || component == "group" { return {kind: component children: []} }
+    if component == "text" { return {kind: "text"} }
+    for fact in ["status" "origin" "destination" "limits" "sources" "comparison" "answer" "confirmation"] { if component == fact { return {kind: "text" binding: fact} } }
+    if component == "routes" && candidates.len() > 0 { return {kind: "route" ref: "routes"} }
+    for candidate in candidates {
+        if component == "route:" + candidate.id { return {kind: "route" ref: candidate.id} }
     }
-    status := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 15}}
-    content := ScrollYView{width: Fill height: Fill flow: Down spacing: 8 on_render: || {
-        if condition_open {
-            View{width: Fill height: Fit flow: Down spacing: 8 padding: 12 show_bg: true draw_bg.color: #xffffff
-                Label{width: Fill draw_text.color: ink text: "修改一项条件；改预算不重置截止，改分钟数从首次指令计算"}
-                limit_query := TextInput{draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: muted} width: Fill height: 40 empty_text: "预算改为80 / 改为60分钟" on_return: || submit_condition()}
-                View{flow: Right width: Fill height: Fit spacing: 8
-                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "应用修改" on_click: || submit_condition()}
-                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "返回" on_click: || { condition_open = false render_content() }}
-                }
-            }
-        } elif picker_open {
-            View{width: Fill height: Fit flow: Down spacing: 8 padding: 12 show_bg: true draw_bg.color: #xffffff
-                Label{text: "选择目的地（允许跨城）" draw_text.color: ink}
-                place_query := TextInput{draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: muted} width: Fill height: 40 empty_text: "搜索地点或航站楼" on_return: || search_user_places()}
-                View{flow: Right width: Fill height: Fit spacing: 8
-                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "搜索" on_click: || search_user_places()}
-                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "返回" on_click: || close_destination_picker()}
-                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "在 Maps 中选择" on_click: || maps_place_picker()}
-                }
-                Label{width: Fill text: picker_status draw_text.color: muted}
-                if picker_preview_poi != nil {
-                    if map_bytes != nil { preview := Image{width: Fill height: 160 fit: ImageFit.Smallest} start_timeout(0.01, || { if map_bytes != nil && map_route_id == map_target_id() { ui.preview.load_image_from_data_async(map_bytes) } }) }
-                    Label{width: Fill text: map_status draw_text.color: muted}
-                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "采用此地点" on_click: || choose_user_place(picker_preview_poi.id)}
-                }
-                for poi in picker_pois {
-                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} width: Fill text: poi.name on_click: || preview_user_place(poi.id)}
-                    Label{width: Fill text: "" + poi.address + " · " + route_get(poi.city_metadata, "city") draw_text.color: muted}
-                }
-            }
-        } else {
-            if phase != "idle" {
-                ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} width: Fill text: destination_label() on_click: || open_destination_picker()}
-                if position_record != nil { Label{width: Fill text: "起点：" + route_get(position_record, "name") + "（不支持手选起点）" draw_text.color: muted} }
-                if constraints != nil { Label{width: Fill text: "" + constraints.minutes + " 分钟 · " + money_text(constraints.budget_cents) + " · 原截止 " + beijing_clock(arrive_by) draw_text.color: ink} }
-                if user_limits != nil { ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "修改预算或时限" on_click: || open_conditions()} }
-                if source_label() != "" { Label{width: Fill text: source_label() draw_text.color: muted} }
-                if phase == "cancelled" { ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "继续当前任务" on_click: || resume_task()} }
-                if phase == "asking" { Label{width: Fill text: answer_text draw_text.color: ink} }
-                if phase == "failed" || phase == "cancelled" { Label{width: Fill text: "比较未完成，已有结果不能证明不存在可行路线。" draw_text.color: muted} }
-                if candidates.len() > 0 {
-                    Label{width: Fill text: comparison_summary() draw_text.color: ink}
-                    if map_bytes != nil { preview := Image{width: Fill height: 160 fit: ImageFit.Smallest} start_timeout(0.01, || { let id = map_route_id if map_bytes != nil && id == viewed_route_id { ui.preview.load_image_from_data_async(map_bytes) } }) }
-                    Label{width: Fill text: map_status draw_text.color: muted}
-                    for candidate in representative_routes() {
-                        View{width: Fill height: Fit flow: Down spacing: 5 padding: 10 show_bg: true draw_bg.color: #xffffff
-                            ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} width: Fill text: candidate_text(candidate) on_click: || view_route(candidate.id)}
-                            Label{width: Fill text: candidate_details(candidate) draw_text.color: ink}
-                        }
-                    }
-                    if candidates.len() > representative_routes().len() { ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "查看全部候选" on_click: || { expanded_routes = true render_content() }} }
-                    elif expanded_routes { ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "收起其它候选" on_click: || { expanded_routes = false render_content() }} }
-                    if phase == "proposal" { ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "采用当前查看方案" on_click: || confirm_viewed()} }
-                    if phase == "confirmed" { Label{width: Fill text: "历史已保存行程；以下按当前时间重新检查，尚未开始导航" draw_text.color: ink} }
-                }
+    if viewed_route() != nil {
+        if component == "route:viewed" { return {kind: "route" ref: "viewed"} }
+    }
+    for action in ui_available_actions() { if component == "action:" + action { return {kind: "action" action: action} } }
+    if user_limits != nil && (component == "place_picker" || component == "conditions") { return {kind: component} }
+    return nil
+}
+let interface_validation_detail = nil
+fn ui_plan_issue(issues, code, path, actual, allowed){ issues.push({code: code path: path actual: actual allowed: allowed}) }
+// 单层分节只在接收处转换一次；所有可解析的独立违规一并反馈，不修改模型描述。
+fn interface_tree(plan){
+    let issues = [] let roots = [] let count = 0 let sources = false let map_present = false
+    if !plan.is_object() { ui_plan_issue(issues, "root_type", "$", plan, "object with sections") }
+    else {
+        for key value in plan { if "" + key == "map" { map_present = true } if "" + key != "sections" && "" + key != "map" { ui_plan_issue(issues, "root_field", "$", "" + key, ["sections" "map"]) } }
+        let sections = route_get(plan, "sections") let map = route_get(plan, "map") let map_target = nil let map_section = nil
+        if map_present {
+            count += 1
+            if !map.is_object() { ui_plan_issue(issues, "map_object", "map", map, "object with target/section") }
+            else {
+                for key value in map { if "" + key != "target" && "" + key != "section" { ui_plan_issue(issues, "map_field", "map", "" + key, ["target" "section"]) } }
+                map_target = route_get(map, "target") map_section = route_get(map, "section") let target_valid = false
+                for target in ui_map_targets() { if map_target == target { target_valid = true } }
+                if !target_valid { ui_plan_issue(issues, "map_target", "map.target", map_target, ui_map_targets()) }
+                if !map_section.is_number() || map_section % 1 != 0 || map_section < 0 || !sections.is_array() || map_section >= sections.len() { ui_plan_issue(issues, "map_section", "map.section", map_section, "integer index in current sections array") }
             }
         }
+        if !sections.is_array() { ui_plan_issue(issues, "sections_array", "sections", sections, "array") }
+        else {
+            if sections.len() < 1 || sections.len() > 12 { ui_plan_issue(issues, "section_count", "sections.length", sections.len(), {min: 1 max: 12}) }
+            for index section in sections {
+                let path = "sections[" + index + "]" let id = "s" + index
+                if !section.is_object() { ui_plan_issue(issues, "section_object", path, section, "object") }
+                else {
+                    for key value in section { if !regex("^(flow|title|items)$", "").test("" + key) { ui_plan_issue(issues, "section_field", path, "" + key, ["flow" "title" "items"]) } }
+                    let flow = route_get(section, "flow") let title = route_get(section, "title") let items = route_get(section, "items")
+                    if flow != "row" && flow != "column" { ui_plan_issue(issues, "section_flow", path + ".flow", flow, ["row" "column"]) }
+                    if !title.is_string() || title.len() > 240 { ui_plan_issue(issues, "section_title", path + ".title", title, "string up to240") }
+                    let titled = title.is_string() && title != ""
+                    let content = {id: id kind: if flow == "column" { "group" } else { "row" } children: []}
+                    let root = content count += 1
+                    if titled {
+                        count += 1
+                        let heading = {id: id + "t" kind: "text" text: title}
+                        if flow == "row" { count += 1 content.id = id + "f" root = {id: id kind: "group" children: [heading content]} }
+                        else { content.children.push(heading) }
+                    }
+                    if !items.is_array() { ui_plan_issue(issues, "section_items", path + ".items", items, "array of current selectors") }
+                    else {
+                        count += items.len()
+                        if items.len() < 1 || items.len() > 12 { ui_plan_issue(issues, "item_count", path + ".items.length", items.len(), {min: 1 max: 12}) }
+                        for item_index component in items {
+                            let node = ui_component_node(component)
+                            if node == nil || node.kind == "row" || node.kind == "column" || node.kind == "group" || component == "text" { ui_plan_issue(issues, "component_current", path + ".items[" + item_index + "]", component, ui_components()) }
+                            else {
+                                node.id = id + "i" + item_index content.children.push(node)
+                                if component == "sources" { sources = true }
+                            }
+                        }
+                    }
+                    if map != nil && map_section == index { content.children.push({id: id + "m" kind: "map" ref: map_target}) }
+                    if content.children.len() > 12 { ui_plan_issue(issues, "sibling_count", path, content.children.len(), 12) }
+                    roots.push(root)
+                }
+            }
+            if count > 36 { ui_plan_issue(issues, "node_count", "sections", count, {max: 36 includes: "actual containers/title/items/map"}) }
+            if !sources { ui_plan_issue(issues, "sources_missing", "sections.items", "sources absent", "include sources selector") }
+        }
+    }
+    if issues.len() > 0 { interface_validation_code = issues[0].code interface_validation_detail = {issues: issues} return nil }
+    return roots
+}
+fn ui_route(ref){ if ref == "viewed" { return viewed_route() } for candidate in candidates { if candidate.id == ref { return candidate } } return nil }
+fn ui_confirmation_available(){
+    let candidate = viewed_route()
+    return phase == "proposal" && candidate != nil && sources_current() && route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents")).passed
+}
+fn interface_facts(){
+    let routes = [] let confirmable = [] let source_valid = sources_current()
+    for candidate in candidates { let check = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents")) if phase == "proposal" && source_valid && check.passed { confirmable.push(candidate.id) } routes.push({id: candidate.id kind: candidate.kind price_cents: candidate.price_cents duration_seconds: candidate.duration_seconds passed: check.passed reason: check.reason}) }
+    return {phase: phase status: runtime_status origin_available: position_record != nil destination_available: destination_record != nil limits_available: user_limits != nil source_label: source_label() answer: answer_text
+        comparison: if candidates.len() > 0 { comparison_summary() } else { "" } routes: routes viewed_route_id: viewed_route_id confirm_available: ui_confirmation_available() confirmable_route_ids: confirmable available_actions: ui_available_actions() maps_available: user_limits != nil
+        semantics: "地图失败不影响比较；点路线只查看；确认必须重新校验；不支持手选起点；确认不代表导航；sources必须保留模拟标识。组件组合、顺序与动作由你选择。"}
+}
+fn ui_reject(state, code){ state.error = code return false }
+fn ui_check_nodes(nodes, depth, state){
+    if !nodes.is_array() { return ui_reject(state, "components_or_children_must_be_array") }
+    if nodes.len() > 12 || depth > 3 { return ui_reject(state, "tree_bounds") }
+    for node in nodes {
+        state.count += 1
+        if state.count > 36 || !node.is_object() || !route_get(node, "id").is_string() || !regex("^[a-zA-Z][a-zA-Z0-9_-]{0,31}$", "").test(node.id) || !route_get(node, "kind").is_string() { return ui_reject(state, "node_identity_or_count") }
+        for id in state.ids { if id == node.id { return ui_reject(state, "duplicate_id") } } state.ids.push(node.id)
+        for key value in node { if !regex("^(id|kind|text|binding|ref|action|children)$", "").test("" + key) { return ui_reject(state, "unknown_field") } }
+        let kind = node.kind
+        if route_get(node, "text") != nil && (!node.text.is_string() || node.text.len() > 240) { return ui_reject(state, "node_fields") }
+        if kind != "text" && route_get(node, "binding") != nil { return ui_reject(state, "binding_on_nontext") }
+        if kind != "action" && route_get(node, "action") != nil { return ui_reject(state, "action_on_nonaction") }
+        if kind != "route" && kind != "map" && route_get(node, "ref") != nil { return ui_reject(state, "ref_on_nonroute") }
+        if kind != "text" && route_get(node, "text") != nil { return ui_reject(state, "node_fields") }
+        if kind == "row" || kind == "column" || kind == "group" {
+            if !ui_check_nodes(route_get(node, "children"), depth + 1, state) { return false }
+            if node.children.len() == 0 { return ui_reject(state, "empty_container") }
+            if route_get(node, "ref") != nil || route_get(node, "action") != nil || route_get(node, "binding") != nil { return ui_reject(state, "node_fields") }
+        } else {
+            if route_get(node, "children") != nil { return ui_reject(state, "children_on_leaf") }
+            if kind == "text" {
+                let text = route_get(node, "text") let binding = route_get(node, "binding")
+                if text != nil && (!text.is_string() || text.len() > 240) { return ui_reject(state, "node_fields") }
+                if binding != nil && (!binding.is_string() || !regex("^(status|origin|destination|limits|sources|comparison|answer|confirmation)$", "").test(binding)) { return ui_reject(state, "node_fields") }
+                if text == nil && binding == nil { return ui_reject(state, "node_fields") }
+                if text != nil && binding != nil { return ui_reject(state, "binding_with_text") }
+                if binding == "sources" { state.sources = true }
+            } elif kind == "route" || kind == "map" {
+                let ref = route_get(node, "ref")
+                if !ref.is_string() { return ui_reject(state, "ref_required") }
+                if !(kind == "route" && ref == "routes") && !(kind == "map" && ref == "destination" && destination_record != nil) && ui_route(ref) == nil { return ui_reject(state, "ref_not_current") }
+                if kind == "map" { state.maps += 1 if state.maps > 1 { return ui_reject(state, "map_count") } }
+            } elif kind == "place_picker" || kind == "conditions" {
+                if user_limits == nil { return ui_reject(state, "limits_required") }
+            } elif kind == "action" {
+                if !route_get(node, "action").is_string() || !regex("^(confirm_viewed|continue|expand_routes|collapse_routes|open_place_picker|open_conditions|maps_pick)$", "").test(node.action) { return ui_reject(state, "node_fields") }
+                if node.action == "confirm_viewed" && phase != "proposal" { return ui_reject(state, "node_fields") }
+                if node.action == "continue" && phase != "cancelled" { return ui_reject(state, "node_fields") }
+                if (node.action == "expand_routes" || node.action == "collapse_routes") && candidates.len() == 0 { return ui_reject(state, "node_fields") }
+                if (node.action == "maps_pick" || node.action == "open_conditions" || node.action == "open_place_picker") && user_limits == nil { return ui_reject(state, "node_fields") }
+            } else { return ui_reject(state, "unknown_kind") }
+        }
+    }
+    return true
+}
+fn accept_interface(plan, token, revision){
+    interface_validation_code = ""
+    if token != run_id || revision != interface_revision { interface_validation_code = "stale_request" return false }
+    interface_validation_detail = nil
+    let tree = interface_tree(plan)
+    if tree == nil { return false }
+    let state = {count: 0 ids: [] maps: 0 sources: false error: ""}
+    if !ui_check_nodes(tree, 0, state) { interface_validation_code = state.error interface_validation_detail = {code: state.error path: "nodes" actual: plan allowed: "valid current components"} return false }
+    if state.count == 0 { interface_validation_code = "empty_tree" return false }
+    if !state.sources { interface_validation_code = "sources_missing" interface_validation_detail = {code: "sources_missing" path: "nodes" actual: "sources absent" allowed: "include sources component"} return false }
+    interface_map_ref = interface_map_reference(tree)
+    interface_nodes = tree interface_run = token interface_inflight = false interface_error = ""
+    render_content() save_audit()
+    load_interface_map()
+    return true
+}
+fn interface_map_reference(nodes){
+    for node in nodes { if node.kind == "map" { return node.ref } let children = route_get(node, "children") if children.is_array() { let ref = interface_map_reference(children) if ref != "" { return ref } } }
+    return ""
+}
+fn load_interface_map(){
+    if interface_map_ref == "" { invalidate_map() return }
+    if interface_map_ref == "destination" && destination_record != nil { load_route_map({id: "destination:" + destination_record.id segments: [] requested_origin: nil requested_destination: coord_text(destination_record)}) return }
+    load_route_map(ui_route(interface_map_ref))
+}
+fn interface_response(data){
+    if route_get(data, "model") != "MiniMax-M3" { return nil }
+    let choices = route_get(data, "choices")
+    if !choices.is_array() || choices.len() != 1 || route_get(choices[0], "finish_reason") == "length" { return nil }
+    let calls = route_get(route_get(choices[0], "message"), "tool_calls")
+    if !calls.is_array() || calls.len() != 1 || route_get(calls[0], "type") != "function" { return nil }
+    let function = route_get(calls[0], "function") let arguments = route_get(function, "arguments")
+    if route_get(function, "name") != "next_action" || !arguments.is_string() || arguments.len() > 10000 { return nil }
+    try { return arguments.parse_json() } { return nil }
+}
+fn request_interface(){
+    if phase == "idle" || phase == "picking" { return }
+    interface_revision += 1 let revision = interface_revision let token = run_id
+    interface_inflight = true interface_error = ""
+    generate_interface(token, revision, nil)
+}
+fn generate_interface(token, revision, feedback){
+    if token != run_id || revision != interface_revision || !interface_inflight { return }
+    let record = {kind: "interface" revision: revision correction: feedback != nil started_at: time_now() completed_at: nil wall_seconds: nil input_bytes: 0 transport_stage: "created" state: "pending"}
+    interface_requests.push(record)
+    let input = {request: request_text clarifications: replies facts: interface_facts()}
+    if feedback != nil { input.protocol_error = feedback }
+    record.input_bytes = input.to_json().len()
+    if record.input_bytes > 20000 { request_failed(record, "展示背景超过界面生成边界，当前行程仍保留") return }
+    render_content()
+    minimax_request("为当前Navigation任务组合可操作的原生界面。提交interface_schema约定的组件树；事实仅引用已给对象，来源不能伪装，使用中文。", input, interface_schema(), token, record, fn(data){
+        if !request_current(token, record) { return }
+        let plan = interface_response(data)
+        start_timeout(0.01, || {
+            if !request_current(token, record) { return }
+            if !accept_interface(plan, token, revision) {
+                record.state = "invalid_interface" record.rejected_interface = plan record.validation_code = interface_validation_code record.validation_detail = interface_validation_detail
+                // 组件协议仅纠正一次；不改变业务步数、修订号和原截止。
+                if feedback == nil { save_audit() start_timeout(0.01, || generate_interface(token, revision, {error: record.validation_detail rejected_scene: plan})) }
+                else { request_failed(record, "Agent界面描述无效或引用已过期；当前行程仍保留") }
+            }
+        })
+    })
+}
+fn ui_fact(binding){
+    if binding == "status" { return runtime_status }
+    if binding == "origin" { if position_record == nil { return "起点尚未取得" } return "起点：" + position_record.name + "（不支持手选起点）" }
+    if binding == "destination" { return destination_label() }
+    if binding == "limits" { if user_limits == nil { return "时限与预算待补充" } if arrive_by == 0 { return "" + user_limits.minutes + " 分钟 · " + money_text(user_limits.budget_cents) + "；从首次指令计时，期限待形成" } return "" + user_limits.minutes + " 分钟 · " + money_text(user_limits.budget_cents) + " · 原截止 " + beijing_clock(arrive_by) }
+    if binding == "sources" { return source_label() }
+    if binding == "comparison" { return comparison_summary() }
+    if binding == "answer" { return answer_text }
+    if binding == "confirmation" { if phase == "confirmed" { return "行程已确认并保存；尚未开始导航" } return "点选只查看；采用前重新校验并保存行程，尚未开始导航" }
+    return ""
+}
+fn map_binding_caption(){
+    if picker_open && picker_preview_poi != nil { return "地图绑定预览地点：" + picker_preview_poi.name }
+    if interface_map_ref == "destination" && destination_record != nil { return "地图绑定目的地：" + destination_record.name }
+    let candidate = ui_route(interface_map_ref)
+    if candidate == nil { return "地图引用已过期" }
+    if interface_map_ref == "viewed" { return "地图跟随当前查看：" + kind_text(candidate.kind) + " · " + candidate.id }
+    let caption = "地图固定绑定：" + kind_text(candidate.kind) + " · " + candidate.id
+    if viewed_route_id != candidate.id { caption += "；当前查看另一方案 " + viewed_route_id }
+    return caption
+}
+fn interface_has_kind(nodes, kind){
+    for node in nodes { if node.kind == kind { return true } let children = route_get(node, "children") if children.is_array() && interface_has_kind(children, kind) { return true } }
+    return false
+}
+// 原生原语只兑现已校验的描述；本地查看、展开和图像更新不重新请求模型。
+fn ui_action_label(action){
+    if action == "confirm_viewed" { return "采用当前查看方案" }
+    if action == "continue" { return "继续原行程" }
+    if action == "expand_routes" { return "展开全部候选" }
+    if action == "collapse_routes" { return "收起其它候选" }
+    if action == "open_place_picker" { return "选择目的地" }
+    if action == "open_conditions" { return "调整条件" }
+    if action == "maps_pick" { return "打开 Maps 选目的地" }
+    return "操作不可用"
+}
+fn ui_dispatch_action(action, ref, token){
+    if token != run_id { interface_error = "这项操作属于旧界面，请重新查询" render_content() return }
+    if action == "confirm_viewed" { confirm_viewed() }
+    elif action == "continue" { resume_task() }
+    elif action == "expand_routes" { expanded_routes = true render_content() }
+    elif action == "collapse_routes" { expanded_routes = false render_content() }
+    elif action == "open_place_picker" { open_destination_picker() }
+    elif action == "open_conditions" { open_conditions() }
+    elif action == "maps_pick" { maps_place_picker() }
+}
+fn ui_route_card(candidate, token){
+    return View{width: Fill height: Fit flow: Down spacing: 5 padding: 10 show_bg: true draw_bg.color: #xffffff
+        ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} width: Fill text: candidate_text(candidate) on_click: || { if token == run_id { view_route(candidate.id) } else { interface_error = "路线引用已过期" render_content() } }}
+        Label{draw_text.text_style: NavRegular width: Fill text: candidate_details(candidate) draw_text.color: ink}
+    }
+}
+fn render_interface_node(node, token){
+    if node.kind == "row" { return View{width: Fill height: Fit flow: Right spacing: 8 for child in node.children { render_interface_node(child, token) }} }
+    if node.kind == "column" || node.kind == "group" {
+        return View{width: Fill height: Fit flow: Down spacing: 8 padding: if node.kind == "group" { 12 } else { 0 } show_bg: node.kind == "group" draw_bg.color: #xffffff
+            for child in node.children { render_interface_node(child, token) }
+        }
+    }
+    if node.kind == "text" {
+        let text = route_get(node, "text") if text == nil { text = "" }
+        if route_get(node, "binding") != nil { if text != "" { text += "\n" } text += ui_fact(node.binding) }
+        if route_get(node, "binding") == "status" { return View{width: Fill height: Fit status := Label{draw_text.text_style: NavRegular width: Fill text: text draw_text.color: ink}} }
+        return Label{draw_text.text_style: NavRegular width: Fill text: text draw_text.color: ink}
+    }
+    if node.kind == "route" {
+        if node.ref == "routes" { return View{width: Fill height: Fit flow: Down spacing: 8 for candidate in representative_routes() { ui_route_card(candidate, token) }
+            if candidates.len() > representative_routes().len() { ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: "查看全部候选" on_click: || ui_dispatch_action("expand_routes", "", token)} }
+            elif expanded_routes { ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: "收起其它候选" on_click: || ui_dispatch_action("collapse_routes", "", token)} }
+        } }
+        let candidate = ui_route(node.ref) if candidate != nil { return ui_route_card(candidate, token) } return Label{draw_text.text_style: NavRegular text: "路线引用已过期" draw_text.color: muted}
+    }
+    if node.kind == "map" {
+        return View{width: Fill height: Fit flow: Down spacing: 8
+            if map_bytes != nil && !picker_open { preview := Image{width: Fill height: 160 fit: ImageFit.Smallest} start_timeout(0.01, || { if map_bytes != nil && map_route_id == map_target_id() { ui.preview.load_image_from_data_async(map_bytes) } }) }
+            Label{draw_text.text_style: NavRegular width: Fill text: map_binding_caption() + "\n" + map_status draw_text.color: muted}
+        }
+    }
+    if node.kind == "place_picker" {
+        return View{width: Fill height: Fit flow: Down spacing: 8
+            if !picker_open { ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} width: Fill text: destination_label() on_click: || ui_dispatch_action("open_place_picker", "", token)} }
+            else { View{width: Fill height: Fit flow: Down spacing: 8 padding: 12 show_bg: true draw_bg.color: #xffffff
+                Label{draw_text.text_style: NavRegular text: "选择目的地（允许跨城）" draw_text.color: ink}
+                place_query := TextInput{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_focus: ink color_empty: muted} width: Fill height: 40 empty_text: "搜索地点或航站楼" on_return: || search_user_places()}
+                View{flow: Right width: Fill height: Fit spacing: 8
+                    ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: "搜索" on_click: || search_user_places()}
+                    ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: "返回" on_click: || close_destination_picker()}
+                    ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: "在 Maps 中选择" on_click: || maps_place_picker()}
+                }
+                Label{draw_text.text_style: NavRegular width: Fill text: picker_status draw_text.color: muted}
+                if picker_preview_poi != nil {
+                    if map_bytes != nil { preview := Image{width: Fill height: 160 fit: ImageFit.Smallest} start_timeout(0.01, || { if map_bytes != nil && map_route_id == map_target_id() { ui.preview.load_image_from_data_async(map_bytes) } }) }
+                    Label{draw_text.text_style: NavRegular width: Fill text: map_status draw_text.color: muted}
+                    ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: "采用此地点" on_click: || choose_user_place(picker_preview_poi.id)}
+                }
+                for poi in picker_pois {
+                    ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} width: Fill text: poi.name on_click: || preview_user_place(poi.id)}
+                    Label{draw_text.text_style: NavRegular width: Fill text: "" + poi.address + " · " + route_get(poi.city_metadata, "city") draw_text.color: muted}
+                }
+            } }
+        }
+    }
+    if node.kind == "conditions" {
+        return View{width: Fill height: Fit flow: Down spacing: 8
+            if !condition_open { ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: "修改预算或时限" on_click: || ui_dispatch_action("open_conditions", "", token)} }
+            else { View{width: Fill height: Fit flow: Down spacing: 8 padding: 12 show_bg: true draw_bg.color: #xffffff
+                Label{draw_text.text_style: NavRegular width: Fill draw_text.color: ink text: "修改一项条件；改预算不重置截止，改分钟数从首次指令计算"}
+                limit_query := TextInput{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_focus: ink color_empty: muted} width: Fill height: 40 empty_text: "预算改为80 / 改为60分钟" on_return: || submit_condition()}
+                View{flow: Right width: Fill height: Fit spacing: 8
+                    ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: "应用修改" on_click: || submit_condition()}
+                    ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: "返回" on_click: || { condition_open = false render_content() }}
+                }
+            } }
+        }
+    }
+    if node.kind == "action" {
+        return View{width: Fill height: Fit flow: Down spacing: 8
+            ButtonFlat{enabled: node.action != "confirm_viewed" || ui_confirmation_available() draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: ui_action_label(node.action) on_click: || ui_dispatch_action(node.action, route_get(node, "ref"), token)}
+            if node.action == "open_place_picker" && picker_open && !interface_has_kind(interface_nodes, "place_picker") { render_interface_node({kind: "place_picker"}, token) }
+            if node.action == "open_conditions" && condition_open && !interface_has_kind(interface_nodes, "conditions") { render_interface_node({kind: "conditions"}, token) }
+        }
+    }
+    return Label{draw_text.text_style: NavRegular text: "界面组件无效" draw_text.color: muted}
+}
+start_timeout(0.05, || restore_trip())
+SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.color: #xf7f7f7
+    sentence := TextInput{width: Fill height: 48 on_return: || shell_action() text: "40 分钟内到机场，预算 50，尽量便宜。" empty_text: "描述行程、纠正地点或修改预算"
+        draw_text +: {text_style: NavRegular color: ink color_hover: ink color_focus: ink color_empty: muted}}
+    control := View{width: Fill height: Fit on_render: || {
+        ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: if shell_busy() { "终止" } else { "查询" } width: 120 height: 36 on_click: || shell_action()}
+    }}
+    content := ScrollYView{width: Fill height: Fill flow: Down spacing: 8 on_render: || {
+        if interface_error != "" { Label{draw_text.text_style: NavRegular width: Fill text: "运行时：" + interface_error draw_text.color: ink} }
+        if interface_inflight || (interface_nodes.len() == 0 && runtime_status != "") { status := Label{draw_text.text_style: NavRegular width: Fill text: if interface_inflight { "Agent 正在生成界面；可终止" } else { runtime_status } draw_text.color: ink} }
+        for node in interface_nodes { render_interface_node(node, interface_run) }
     }}
 }
+start_timeout(0.01, || render_content())

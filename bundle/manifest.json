@@ -7,7 +7,7 @@
   ],
   "id": "agentic26-navigation",
   "integrity": {
-    "bundle_blake3": "4be5e403292021a24489d1ce8dc7eabe1b82f1f22e1d9c500df3b2e33c418b71"
+    "bundle_blake3": "7d440ae804fc0d3a482542a942ad9b301b38aceb71dd233e1d1521ef84f40417"
   },
   "name": "Agentic26 Navigation",
   "network": {
@@ -17,5 +17,5 @@
     ]
   },
   "schema": 1,
-  "version": "0.5.0"
+  "version": "0.6.0"
 }

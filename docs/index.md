@@ -8,6 +8,7 @@
 | --- | --- |
 | 产品目标、能力层方向、用户行为与当前范围 | README 的 [产品目标](../README.md#产品目标) 与 [当前能力](../README.md#当前能力) |
 | 组件职责、路线模型、上下文与宿主边界 | [技术草案](architecture.md)；提案尚不等于实现 |
+| Navigation 字体来源、许可与复现 | [字体资源说明](../bundle/assets/fonts/README.md)，完整 [OFL](../bundle/assets/fonts/OFL.txt) |
 | 开发命令、环境与参赛交付 | [README](../README.md)、[工具链说明](../toolchain/README.md) |
 | 赛事、上游能力和方法资料的事实来源 | [资料核对](sources.md) |
 | 已执行验证及其条件、证据和局限 | [初始化验证](verification.md)；后续任务证据先归对应 packet |
@@ -18,7 +19,7 @@
 
 ## 当前任务
 
-[交互优化与应用联动](../tasks/interaction-integration/packet.md)保存当前任务、授权与实际宿主接口核对。[一句话机场 Navigation Agent](../tasks/capability-boundary/packet.md)保留直接服务接入方案、0.1 用户验收及历史运行证据。已完成的[本地开发与调试闭环](../tasks/local-development/packet.md)和[能力层项目初始化](../tasks/initialization/packet.md)保留各自验证与发布依据。此入口不重复 packet 的进度；后续非简单任务建立或接续对应 packet，并维护有效导航。
+[Agent 动态界面与局部字体](../tasks/agent-generated-ui/packet.md)保存当前实施、授权与验收入口。[交互优化与应用联动](../tasks/interaction-integration/packet.md)保留 0.2 实现及实际宿主接口核对。[一句话机场 Navigation Agent](../tasks/capability-boundary/packet.md)保留直接服务接入方案、0.1 用户验收及历史运行证据。已完成的[本地开发与调试闭环](../tasks/local-development/packet.md)和[能力层项目初始化](../tasks/initialization/packet.md)保留各自验证与发布依据。此入口不重复 packet 的进度；后续非简单任务建立或接续对应 packet，并维护有效导航。
 
 ## 采用的 SVC 范围
 

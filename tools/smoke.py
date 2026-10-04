@@ -24,10 +24,12 @@ CHECK = r'''
 let smoke_checks = []
 fn smoke_maps_pick(args, done){ start_timeout(0.01, || done({is_ok: false error: "synthetic-unsupported"})) return 1 }
 fn smoke_maps_cancel(args, done){ done({is_ok: true data: {success: true cancelled: true}}) }
+let smoke_ui_mode = "valid"
 let smoke_reply_mode = "late"
 let smoke_last_model_input = nil
 let smoke_last_system = ""
 fn smoke_batch_start(){ smoke_reply_mode = "batch" start_task() }
+fn smoke_parse_then_stop_start(){ smoke_reply_mode = "parse_then_stop" start_task() }
 fn smoke_identity_start(){ smoke_reply_mode = "wrong_model" start_task() }
 let smoke_protocol_responses = 0
 fn smoke_protocol_once_start(){ smoke_reply_mode = "protocol_once" smoke_protocol_responses = 0 start_task() }
@@ -49,10 +51,27 @@ fn smoke_model_data(action, model){
     return {model: model choices: [{finish_reason: "tool_calls" message: {tool_calls: [{type: "function" function: {name: "next_action" arguments: action.to_json()}}]}}]}
 }
 fn smoke_minimax_request(task, input, schema, token, record, done){
+    if route_get(record, "kind") == "interface" {
+        let components = [{id: "status" kind: "text" binding: "status"} {id: "sources" kind: "text" binding: "sources"}]
+        if user_limits != nil { components.push({id: "places" kind: "place_picker"}) components.push({id: "conditions" kind: "conditions"}) }
+        if candidates.len() > 0 { components.push({id: "summary" kind: "text" binding: "comparison"}) components.push({id: "routes" kind: "route" ref: "routes"}) }
+        if viewed_route() != nil { components.push({id: "map" kind: "map" ref: "viewed"}) }
+        if phase == "proposal" && candidates.len() > 0 { components.push({id: "confirm" kind: "action" action: "confirm_viewed"}) }
+        if smoke_ui_mode == "repeat_bad" || ((smoke_ui_mode == "correct_once" || smoke_ui_mode == "stop_correct") && route_get(record, "correction") != true) { components = {item: components} }
+        if smoke_ui_mode == "stop_correct" && route_get(record, "correction") == true { start_timeout(0.001, || stop_interface()) }
+        start_timeout(0.01, || { if request_current(token, record) { done(smoke_model_data(if components.is_array() { smoke_scene(components) } else { {sections: components} }, "MiniMax-M3")) } }) return
+    }
     smoke_last_model_input = input.to_json().parse_json()
     smoke_last_system = task
     fs.write("smoke-last-input.json", {task: task input: smoke_last_model_input token: token}.to_json())
     fs.write("smoke-send-started.json", {synthetic: true token: token}.to_json())
+    if smoke_reply_mode == "parse_then_stop" {
+        start_timeout(0.1, || {
+            done(smoke_model_data({next_action: "read_notes" reason: "已解析但还未派发的合成动作" parameters: {}}, "MiniMax-M3"))
+            cancel_task()
+            start_timeout(0.03, || fs.write("smoke-dispatch-cancelled.json", {phase: phase decisions: decisions observations: observations trip_written: fs.exists("trip.json")}.to_json()))
+        }) return
+    }
     if smoke_reply_mode == "protocol_once" || smoke_reply_mode == "protocol_repeat" {
         let mode = smoke_reply_mode
         smoke_protocol_responses += 1
@@ -310,10 +329,10 @@ fn smoke_prepare(){
     smoke_check("经济策略重复请求零派发", phase == "failed" && smoke_location_map_calls == calls_before_unsupported)
     phase = "running"
     query_transit({strategy: 6}, run_id)
-    smoke_check("未取得地铁站POI时策略6零派发且原因明确", phase == "failed" && smoke_location_map_calls == calls_before_unsupported && ui.status.text().search("地铁站POI") >= 0)
+    smoke_check("未取得地铁站POI时策略6零派发且原因明确", phase == "failed" && smoke_location_map_calls == calls_before_unsupported && runtime_status.search("地铁站POI") >= 0)
     phase = "running"
     query_transit({strategy: 1.5}, run_id)
-    smoke_check("小数策略参数无效且零派发", phase == "failed" && smoke_location_map_calls == calls_before_unsupported && ui.status.text().search("参数无效") >= 0)
+    smoke_check("小数策略参数无效且零派发", phase == "failed" && smoke_location_map_calls == calls_before_unsupported && runtime_status.search("参数无效") >= 0)
     phase = "running"
     let calls_before_repeat = smoke_location_map_calls
     query_transit({strategy: 3}, run_id)
@@ -403,7 +422,7 @@ fn smoke_prepare(){
     }
     transit_count = 1 transit_completed = 1 driving_done = true driving_completed = true phase = "running"
     dispatch({next_action: "fail" reason: "最短3425秒，整体无法40分钟到达" parameters: {}}, run_id)
-    smoke_check("有效比较后的模型fail成为已查范围内的完成负例", phase == "proposal" && chosen == nil && ui.status.text().search("比较完成") >= 0 && result_text().search("比较未完成") < 0 && result_text().search("整体无法") < 0)
+    smoke_check("有效比较后的模型fail成为已查范围内的完成负例", phase == "proposal" && chosen == nil && runtime_status.search("比较完成") >= 0 && result_text().search("比较未完成") < 0 && result_text().search("整体无法") < 0)
     smoke_check("八候选摘要从数据取3310秒与最低已知5元不冒充可行", comparison_summary().search("8 条候选") >= 0 && comparison_summary().search("3310 秒") >= 0 && comparison_summary().search("¥5") >= 0 && comparison_summary().search("费用未知") >= 0 && comparison_summary().search("不代表存在可用路线") >= 0 && chosen == nil)
     phase = "running" driving_completed = false
     fail_task("合成服务中断")
@@ -478,6 +497,89 @@ fn smoke_prepare(){
 '''
 
 UX_CHECK = r'''
+// 旧树仅作renderer fixture，测试入口转为分节；产品不接收旧协议。
+fn smoke_items(nodes, section){
+ for node in nodes {
+  if route_get(node, "children").is_array() { smoke_items(node.children, section) }
+  else {
+   let component = node.kind
+   if node.kind == "text" {
+    if route_get(node, "binding") != nil { component = node.binding if route_get(node, "text") != nil { section.extra = node.text } }
+    else { section.title += node.text + " " component = nil }
+   }
+   elif node.kind == "route" { component = if node.ref == "routes" { "routes" } else { "route:" + node.ref } }
+   elif node.kind == "map" { section.map_target = node.ref component = nil }
+   elif node.kind == "action" { component = "action:" + node.action }
+   if component != nil { section.items.push(component) }
+  }
+ }
+}
+fn smoke_sections(nodes){
+ let sections = []
+ for node in nodes {
+  let section = {flow: if node.kind == "row" { "row" } else { "column" } title: "" items: []}
+  smoke_items([node], section) sections.push(section)
+ }
+ return sections
+}
+fn smoke_scene(nodes){
+ let sections = smoke_sections(nodes) let plan = {sections: []}
+ for index section in sections {
+  let target = route_get(section, "map_target")
+  if target != nil { plan.map = {target: target section: index} }
+  let clean = {flow: section.flow title: section.title items: section.items}
+  if route_get(section, "extra") != nil { clean.extra = section.extra }
+  if clean.items.len() == 0 && target != nil { clean.items.push("status") }
+  plan.sections.push(clean)
+ }
+ return plan
+}
+fn smoke_accept_tree(plan, token, revision){ return accept_interface(smoke_scene(plan.components), token, revision) }
+
+fn smoke_editor_prepare(explicit){
+    smoke_prepare() stop_interface() picker_open = false condition_open = false
+    let nodes = [{id: "sources" kind: "text" binding: "sources"} {id: "edit" kind: "action" action: "open_conditions"} {id: "pick" kind: "action" action: "open_place_picker"}]
+    if explicit { nodes.push({id: "conditions" kind: "conditions"}) nodes.push({id: "places" kind: "place_picker"}) }
+    smoke_accept_tree({components: nodes}, run_id, interface_revision)
+    let before = {business: model_requests.len() interface: interface_requests.len() arrive_by: arrive_by}
+    fs.write("smoke-editor-before.json", before.to_json())
+    start_timeout(0.6, || fs.write("smoke-editor-after.json", {business: model_requests.len() interface: interface_requests.len() arrive_by: arrive_by}.to_json()))
+}
+fn smoke_editor_actions(){ smoke_editor_prepare(false) }
+fn smoke_editor_explicit(){ smoke_editor_prepare(true) }
+let smoke_catalog_checks = []
+fn smoke_catalog_check(name, passed){ smoke_catalog_checks.push({name: name passed: passed}) }
+fn smoke_catalog_start(){
+ smoke_prepare() stop_interface() smoke_catalog_checks = []
+ let valid = {sections: [{flow: "column" title: "模型标题" items: ["sources" "routes"]} {flow: "row" title: "" items: ["action:confirm_viewed" "action:open_conditions" "action:open_place_picker"]}] map: {target: "viewed" section: 0}}
+ smoke_catalog_check("column单group含标题叶和地图且无标题row直接row", accept_interface(valid, run_id, interface_revision) && interface_nodes[0].children[0].text == "模型标题" && interface_nodes[0].children[1].binding == "sources" && interface_nodes[0].children[3].ref == "viewed" && interface_nodes[1].kind == "row")
+ let preserved = interface_nodes.to_json()
+ let wrong = {sections: [{flow: "grid" title: 42 items: ["route:unknown"] extra: true}] map: {target: "unknown" section: 99}}
+ smoke_catalog_check("一次反馈全部独立地图目标分节字段方向标题引用来源违规", !accept_interface(wrong, run_id, interface_revision) && interface_validation_detail.issues.len() == 7)
+ smoke_catalog_check("错误地图反馈实际目标及节且不替换", interface_validation_detail.issues[0].path == "map.target" && interface_validation_detail.issues[1].actual == 99)
+ smoke_catalog_check("旧graph协议不兼容", !accept_interface({nodes: []}, run_id, interface_revision) && interface_validation_code == "root_field")
+ let oversized = {sections: []}
+ for index in 0..12 { oversized.sections.push({flow: "row" title: "标题" items: ["sources"]}) }
+ smoke_catalog_check("有标题row实际四节点乘12等于48超过36", !accept_interface(oversized, run_id, interface_revision) && interface_validation_detail.issues[0].actual == 48)
+ let siblings = {sections: [{flow: "column" title: "标题" items: []}] map: {target: "viewed" section: 0}}
+ for index in 0..11 { siblings.sections[0].items.push("sources") }
+ smoke_catalog_check("标题与地图也占原生同层上限实际13超过12", !accept_interface(siblings, run_id, interface_revision) && interface_validation_code == "sibling_count" && interface_validation_detail.issues[0].actual == 13)
+ smoke_catalog_check("地图不在叶目录且多图对象不解包", !accept_interface({sections: [{flow: "column" title: "" items: ["sources" "map:viewed"]}] map: [{target: "viewed" section: 0}]}, run_id, interface_revision) && interface_validation_detail.issues.len() == 2)
+ smoke_catalog_check("非array不隐式解包", !accept_interface({sections: [{flow: "column" title: "" items: {item: ["sources"]}}]}, run_id, interface_revision) && interface_validation_code == "section_items")
+ smoke_catalog_check("空原语组拒绝", !accept_interface({sections: [{flow: "column" title: "" items: []}]}, run_id, interface_revision) && interface_validation_code == "item_count")
+ smoke_catalog_check("全部拒绝保留旧树及业务且不保存Trip", interface_nodes.to_json() == preserved && phase == "proposal" && !fs.exists("trip.json"))
+ smoke_catalog_check("显式null地图不按省略悄悄接受", !accept_interface({sections: [{flow: "column" title: "" items: ["sources"]}] map: nil}, run_id, interface_revision) && interface_validation_code == "map_object")
+ smoke_catalog_check("地图节索引必须整数不能舍入", !accept_interface({sections: [{flow: "column" title: "" items: ["sources"]}] map: {target: "viewed" section: 0.5}}, run_id, interface_revision) && interface_validation_code == "map_section")
+ let exact = {sections: []}
+ for index in 0..12 { exact.sections.push({flow: "column" title: "" items: ["sources" "status"]}) }
+ smoke_catalog_check("column不多包flow且36实节点恰好通过", accept_interface(exact, run_id, interface_revision))
+ let titled = {sections: [{flow: "row" title: "操作" items: ["sources" "action:open_conditions"]}]}
+ smoke_catalog_check("有标题row仅必须group标题row三个结构节点", accept_interface(titled, run_id, interface_revision) && interface_nodes[0].children[0].text == "操作" && interface_nodes[0].children[1].kind == "row")
+ phase = "asking" answer_text = "请选目的地"
+ let asking = {sections: [{flow: "column" title: "补充目的地" items: ["answer" "sources" "action:open_place_picker" "action:open_conditions"]}]}
+ smoke_catalog_check("asking事实与编辑动作均可表达", accept_interface(asking, run_id, interface_revision) && interface_nodes[0].children[3].action == "open_place_picker")
+ fs.write("smoke-catalog-checks.json", smoke_catalog_checks.to_json())
+}
 let smoke_ux_checks = []
 fn smoke_ux_check(name, passed){ smoke_ux_checks.push({name: name passed: passed}) }
 fn smoke_ux_start(){
@@ -493,11 +595,55 @@ fn smoke_ux_start(){
     let summary_bytes = observations.to_json().len()
     smoke_ux_check("八策略候选摘要保持输入边界且历史候选仍有来源", summary_bytes < 32768 && observations[before_observations].tool == "smoke-multi-strategy")
     candidates = original_rows
+    stop_interface()
+    let valid_plan = {components: [{id: "group" kind: "group" children: [{id: "status" kind: "text" binding: "status"} {id: "sources" kind: "text" binding: "sources"} {id: "routes" kind: "route" ref: "routes"}]}]}
+    fs.write("smoke-interface-wire.json", {model: "MiniMax-M3" tools: [{type: "function" function: {name: "next_action" parameters: interface_schema()}}] messages: []}.to_json())
+    let business_requests = model_requests.len()
+    smoke_ux_check("模型描述递归组合原语且呈现不启动业务模型", smoke_accept_tree(valid_plan, run_id, interface_revision) && interface_nodes[0].kind == "group" && model_requests.len() == business_requests)
+    let failure_record = {kind: "interface" revision: interface_revision}
+    interface_inflight = true request_failed(failure_record, "合成生成失败")
+    smoke_ux_check("展示生成失败保留原树业务结果及期限并解除busy", phase == "proposal" && candidates.len() == original_rows.len() && interface_nodes[0].id == "s0" && !shell_busy() && interface_error == "合成生成失败")
+    interface_error = ""
+    ui_dispatch_action("confirm_viewed", "", run_id - 1)
+    smoke_ux_check("旧界面确认事件不能执行或写Trip", phase == "proposal" && !fs.exists("trip.json") && interface_error.search("旧界面") >= 0)
+    interface_error = ""
+    let pinned = valid_plan.to_json().parse_json()
+    pinned.components.push({id: "map" kind: "map" ref: candidates[0].id})
+    smoke_accept_tree(pinned, run_id, interface_revision)
+    view_route(candidates[1].id)
+    smoke_ux_check("固定地图A和查看B明确标注绑定且不请求M3", map_target_id() == candidates[0].id && map_binding_caption().search("固定绑定") >= 0 && map_binding_caption().search(candidates[0].id) >= 0 && map_binding_caption().search(candidates[1].id) >= 0 && model_requests.len() == business_requests)
+    pinned.components[pinned.components.len() - 1].ref = "viewed"
+    smoke_accept_tree(pinned, run_id, interface_revision)
+    smoke_ux_check("跟随地图引用与当前卡片一致且不请求M3", map_target_id() == candidates[1].id && map_binding_caption().search("跟随当前查看") >= 0 && model_requests.len() == business_requests)
+    smoke_accept_tree(valid_plan, run_id, interface_revision)
+    let bad_ref = valid_plan.to_json().parse_json() bad_ref.components[0].children[2].ref = "unknown-route"
+    smoke_ux_check("未经查询路线引用不能进入生成界面", !smoke_accept_tree(bad_ref, run_id, interface_revision) && interface_nodes[0].children[2].ref == "routes")
+    let bad_action = valid_plan.to_json().parse_json() bad_action.components.push({id: "execute" kind: "action" action: "execute_shell" text: "非法"})
+    smoke_ux_check("生成界面不能扩大执行器动作权限", !smoke_accept_tree(bad_action, run_id, interface_revision))
+    let mixed_fact = valid_plan.to_json().parse_json() mixed_fact.components[0].children[0].text = "模型旧进度"
+    smoke_ux_check("绑定事实不能附带模型旧文本前缀且有结构诊断", !smoke_accept_tree(mixed_fact, run_id, interface_revision) && interface_validation_code == "section_field")
+    let bad_picker = {sections: [{flow: "column" title: "" items: ["sources" "place_picker"] binding: "destination"}]}
+    smoke_ux_check("真实M3错误字段组合被拒绝且保留绑定事实", !accept_interface(bad_picker, run_id, interface_revision) && interface_validation_code == "section_field")
+    let bad_source = valid_plan.to_json().parse_json() bad_source.components[0].children = [{id: "status" kind: "text" binding: "status"}]
+    smoke_ux_check("生成界面不能省略已有模拟来源标识", !smoke_accept_tree(bad_source, run_id, interface_revision))
+    let overflow = valid_plan.to_json().parse_json() overflow.components = []
+    for index in 0..13 { overflow.components.push({id: "node" + index kind: "text" text: "越界"}) }
+    smoke_ux_check("模型组件数量越界被拒绝而不是裁剪", !smoke_accept_tree(overflow, run_id, interface_revision))
+    let stale_revision = interface_revision let stale_token = run_id
+    let stopped_record = {kind: "interface" revision: interface_revision}
+    interface_inflight = true
+    smoke_ux_check("非running结果阶段仍可独立生成展示且不改期限", request_current(run_id, stopped_record) && phase == "proposal")
+    stop_interface()
+    smoke_ux_check("停止生成使旧UI返回无效而保留业务候选", !request_current(run_id, stopped_record) && !smoke_accept_tree(valid_plan, stale_token, stale_revision) && candidates.len() > 0)
     let original_chosen = chosen.id let original_received = received_at let original_deadline = arrive_by let original_requests = model_requests.len()
     view_route(candidates[1].id)
     smoke_ux_check("点卡片只改查看路线不保存不规划不自动确认", viewed_route_id == candidates[1].id && chosen.id == original_chosen && phase == "proposal" && model_requests.len() == original_requests && !fs.exists("trip.json"))
     view_route(candidates[2].id) confirm_viewed()
-    smoke_ux_check("不合格所选不能确认且保留推荐", phase == "proposal" && chosen.id == original_chosen && !fs.exists("trip.json") && ui.status.text().search("不能确认") >= 0)
+    smoke_ux_check("不合格所选不能确认且保留推荐", phase == "proposal" && chosen.id == original_chosen && !fs.exists("trip.json") && runtime_status.search("不能确认") >= 0)
+    let failed_facts = interface_facts()
+    smoke_ux_check("当前不可行查看对象不误报可确认且合格ID仍完整", !failed_facts.confirm_available && failed_facts.confirmable_route_ids.len() > 0)
+    view_route(candidates[0].id)
+    smoke_ux_check("本地切回合格路线即时更新可确认事实且不调用模型", interface_facts().confirm_available && model_requests.len() == original_requests)
     let original_candidates = candidates
     let overview = static_map_params(candidates[0])
     smoke_ux_check("地图端点可区分起点A终点B且缺几何不补线", overview.params.search("A%3A") >= 0 && overview.params.search("B%3A") >= 0 && overview.paths.len() == 0 && overview.markers.len() == 2)
@@ -555,6 +701,7 @@ fn smoke_ux_start(){
     ui.sentence.set_text("预算改为80")
     let changed = change_one_limit(ui.sentence.text())
     smoke_ux_check("单预算修改重新核验但保留首次截止", changed && user_limits.budget_cents == 8000 && received_at == budget_received && arrive_by == budget_deadline && candidates.len() == 0)
+    smoke_ux_check("预算修改新任务后迟到旧生成UI不能出现且原截止保持", !smoke_accept_tree(valid_plan, stale_token, stale_revision) && interface_nodes.len() == 0 && arrive_by == budget_deadline && shell_busy())
     let resumed_received = received_at let resumed_deadline = arrive_by let resumed_budget = user_limits.budget_cents
     cancel_task() ui.sentence.set_text("预算改为90") query_task()
     smoke_ux_check("停止后查询预算修正不会被继续吞掉", user_limits.budget_cents == 9000 && arrive_by == resumed_deadline && received_at == resumed_received)
@@ -565,8 +712,39 @@ fn smoke_ux_start(){
     let maps_previous_destination = destination_record.id let maps_deadline = arrive_by
     maps_place_picker()
     start_timeout(0.05, || {
-        smoke_ux_check("未支持Maps真实回报原因并保留原结果与期限", phase == "proposal" && destination_record.id == maps_previous_destination && arrive_by == maps_deadline && pending_maps_pick == nil && ui.status.text().search("未能完成选点") >= 0)
-        fs.write("smoke-ux-checks.json", smoke_ux_checks.to_json())
+        smoke_ux_check("未支持Maps真实回报原因并保留原结果与期限", phase == "proposal" && destination_record.id == maps_previous_destination && arrive_by == maps_deadline && pending_maps_pick == nil && runtime_status.search("未能完成选点") >= 0 && interface_run == run_id)
+        smoke_prepare() stop_interface()
+        let race_token = run_id let race_revision = interface_revision let race_deadline = arrive_by
+        let race_record = {kind: "interface" revision: race_revision}
+        let race_plan = {components: [{id: "lateOld" kind: "text" text: "旧响应不能出现"} {id: "sources" kind: "text" binding: "sources"}]}
+        interface_inflight = true
+        start_timeout(0.04, || {
+            let applied = false
+            if request_current(race_token, race_record) { applied = smoke_accept_tree(race_plan, race_token, race_revision) }
+            let old_visible = false for node in interface_nodes { if node.id == "lateOld" { old_visible = true } }
+            smoke_ux_check("延迟旧UI在预算新run及终止后释放不回滚界面或原截止", !applied && !old_visible && arrive_by == race_deadline && phase == "cancelled" && !shell_busy())
+            smoke_prepare() stop_interface() smoke_ui_mode = "correct_once"
+            let correction_start = interface_requests.len() let correction_deadline = arrive_by let correction_steps = step_count
+            request_interface()
+            start_timeout(0.09, || {
+                smoke_ux_check("组件协议单次纠正恢复生成且不占业务步数不改期限", interface_requests.len() == correction_start + 2 && !interface_inflight && interface_error == "" && step_count == correction_steps && arrive_by == correction_deadline)
+                smoke_ui_mode = "repeat_bad" let repeated_start = interface_requests.len()
+                request_interface()
+                start_timeout(0.09, || {
+                    smoke_ux_check("组件协议重复失败有界停止并保留已生成界面", interface_requests.len() == repeated_start + 2 && !shell_busy() && interface_error != "" && interface_nodes.len() > 0 && arrive_by == correction_deadline)
+                    smoke_ui_mode = "stop_correct" let stopped_start = interface_requests.len() let preserved_tree = interface_nodes.to_json()
+                    request_interface()
+                    start_timeout(0.09, || {
+                        smoke_ux_check("终止纠正请求后迟到界面仍拒绝且期限与原树保留", interface_requests.len() == stopped_start + 2 && !shell_busy() && interface_nodes.to_json() == preserved_tree && arrive_by == correction_deadline)
+                        smoke_ui_mode = "valid" fs.write("smoke-ux-checks.json", smoke_ux_checks.to_json())
+                    })
+                })
+            })
+        })
+        ui.sentence.set_text("预算改为80") change_one_limit(ui.sentence.text())
+        smoke_ux_check("预算新run仍可终止且原展示请求无效", shell_busy() && !request_current(race_token, race_record) && arrive_by == race_deadline)
+        shell_action()
+
     })
 }
 '''
@@ -607,11 +785,11 @@ fn smoke_dispatch_start(){
             start_timeout(0.05, || {
                 smoke_dispatch_check("独立入口实际构造HTTP请求并返回且状态仍未知", smoke_dispatch_calls == 1 && pending_record.dispatch_returned == true && pending_record.dispatch_returned_at >= pending_record.dispatch_started_at && pending_record.http_status == nil)
                 model_request_timeout({settled: false}, pending_record, run_id)
-                smoke_dispatch_check("已派发无响应报告等待超时而非本机派发失败", phase == "failed" && pending_record.state == "response_timeout" && ui.status.text().search("等待模型响应超时") >= 0 && pending_record.http_status == nil)
+                smoke_dispatch_check("已派发无响应报告等待超时而非本机派发失败", phase == "failed" && pending_record.state == "response_timeout" && runtime_status.search("等待模型响应超时") >= 0 && pending_record.http_status == nil)
                 phase = "running" run_id += 1
                 let local_record = smoke_dispatch_record() local_record.dispatch_returned = false local_record.http_status = nil
                 model_request_timeout({settled: false}, local_record, run_id)
-                smoke_dispatch_check("未观测派发返回准确报告本机未完成与远端未知", phase == "failed" && local_record.state == "dispatch_incomplete" && ui.status.text().search("本机模型请求派发未完成，远端状态未知") >= 0 && local_record.http_status == nil)
+                smoke_dispatch_check("未观测派发返回准确报告本机未完成与远端未知", phase == "failed" && local_record.state == "dispatch_incomplete" && runtime_status.search("本机模型请求派发未完成，远端状态未知") >= 0 && local_record.http_status == nil)
                 phase = "running" run_id += 1 smoke_dispatch_mode = "returned"
                 let returned_record = smoke_dispatch_record()
                 smoke_product_minimax_request("合成已返回响应", {request: "合成"}, action_schema(), run_id, returned_record, fn(data){ smoke_dispatch_done += 1 })
@@ -789,7 +967,7 @@ def main():
     source_main_sha256 = hashlib.sha256(source.encode()).hexdigest()
     anchor = 'start_timeout(0.05, || restore_trip())'
     assert source.count(anchor) == 1, '应用启动契约已变化；需调整smoke注入入口'
-    assert source.count('    minimax_request(') == 1, '模型发送契约已变化；禁止意外外部请求'
+    assert source.count('    minimax_request(') == 2, '模型发送契约已变化；禁止意外外部请求'
     host_call = 'host.request("location.get", args, done)'
     cancel_call = 'host.request("location.cancel", args, fn(r){})'
     assert source.count(host_call) == 1 and source.count(cancel_call) == 1 and source.count('host.request(') == 4, '定位发送边界已变化；禁止真实宿主请求'
@@ -798,13 +976,17 @@ def main():
     source = source.replace('host.request("maps.pick", {search_hint: hint},', 'smoke_maps_pick({search_hint: hint},')
     source = source.replace('host.request("maps.cancel", {request_id: ticket.request_id},', 'smoke_maps_cancel({request_id: ticket.request_id},')
     source = source.replace('amap_request("/' , 'smoke_amap_request("/')
-    source = source.replace('    minimax_request(', '    smoke_minimax_request(', 1)
+    source = source.replace('    minimax_request(', '    smoke_minimax_request(')
     source = source.replace('fn minimax_request(', 'fn smoke_product_minimax_request(', 1)
     model_send = 'net.http_request(net.HttpRequest{url: "https://api.minimax.cn/v1/chat/completions"'
     assert source.count(model_send) == 1, '模型HTTP发送边界已变化'
     source = source.replace(model_send, 'smoke_model_http_request(net.HttpRequest{url: "https://api.minimax.cn/v1/chat/completions"', 1)
     source = 'use mod.net\n' + source
     source = source.replace(anchor, CHECK + UX_CHECK + DISPATCH_CHECK + LOCATION_CHECK + '\nstart_timeout(0.05, || restore_trip())')
+    if '--catalog-only' in sys.argv:
+        source = source.replace('on_click: || shell_action()', 'on_click: || smoke_catalog_start()', 1)
+    if '--dispatch-race-only' in sys.argv:
+        source = source.replace('let smoke_reply_mode = "late"', 'let smoke_reply_mode = "parse_then_stop"', 1)
     (bundle / 'main.splash').write_text(source)
     jail = work / 'data' / APP_ID
     jail.mkdir(parents=True)
@@ -851,12 +1033,23 @@ def main():
         return [w for w in json.loads(request('/snap'))['s'] if w['ty'] != 'Splash']
 
     def find(predicate):
-        found = [w for w in widgets() if predicate(w)]
+        # 等待刚更新的原生组件实际进入下一帧；持续缺失仍明确失败。
+        for _ in range(20):
+            found = [w for w in widgets() if predicate(w)]
+            if len(found) == 1:
+                return found[0]
+            time.sleep(.05)
+        (work / 'missing-widget-snap.json').write_bytes(request('/snap'))
         assert len(found) == 1, found
-        return found[0]
 
     def status():
-        return find(lambda w: w['i'] == 'status' and w['ty'] == 'Label')['t']
+        for _ in range(30):
+            rows = [w for w in widgets() if w['i'] == 'status' and w['ty'] == 'Label']
+            settled = [w for w in rows if not w.get('t', '').startswith('Agent 正在生成')]
+            if settled:
+                return settled[-1]['t']
+            time.sleep(.03)
+        return rows[-1]['t'] if rows else ''
 
     def button(text):
         widget = None
@@ -880,7 +1073,11 @@ def main():
         request('/click', x=x + width / 2, y=y + height / 2, wait=1)
         request('/key', c='KeyA', cmd=1, wait=1)
         request('/text', text='确认', wait=1)
-        button('查询')
+        for _ in range(30):
+            if any(w['ty'] == 'Button' and w.get('t') == '查询' for w in widgets()):
+                break
+            time.sleep(.03)
+        request('/key', c='ReturnKey', wait=1)
 
     def start():
         nonlocal running
@@ -905,8 +1102,8 @@ def main():
                 time.sleep(.05)
             raise AssertionError('本次card-host未释放端口')
 
-    def inject_callback(function, previous='cancel_task'):
-        widget = find(lambda w: w['ty'] == 'Button' and w.get('t') == '终止')
+    def inject_callback(function, previous='shell_action'):
+        widget = find(lambda w: w['ty'] == 'Button' and w.get('t') in ('查询', '终止'))
         x, y, width, height = widget['r']
         # 仍通过真实按钮回调调用注入入口，避免依赖脚本控制台/非公开宿主接口。
         current = (bundle / 'main.splash').read_text()
@@ -917,8 +1114,30 @@ def main():
 
     try:
         start()
-        assert sorted(w['t'] for w in widgets() if w['ty'] == 'Button') == ['查询', '终止']
+        assert sorted(w['t'] for w in widgets() if w['ty'] == 'Button') == ['查询']
         button('查询')
+        if '--catalog-only' in sys.argv:
+            for _ in range(40):
+                if (jail / 'smoke-catalog-checks.json').is_file(): break
+                time.sleep(.03)
+            catalog = json.loads((jail / 'smoke-catalog-checks.json').read_text())
+            assert all(c['passed'] for c in catalog), [c['name'] for c in catalog if not c['passed']]
+            stop()
+            assert not re.findall(ERROR_PATTERN, '\n'.join(logs), re.M)
+            (work / 'report.json').write_text(json.dumps({'passed': True, 'source_main_sha256': source_main_sha256, 'external_requests': 0, 'catalog_checks': catalog}, ensure_ascii=False, indent=2))
+            print(f'PASS: {len(catalog)}条单一原语selector协议边界；证据: {work}')
+            return
+        if '--dispatch-race-only' in sys.argv:
+            for _ in range(40):
+                if (jail / 'smoke-dispatch-cancelled.json').is_file(): break
+                time.sleep(.03)
+            race = json.loads((jail / 'smoke-dispatch-cancelled.json').read_text())
+            assert race['phase'] == 'cancelled' and race['decisions'] == [] and race['observations'] == [] and not race['trip_written'], race
+            stop()
+            assert not re.findall(ERROR_PATTERN, '\n'.join(logs), re.M)
+            (work / 'report.json').write_text(json.dumps({'passed': True, 'source_main_sha256': source_main_sha256, 'external_requests': 0, 'cancel_after_parse_before_dispatch': race}, ensure_ascii=False, indent=2))
+            print(f'PASS: 已解析动作的新timer在终止后不派发工具；证据: {work}')
+            return
         # 应用现在以timer进入模型请求；必须确认发送已开始才覆盖迟到回调。
         for _ in range(40):
             if (jail / 'smoke-send-started.json').is_file():
@@ -954,7 +1173,14 @@ def main():
         assert identity['retry_count'] == 0 and len(identity['model_requests']) == 1
         assert not (jail / 'trip.json').exists()
         print('PASS: 实际模型回调拒绝非MiniMax-M3响应，不保存Trip（合成响应）')
-        inject_callback('smoke_protocol_once_start', previous='smoke_identity_start')
+        inject_callback('smoke_parse_then_stop_start', previous='smoke_identity_start')
+        for _ in range(40):
+            if (jail / 'smoke-dispatch-cancelled.json').is_file(): break
+            time.sleep(.03)
+        dispatch_cancelled = json.loads((jail / 'smoke-dispatch-cancelled.json').read_text())
+        assert dispatch_cancelled['phase'] == 'cancelled' and dispatch_cancelled['decisions'] == [] and dispatch_cancelled['observations'] == [] and not dispatch_cancelled['trip_written'], dispatch_cancelled
+        print('PASS: 模型动作解析后终止使待派发timer无效，没有执行工具')
+        inject_callback('smoke_protocol_once_start', previous='smoke_parse_then_stop_start')
         for _ in range(40):
             if (jail / 'smoke-protocol_once-done.json').is_file():
                 break
@@ -999,9 +1225,34 @@ def main():
                 break
             time.sleep(.05)
         ux_checks = json.loads((jail / 'smoke-ux-checks.json').read_text())
+        wire = json.loads((jail / 'smoke-interface-wire.json').read_text())
+        def json_depth(value):
+            children = value.values() if isinstance(value, dict) else value if isinstance(value, list) else None
+            return 0 if children is None else 1 + max((json_depth(child) for child in children), default=0)
+        assert json_depth(wire) <= 24
+        assert set(wire['tools'][0]['function']['parameters']['properties']['sections']['items']['properties']) == {'flow','title','items'}
+        assert wire['tools'][0]['function']['parameters']['properties']['sections']['maxItems'] == 12
+        ux_checks.append({'name': '原VM完整工具schema请求序列化为合法JSON且在24层边界内', 'passed': True})
         assert all(item['passed'] for item in ux_checks), [item['name'] for item in ux_checks if not item['passed']]
         print(f'PASS: {len(ux_checks)}条原生卡片、地点、地图字节隔离、条件修正与继续边界')
-        inject_callback('smoke_prepare', previous='smoke_ux_start')
+        previous_editor_entry = 'smoke_ux_start'
+        for explicit, entry in ((False, 'smoke_editor_actions'), (True, 'smoke_editor_explicit')):
+            for name in ('smoke-editor-before.json', 'smoke-editor-after.json'):
+                (jail / name).unlink(missing_ok=True)
+            inject_callback(entry, previous=previous_editor_entry)
+            button('调整条件')
+            assert len([w for w in widgets() if w['ty'] == 'TextInput' and w['i'] == 'limit_query']) == 1
+            button('返回')
+            button('选择目的地')
+            assert len([w for w in widgets() if w['ty'] == 'TextInput' and w['i'] == 'place_query']) == 1
+            for _ in range(40):
+                if (jail / 'smoke-editor-after.json').is_file(): break
+                time.sleep(.03)
+            assert json.loads((jail / 'smoke-editor-before.json').read_text()) == json.loads((jail / 'smoke-editor-after.json').read_text())
+            ux_checks.append({'name': f'实际点编辑动作显示一个原生表单且不调M3（显式组件={explicit}）', 'passed': True})
+            previous_editor_entry = entry
+        print('PASS: 实际点击动作自带原生编辑器；有显式primitive时不重复、不调M3、不改截止')
+        inject_callback('smoke_prepare', previous=previous_editor_entry)
         checks = json.loads((jail / 'smoke-checks.json').read_text())
         assert all(item['passed'] for item in checks), [item['name'] for item in checks if not item['passed']]
         assert '最低估价' in status(), status()
@@ -1018,7 +1269,7 @@ def main():
                 (work / 'source-changed-snap.json').write_bytes(request('/snap'))
                 subprocess.run([*OCTO, 'shot', str(port), str(work / 'source-changed.png')], check=True)
             path.write_text(original)
-            button('终止')  # 隔离副本中此按钮现在调用smoke_prepare，建立新的合成proposal。
+            button('查询')  # 隔离副本中此按钮现在调用smoke_prepare，建立新的合成proposal。
         print('PASS: proposal后日历/笔记/位置分别变化均阻止旧Trip确认')
         confirm()
         assert status() == '行程已确认；尚未开始导航', status()
@@ -1075,7 +1326,7 @@ def main():
     (work / 'combined.log').write_text('\n'.join(logs))
     problems = re.findall(ERROR_PATTERN, '\n'.join(logs), re.M)
     assert not problems, problems
-    (work / 'report.json').write_text(json.dumps({'passed': True, 'synthetic_network_responses': True, 'external_requests': 0, 'source_main_sha256': source_main_sha256, 'checks': checks, 'location_checks': location_checks, 'dispatch_checks': dispatch_checks, 'ux_checks': ux_checks, 'observed_failure_paths': failure_paths, 'parsed_batch_callback': batch, 'wrong_model_callback': identity, 'protocol_correction': corrected, 'repeated_protocol_failure': repeated}, ensure_ascii=False, indent=2))
+    (work / 'report.json').write_text(json.dumps({'passed': True, 'synthetic_network_responses': True, 'external_requests': 0, 'source_main_sha256': source_main_sha256, 'checks': checks, 'location_checks': location_checks, 'dispatch_checks': dispatch_checks, 'ux_checks': ux_checks, 'observed_failure_paths': failure_paths, 'parsed_batch_callback': batch, 'wrong_model_callback': identity, 'cancel_after_parse_before_dispatch': dispatch_cancelled, 'protocol_correction': corrected, 'repeated_protocol_failure': repeated}, ensure_ascii=False, indent=2))
     print(f'PASS: 无网络原生Navigation验收；证据: {work}')
 
 

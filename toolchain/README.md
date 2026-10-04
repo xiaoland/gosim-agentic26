@@ -30,7 +30,7 @@ make agent-dev
 ```
 
 `agent-bootstrap` 默认在仓库同级 `.octosense-agentic26-host-bridge/` 准备固定源码，
-按定位覆盖、Maps 覆盖的顺序验证源码树，再使用官方 `tools/setup.py --no-hub` 应用已锁定的运行时补丁并执行 `cargo build --locked`。
+按定位覆盖、Maps 覆盖、字体文档 gate 覆盖的顺序验证源码树，再使用官方 `tools/setup.py --no-hub` 应用已锁定的运行时补丁并执行 `cargo build --locked`。
 可用 `AGENTIC26_AGENT_TOOLCHAIN` 指定另一隔离目录。启动器拒绝版本或源码摘要不符，
 不会覆盖旧工具链或个人全局模型配置。
 
@@ -84,3 +84,11 @@ localhost 端口。`.local-state/agent/session.json` 记录 PID、端口、进�
 `agent-runtime.lock.json` 的 maps_overlays 记录定位基树、增量 patch 摘要、最终源码树和锁文件。原定位 patch 保持独立；bootstrap 可以接续已应用的完整组合，未知修改仍拒绝。Maps 选择模式修改也属于受校验的覆盖，暂存包须与该固定源码一致，不将其称为未修改的官方 Maps。Navigation、Maps 和 Mail 的实际编译产物都逐文件核对；Mail 保留官方入口不表示 Navigation 获得邮箱账户权限。
 
 Maps 能力的同版本 app-contract 通过本地 path patch 进入实际权限策略，Cargo.lock 同步锁定。`make check` 构建同一组合的 Hub CLI，再调用固定 OctoScript-App-Design-Flow harness 完成摘要、验证与预检；无需扩展旧 card-host 的闭名单。应用脚本仍在 bundle，宿主覆盖仅供可复现本地运行，不能把这组 Rust 代码当作初赛 OctoScript 应用包。
+
+## Navigation 字体资源与文档 gate
+
+Navigation Sans CN 的字体、完整 OFL 原文与复现说明一起放在 `bundle/assets/fonts/`，由既有 `{{assets}}` 本地资源服务加载；不安装系统字体、不修改宿主主题，也不增加外部字体主机。正式 gate 允许 OTF/TTF，整包上限仍为 8 MiB；最终脚本、字体与截图都计入该限制。
+
+固定 Hub 的原检查将字体版权及来源文档里的普通 URL 当作资源加载而拒绝。`agent-runtime.lock.json` 的 font_document_overlay 锁定一条叠加于 Maps Hub tree 的独立补丁，保留原 Maps 与定位补丁字节。该补丁仅识别 `assets/fonts/` 中伴随实际 `.otf`／`.ttf` 的 `OFL.txt`、`LICENSE.txt`、`LICENSE.md` 与 `README.md`。执行脚本与 Agent 文件继续走原检查；带 HTML、Markdown 图片、CSS 资源或远端 `http_resource` 引用的文档也继续受原检查。普通版权／来源链接与本地 `http_resource("{{assets}}/…")` 示例可以保留，未知远端字体资源仍不能绕过清单主机限制。
+
+正式构建将 `MAKEPAD_BUNDLE_NAME=OctoSense` 与 `MAKEPAD_BUNDLE_IDENTIFIER=dev.makepad.octosense` 明确传给官方 Makepad build script。默认身份原本由 target 的父目录推断，在隔离工具链目录中会生成另一个 bundle ID；显式固定构建身份，并在本机 `.app` 包装时按固定 OctoSense 配置设置 bundle ID、名称及 executable。Makepad 的 profile 级 Info.plist 可能被同 target 的另一个包构建覆盖，Cargo 缓存未必重新生成它，因此本机包装不从该共享副产物继承应用身份。用途说明仍来自官方模板，不修改系统定位权限。`make check` 使用同一环境构建 Hub CLI，避免共享 target 的 plist 被另一个默认目录身份覆盖。

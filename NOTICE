@@ -9,3 +9,7 @@ Licensed under the Apache License, Version 2.0.
 The template has been modified into a local trip-constraint draft application.
 The toolchain repositories are downloaded separately, retain their own notices,
 and are identified in toolchain/sources.lock.json.
+
+Navigation 包含基于 Adobe 思源黑体 CN 2.005 修改并更名的 Navigation Sans CN。
+该字体依 SIL Open Font License 1.1 分发，不由本项目的 Apache-2.0 重新许可。
+来源、修改与复现说明见 bundle/assets/fonts/README.md，许可证见同目录 OFL.txt。
