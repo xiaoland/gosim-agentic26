@@ -166,6 +166,11 @@ def apply_overlay(source, spec):
     verify_overlay(source, spec)
 
 
+def final_overlay(name):
+    maps = LOCK['maps_overlays'][name]
+    return LOCK.get('font_document_overlay', maps) if name == 'app_hub' else LOCK.get('ui_widget_overlay', maps)
+
+
 def verify_source():
     require(SOURCE.is_dir(), '请先运行 make agent-bootstrap。')
     spec = LOCK['octosense']
@@ -177,7 +182,11 @@ def verify_source():
     for name, source in [('octosense', SOURCE), ('app_hub', SOURCE / '.sources/app-hub')]:
         require(maps[name]['base_tree'] == overlays[name]['tree'], 'Maps 覆盖补丁的定位基线不符。')
         require(hashlib.sha256((ROOT / overlays[name]['patch']).read_bytes()).hexdigest() == overlays[name]['patch_sha256'], '定位基线补丁摘要不符。')
-        overlay = LOCK.get('font_document_overlay', maps[name]) if name == 'app_hub' else maps[name]
+        overlay = final_overlay(name)
+        if name == 'octosense' and 'ui_widget_overlay' in LOCK:
+            require(overlay['base_tree'] == maps[name]['tree'], '控件接口覆盖补丁的 Maps 基线不符。')
+            require(hashlib.sha256((ROOT / maps[name]['patch']).read_bytes()).hexdigest() == maps[name]['patch_sha256'], 'Maps 基线补丁摘要不符。')
+            require(hashlib.sha256((ROOT / overlay['makepad_patch']).read_bytes()).hexdigest() == overlay['makepad_patch_sha256'], '控件运行时补丁摘要不符。')
         if name == 'app_hub' and 'font_document_overlay' in LOCK:
             require(overlay['base_tree'] == maps[name]['tree'], '字体文档覆盖补丁的 Maps 基线不符。')
             require(hashlib.sha256((ROOT / maps[name]['patch']).read_bytes()).hexdigest() == maps[name]['patch_sha256'], 'Maps 基线补丁摘要不符。')
@@ -330,7 +339,7 @@ def build(values):
         app['bundle_blake3'] = verify_pack(out_dir / f'system-{name}.pack.json', staged_files, app['runtime_id'], values)
     metadata['bundle_blake3'] = metadata['system_apps']['navigation']['bundle_blake3']
     metadata['host_revision'] = LOCK['octosense']['revision']
-    metadata['host_overlay_tree'] = LOCK['maps_overlays']['octosense']['tree']
+    metadata['host_overlay_tree'] = final_overlay('octosense')['tree']
     metadata['hub_overlay_tree'] = LOCK.get('font_document_overlay', LOCK['maps_overlays']['app_hub'])['tree']
     metadata['host_binary_sha256'] = hashlib.sha256(BINARY.read_bytes()).hexdigest()
     (BUILD / 'build.json').write_bytes(json_bytes(metadata))
@@ -357,13 +366,26 @@ def bootstrap():
         command('git', 'checkout', '--detach', 'FETCH_HEAD', cwd=hub)
     for name, source in [('app_hub', hub), ('octosense', SOURCE)]:
         maps = LOCK['maps_overlays'][name]
-        final = LOCK.get('font_document_overlay', maps) if name == 'app_hub' else maps
+        final = final_overlay(name)
         tree = output('git', 'write-tree', cwd=source)
         if tree != final['tree']:
             if tree != maps['tree']:
                 apply_overlay(source, LOCK['location_overlays'][name])
             apply_overlay(source, maps)
         apply_overlay(source, final)
+    # An existing checkout may already have the stock reviewed runtime stack.
+    # Apply just our extra layer; fresh checkouts are reconstructed by setup.
+    if 'ui_widget_overlay' in LOCK:
+        overlay = LOCK['ui_widget_overlay']
+        makepad = SOURCE / '.sources/makepad'
+        if makepad.is_dir() and output('git', 'write-tree', cwd=makepad) == overlay['makepad_base_tree']:
+            require(not output('git', 'diff', '--name-only', cwd=makepad)
+                    and not output('git', 'ls-files', '--others', '--exclude-standard', cwd=makepad),
+                    '保留未知 Makepad 修改；请选择新的工具链目录。')
+            patch = ROOT / overlay['makepad_patch']
+            require(hashlib.sha256(patch.read_bytes()).hexdigest() == overlay['makepad_patch_sha256'], '控件运行时补丁摘要不符。')
+            command('git', 'apply', '--check', patch, cwd=makepad)
+            command('git', 'apply', '--index', patch, cwd=makepad)
     command(sys.executable, SOURCE / 'tools/setup.py', '--no-hub', '--cache', ROOT.parent / '.octosense-agentic26')
     build(env_values(required=False))
 
@@ -375,7 +397,14 @@ def jail_path():
     return HOME_DIR / 'apps' / (app_id if app_id.startswith('os.') else 'os.' + app_id)
 
 
+def materialize_skills(bundle, jail):
+    # Skills have one authoritative body in the bundle; fs reads its runtime copy.
+    for source in (bundle / 'assets/skills').glob('*.md'):
+        write_private(jail / 'skills' / source.name, source.read_bytes())
+
+
 def configure(values, jail, location_mode="live"):
+    materialize_skills(STAGE, jail)
     now = datetime.now(timezone.utc).isoformat()
     profile = {'id': '_main', 'name': 'Navigation MiniMax-M3', 'enabled': True, 'created_at': now, 'updated_at': now,
                'config': {'llm': {'primary': {'family_id': 'minimax-cn', 'model_id': LOCK['model'],
@@ -542,11 +571,11 @@ def doctor():
     require((BUILD / 'build.json').is_file(), '缺少当前构建记录；运行 make agent-build。')
     metadata = json.loads((BUILD / 'build.json').read_bytes())
     require(metadata['source_sha256'] == source_digest(bundle_files(values))
-            and metadata['host_overlay_tree'] == LOCK['maps_overlays']['octosense']['tree']
+            and metadata['host_overlay_tree'] == final_overlay('octosense')['tree']
             and metadata['hub_overlay_tree'] == LOCK.get('font_document_overlay', LOCK['maps_overlays']['app_hub'])['tree']
             and metadata['host_binary_sha256'] == hashlib.sha256(BINARY.read_bytes()).hexdigest(),
             '构建记录、应用源码或宿主二进制已改变；运行 make agent-build。')
-    print('固定官方源码、定位与 Maps 窄选点覆盖补丁、字体文档 gate 覆盖、运行时补丁、MiniMax-M3 单 provider/无 fallback 配置及 Navigation／固定官方 Maps、Mail 包和选择、凭据边界通过；未调用外部服务。')
+    print('固定官方源码、定位与 Maps 窄选点覆盖补丁、字体文档 gate 覆盖、控件查找与只读几何接口、运行时补丁、MiniMax-M3 单 provider/无 fallback 配置及 Navigation／固定官方 Maps、Mail 包和选择、凭据边界通过；未调用外部服务。')
 
 
 def check():

@@ -1,0 +1,261 @@
+diff --git a/widgets/src/widget.rs b/widgets/src/widget.rs
+index b6e496a..abbc64e 100644
+--- a/widgets/src/widget.rs
++++ b/widgets/src/widget.rs
+@@ -805,6 +805,20 @@ pub fn script_call(
+             vm.with_cx_mut(|cx| self.set_text(cx, &text));
+             return ScriptAsyncResult::Return(NIL);
+         }
++        // Geometry is read only and comes from this widget's painted, clipped area.
++        // A not-yet-drawn widget has no usable viewport: report nil, not a guessed size.
++        if method == live_id!(rect) {
++            let area = self.area();
++            let rect = vm.with_cx(|cx| area.is_valid(cx).then(|| area.clipped_rect(cx)));
++            let Some(rect) = rect else { return ScriptAsyncResult::Return(NIL); };
++            let object = vm.bx.heap.new_object();
++            let trap = vm.bx.threads.cur().trap.pass();
++            for (key, value) in [(id!(x), rect.pos.x), (id!(y), rect.pos.y),
++                                 (id!(width), rect.size.x), (id!(height), rect.size.y)] {
++                vm.bx.heap.set_value(object, key.into(), value.into(), trap);
++            }
++            return ScriptAsyncResult::Return(object.into());
++        }
+         if method == live_id!(text) {
+             let text = self.text();
+             return ScriptAsyncResult::Return(vm.bx.heap.new_string_from_str(&text));
+diff --git a/widgets/src/widget_async.rs b/widgets/src/widget_async.rs
+index d2f22ab..550c707 100644
+--- a/widgets/src/widget_async.rs
++++ b/widgets/src/widget_async.rs
+@@ -1233,20 +1233,8 @@ fn widget_to_script_call(
+     }
+ }
+ 
+-fn register_ui_handle(vm: &mut ScriptVm) {
+-    let vm_id = vm.cx_mut().global::<CxWidgetAsync>().current_vm_id;
+-    if vm
+-        .cx_mut()
+-        .global::<CxWidgetAsync>()
+-        .ui_handle_types
+-        .contains_key(&vm_id)
+-    {
+-        return;
+-    }
+-
+-    let ui_type = vm.new_handle_type(id_lut!(ui));
+-
+-    vm.set_handle_getter(ui_type, move |vm, pself, prop| {
++// Static and string-based lookup share the same isolate-root confinement.
++fn lookup_ui_handle(vm: &mut ScriptVm, pself: ScriptValue, prop: LiveId) -> ScriptValue {
+         if let Some(handle) = pself.as_handle() {
+             let Some(target_uid) = vm
+                 .downcast_handle_gc::<CxWidgetHandleGc>(handle)
+@@ -1320,19 +1308,37 @@ fn register_ui_handle(vm: &mut ScriptVm) {
+                 return script_err_not_found!(vm.trap(), "widget has no uid");
+             }
+ 
+-            let gc = CxWidgetHandleGc {
+-                handle: ScriptHandle::ZERO,
+-                uid: child_uid,
+-            };
+-            let child_handle = vm.bx.heap.new_handle(ui_type, Box::new(gc));
+-            return child_handle.into();
++            return vm.build_ui_handle_for_uid(child_uid);
+         }
+ 
+         script_err_not_found!(vm.trap(), "invalid ui handle")
+-    });
++}
++
++fn register_ui_handle(vm: &mut ScriptVm) {
++    let vm_id = vm.cx_mut().global::<CxWidgetAsync>().current_vm_id;
++    if vm
++        .cx_mut()
++        .global::<CxWidgetAsync>()
++        .ui_handle_types
++        .contains_key(&vm_id)
++    {
++        return;
++    }
++
++    let ui_type = vm.new_handle_type(id_lut!(ui));
++
++    vm.set_handle_getter(ui_type, lookup_ui_handle);
+ 
+     vm.set_handle_call(ui_type, move |vm, args, method| {
+         let pself = script_value!(vm, args.self);
++        if method == live_id!(find) {
++            let trap = vm.bx.threads.cur().trap.pass();
++            let value = vm.bx.heap.vec_value(args, 0, trap);
++            let Some(name) = vm.bx.heap.cast_to_owned_string(value, "finding a named widget") else {
++                return script_err_not_found!(vm.trap(), "ui.find expects a widget name string");
++            };
++            return lookup_ui_handle(vm, pself, LiveId::from_str(&name));
++        }
+         if let Some(handle) = pself.as_handle() {
+             let Some(uid) = vm
+                 .downcast_handle_gc::<CxWidgetHandleGc>(handle)
+@@ -1341,6 +1347,29 @@ fn register_ui_handle(vm: &mut ScriptVm) {
+                 return script_err_not_found!(vm.trap(), "invalid ui handle");
+             };
+ 
++            if method == live_id!(child) {
++                let trap = vm.bx.threads.cur().trap.pass();
++                let value = vm.bx.heap.vec_value(args, 0, trap);
++                let Some(index) = value.as_number().filter(|n| n.is_finite() && *n >= 0.0 && n.fract() == 0.0 && *n <= usize::MAX as f64) else {
++                    return script_err_not_found!(vm.trap(), "ui.child expects a non-negative integer index");
++                };
++                // Handles are minted by this VM's confined lookup. Descending its
++                // direct children cannot widen the current script-root boundary.
++                let child = vm.with_cx(|cx| {
++                    let parent = cx.widget_tree().widget(uid);
++                    let mut ordinal = 0usize;
++                    let mut child = WidgetRef::empty();
++                    parent.try_children(&mut |_, widget| {
++                        if ordinal == index as usize { child = widget.clone(); }
++                        ordinal += 1;
++                    });
++                    child
++                });
++                if child.is_empty() {
++                    return script_err_not_found!(vm.trap(), "widget child index is out of range or its instance is gone");
++                }
++                return vm.build_ui_handle_for_uid(child.widget_uid());
++            }
+             let ui_handle = vm.build_ui_handle_for_uid(uid);
+             force_set_map_value(&mut vm.bx.heap, args, id!(ui), ui_handle);
+ 
+diff --git a/platform/script/src/vm.rs b/platform/script/src/vm.rs
+index c579c89..f11b4ac 100644
+--- a/platform/script/src/vm.rs
++++ b/platform/script/src/vm.rs
+@@ -772,7 +772,7 @@ pub fn drain_errors(&mut self) {
+                     if let Some(sink) = self.bx.captured_errors.as_mut() {
+                         sink.push(formatted);
+                     }
+-                    continue;
++                    if !self.bx.captured_errors_log { continue; }
+                 }
+                 if self.bx.silence_errors {
+                     continue;
+@@ -1750,6 +1750,8 @@ pub struct ScriptVmBase {
+     /// eval/call, take after, to feed diagnostics back to a host (e.g. an AI
+     /// agent editing the script live).
+     pub captured_errors: Option<Vec<String>>,
++    /// Also retain the ordinary diagnostic log while a host collects errors.
++    pub captured_errors_log: bool,
+     /// Uncaught errors, including those suppressed from logs.
+     pub uncaught_error_count: usize,
+     pub run_budget: Option<ScriptRunBudget>,
+@@ -1774,6 +1776,7 @@ pub fn empty() -> Self {
+             silence_errors: false,
+             allow_debug_output: true,
+             captured_errors: None,
++            captured_errors_log: false,
+             uncaught_error_count: 0,
+             run_budget: None,
+             last_limit_consumed: 0,
+@@ -1812,6 +1815,7 @@ pub fn new() -> Self {
+             silence_errors: false,
+             allow_debug_output: true,
+             captured_errors: None,
++            captured_errors_log: false,
+             uncaught_error_count: 0,
+             run_budget: None,
+             last_limit_consumed: 0,
+diff --git a/widgets/src/splash.rs b/widgets/src/splash.rs
+index ac1ebe8..bff2ebf 100644
+--- a/widgets/src/splash.rs
++++ b/widgets/src/splash.rs
+@@ -4,7 +4,7 @@
+     view::View,
+     widget::*,
+     widget_async::{
+-        CxSplashVmExt, SplashVmId, MAIN_SPLASH_VM_ID, WIDGET_SCRIPT_INSTRUCTION_LIMIT,
++        CxSplashVmExt, SplashVmId, ScriptAsyncResult, MAIN_SPLASH_VM_ID, WIDGET_SCRIPT_INSTRUCTION_LIMIT,
+     },
+     widget_tree::CxWidgetExt,
+ };
+@@ -95,6 +95,11 @@ pub struct Splash {
+     /// script by hand.
+     #[rust]
+     debug_name: String,
++    /// Raw diagnostics from this instance's current body and its isolate callbacks.
++    #[rust]
++    execution_diagnostics: Vec<String>,
++    #[rust]
++    capture_execution_diagnostics: bool,
+     #[rust]
+     stylesheet: Option<crate::desktop_style::StyleSheet>,
+     #[rust]
+@@ -256,6 +261,7 @@ fn eval_styled_body_with_apply(&mut self, cx: &mut Cx, preserve: bool, apply: &A
+         };
+ 
+         let vm_id = self.vm_id;
++        let capture_diagnostics = self.capture_execution_diagnostics;
+         let sheet=self.stylesheet.clone();
+         self.style_pending=false;
+         // A style reapply runs the body's top-level statements again: only the
+@@ -314,7 +320,10 @@ fn eval_styled_body_with_apply(&mut self, cx: &mut Cx, preserve: bool, apply: &A
+                 }
+             });
+             let evaluation_errors = vm.take_errors();
+-            vm.bx.captured_errors = previous_errors;
++            vm.bx.captured_errors = if capture_diagnostics {
++                Some(evaluation_errors.clone())
++            } else { previous_errors };
++            vm.bx.captured_errors_log = capture_diagnostics;
+             if preserve {
+                 restore_modules(vm, saved);
+             }
+@@ -337,9 +346,7 @@ fn eval_styled_body_with_apply(&mut self, cx: &mut Cx, preserve: bool, apply: &A
+                 // its previous view — or nothing at all. Say so: a silent
+                 // blank widget is the hardest bug in this file to find.
+                 if value.is_err() {
+-                    for e in evaluation_errors {
+-                        log!("splash: {}", e);
+-                    }
++                    for e in evaluation_errors { log!("splash: {}", e); }
+                 } else {
+                     log!("splash: script body evaluated to nothing (no root view)");
+                 }
+@@ -620,8 +627,30 @@ fn drop(&mut self) {
+     }
+ }
+ 
++impl Splash {
++    fn collect_execution_diagnostics(&mut self, cx: &mut Cx) {
++        if !self.capture_execution_diagnostics || self.vm_id == MAIN_SPLASH_VM_ID { return; }
++        let errors = cx.with_script_vm_id(self.vm_id, |vm| {
++            vm.drain_errors();
++            let errors = vm.take_errors();
++            vm.bx.captured_errors = Some(Vec::new());
++            vm.bx.captured_errors_log = true;
++            errors
++        });
++        self.execution_diagnostics.extend(errors);
++    }
++}
++
+ impl Widget for Splash {
++    fn script_call(&mut self, vm: &mut ScriptVm, method: LiveId, _args: ScriptValue) -> ScriptAsyncResult {
++        if method != id!(diagnostics) { return ScriptAsyncResult::MethodNotFound; }
++        self.capture_execution_diagnostics = true;
++        vm.with_cx_mut(|cx| self.collect_execution_diagnostics(cx));
++        let text = self.execution_diagnostics.join("\n");
++        ScriptAsyncResult::Return(vm.bx.heap.new_string_from_str(&text))
++    }
+     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
++        self.collect_execution_diagnostics(cx);
+         if self.allow_net {
+             if let Event::NetworkResponses(responses) = event {
+                 crate::widget_async::handle_splash_network_responses(cx, self.vm_id, responses);
+@@ -682,6 +711,8 @@ fn text(&self) -> String {
+     }
+ 
+     fn set_text(&mut self, cx: &mut Cx, v: &str) {
++        self.collect_execution_diagnostics(cx);
++        self.execution_diagnostics.clear();
+         if self.body.as_ref() != v {
+             self.body.set(v);
+             // Empty body = tear down the app: reclaim its isolate (stopping its

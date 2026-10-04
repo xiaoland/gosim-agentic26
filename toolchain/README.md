@@ -30,7 +30,7 @@ make agent-dev
 ```
 
 `agent-bootstrap` 默认在仓库同级 `.octosense-agentic26-host-bridge/` 准备固定源码，
-按定位覆盖、Maps 覆盖、字体文档 gate 覆盖的顺序验证源码树，再使用官方 `tools/setup.py --no-hub` 应用已锁定的运行时补丁并执行 `cargo build --locked`。
+按定位覆盖、Maps 覆盖、控件接口覆盖及字体文档 gate 覆盖的顺序验证源码树，再使用官方 `tools/setup.py --no-hub` 应用已锁定的运行时补丁并执行 `cargo build --locked`。
 可用 `AGENTIC26_AGENT_TOOLCHAIN` 指定另一隔离目录。启动器拒绝版本或源码摘要不符，
 不会覆盖旧工具链或个人全局模型配置。
 
@@ -53,8 +53,8 @@ M3 地址只允许已实测的 `api.minimax.cn` HTTPS 主机、默认或 443 端
 不接受 URL 账号、查询参数或片段；启动器将尾斜杠和显式 443 规范为上述 Base URL。
 应用请求固定 `/v1/chat/completions`，用 Authorization header 传 key，并关闭 thinking；
 应用清单仍须声明这个 HTTPS 主机，应用本身也须核对私有配置中的模型和地址。
-两家 key 对被授权应用运行时可见；应用承担动作 schema 校验、调用预算与错误脱敏，
-不能依赖 `model.complete` 的预算或输出检查覆盖直接请求。
+两家 key 对应用运行时可见，费用、时效及路线是否满足用户条件由应用计算。
+本轮撤掉应用自行添加的输入／输出、工具步数、自动阶段和纠正次数上限，直接生成 Splash 界面；宿主和服务端的实际能力及错误以运行结果为准。
 应用必须捕获网络派发失败并使用通用错误，不能把 key、含 key 的 URL、原始网络错误、
 响应全文或私有配置写入 UI、日志、模型输入、Trip 或验收记录。
 
@@ -97,4 +97,19 @@ Navigation Sans CN 的字体、完整 OFL 原文与复现说明一起放在 `bun
 
 后续交互与演示验收默认使用锁定 macOS 宿主的 Android 手机模式。`make agent-dev` 启动后，在顶栏当前样式菜单 `OctoSense ▾` 选择 `Android`；官方 smoke 也通过 `⌘Space`、输入 `android`、回车切换，日志 `wm: desktop style android applied` 确认应用。当前启动器没有 Android 模式参数，macOS 默认样式仍为 OctoSense，因此每次验收启动后明确切换，不依赖未经确认的持久化。
 
-该模式提供手机视口与应用布局，用于检查滚动、按钮、输入和 Maps 往返；报告记录“macOS 宿主 Android 模式”。它与 Android 设备／APK 的系统权限及服务运行验证分别记录。此前桌面模式截图保留为历史证据，后续截图使用 Android 模式。本轮只核对入口并记录验收偏好，没有启动或切换实例。
+该模式提供手机视口与应用布局，用于检查滚动、按钮、输入和 Maps 往返；报告记录“macOS 宿主 Android 模式”。它与 Android 设备／APK 的系统权限及服务运行验证分别记录。此前桌面模式截图保留为历史证据，后续截图使用 Android 模式。具体运行证据与源码版本在对应任务包单独记录。
+
+
+## 原生控件的动态查找与几何
+
+正式运行时增加 `ui.find(name)`，字符串名称与既有 `ui.name` 共用同一查找实现。隔离 Splash 的查找始终限于自己的脚本根，不搜索其它应用；它不接受路径、源码或业务调用。`ui[name]` 在锁定解释器中不能索引 UI handle，不能将它当作动态查找 API。`ui.child(index)` 返回当前控件的直接原生子实例句柄，index 从 0 开始；不递归搜索，也不依赖动态名字。低层树可以按自己的准确渲染顺序递归取句柄，再将业务 node.id 绑定在应用对象中。多 Image 可通过这种独立实例句柄调用既有 `load_image_from_data_async(bytes)`，每次加载仍须由应用核验实例、目标与 generation；销毁后不得按旧名称给新图加载旧响应。
+
+`ui.find(name).rect()` 或实例句柄的 `rect()` 只读该控件最近一帧已经绘制、裁剪后的 `{x,y,width,height}`，坐标为宿主布局点。未绘制时返回 `nil`，应用需等待绘制再读取，重新布局或图片尺寸改变后也要在新帧读取，不能猜测窗口尺寸。模型得到的是应用选择提供的几何事实，不获得窗口操作或其它应用句柄。这个接口不执行生成代码、不引入嵌套 VM 或沙箱。
+
+`agent-runtime.lock.json` 的 `ui_widget_overlay` 叠加于原 Maps 宿主 tree；其中包含一条追加于官方 Makepad patch 栈的独立 `makepad-ui-find-rect.patch`。wrapper 校验原定位、Maps、字体文档 patch 字节、新覆盖的基树、固定最终 runtime tree 与 patch 摘要。已有官方 runtime 栈可接续应用新层；新 checkout 由官方 setup 按完整锁定顺序重建。未知源码修改仍拒绝，不改其它应用权限或主题。
+
+## 生成界面的执行诊断
+
+`Splash.diagnostics()` 首次调用启用该实例后续诊断，因此父应用在 `set_text` 前调用它。接口返回最近收集的原始诊断字符串，重复读取不消耗；每次 `set_text` 清除旧稿诊断，空串停止子实例，捕获启用状态留给下一稿。已被日志排出的历史错误无法补回。只有调用接口的实例启用捕获，其日志通过 tee 保留；其它 Splash 默认行为不变。
+
+脚本 `try` 主动捕获的异常仍按原 VM 清除，接口不会恢复它。原生 `on_render` 的属性类型错误已有实际证据返回 `expected DrawQuad, got object`，使应用能向 M3 反馈具体执行结果。这个接口属于现有 UI overlay，补丁摘要和 runtime tree 由锁文件管理，不是读取全局日志或新增界面校验。

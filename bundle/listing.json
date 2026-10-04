@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "subtitle": "理解出行约束，动态呈现路线与操作",
-  "description": "Navigation 开发原型：MiniMax M3 查询设备位置与高德机场候选，提出可纠正的目的地推断。由 MiniMax M3 组合原生文字、路线、地图与操作组件，固定入口为输入框和查询／终止按钮。支持地点搜索预览、独立 Maps 搜索结果选点返回、路线卡片比较与高德静态地图概览。费用、耗时、未知项和未通过原因分别展示；查看方案不会确认，确认后重新校验并保存读回 Trip。修改单个条件、纠正地点或停止后继续保留原始起算时间。默认使用授权的 macOS CoreLocation，模拟来源明确标注；费用与耗时为估计。Maps 联动需要本仓库锁定的宿主覆盖，尚未接通真实日历或提醒。",
+  "subtitle": "自主组合工具与界面的出行 Agent",
+  "description": "Navigation 开发原型：MiniMax M3 在同一工具调用会话中自主读取背景、查询定位与交通、比较候选并生成 Splash／Makepad 界面。原生语言与业务接口资料以 skills 按需读取，应用不预设任务步骤。固定入口为输入框和查询／终止按钮，界面通过本地消息调用业务操作，多幅高德静态地图分别加载。确定性工具计算费用、耗时、路线端点和未满足条件；用户原始期限与预算保留。默认使用授权的 macOS CoreLocation，模拟来源明确标注；费用与耗时为估计。Maps 与动态执行诊断需要锁定的宿主覆盖，尚未接通真实日历或提醒。",
   "category": "travel",
   "keywords": [
     "navigation",
@@ -21,7 +21,7 @@
     "support": "https://example.com/support",
     "privacy_policy_url": "https://example.com/privacy"
   },
-  "release_notes": "内容区改为 M3 生成的原生组件组合，保留本地即时交互与事实、路线引用、动作校验。展示请求可终止，旧响应不覆盖新任务；Navigation 单独使用中文无衬线字体，宿主和其它应用主题保持原样。发布者信息仍为占位。",
+  "release_notes": "迁移为单一工具调用 harness＋按需 skills，由 M3 自主编排背景读取、交通查询与界面生成。渲染工具返回实际 Splash 执行诊断供 Agent 处理；开发期不添加界面结构、安全或人为输出限制。Navigation 默认使用应用局部无衬线字体，交互验收采用 macOS 宿主 Android 手机模式。发布者信息仍为占位。",
   "age_rating": "all",
   "license": "Apache-2.0"
 }
