@@ -92,3 +92,9 @@ Navigation Sans CN 的字体、完整 OFL 原文与复现说明一起放在 `bun
 固定 Hub 的原检查将字体版权及来源文档里的普通 URL 当作资源加载而拒绝。`agent-runtime.lock.json` 的 font_document_overlay 锁定一条叠加于 Maps Hub tree 的独立补丁，保留原 Maps 与定位补丁字节。该补丁仅识别 `assets/fonts/` 中伴随实际 `.otf`／`.ttf` 的 `OFL.txt`、`LICENSE.txt`、`LICENSE.md` 与 `README.md`。执行脚本与 Agent 文件继续走原检查；带 HTML、Markdown 图片、CSS 资源或远端 `http_resource` 引用的文档也继续受原检查。普通版权／来源链接与本地 `http_resource("{{assets}}/…")` 示例可以保留，未知远端字体资源仍不能绕过清单主机限制。
 
 正式构建将 `MAKEPAD_BUNDLE_NAME=OctoSense` 与 `MAKEPAD_BUNDLE_IDENTIFIER=dev.makepad.octosense` 明确传给官方 Makepad build script。默认身份原本由 target 的父目录推断，在隔离工具链目录中会生成另一个 bundle ID；显式固定构建身份，并在本机 `.app` 包装时按固定 OctoSense 配置设置 bundle ID、名称及 executable。Makepad 的 profile 级 Info.plist 可能被同 target 的另一个包构建覆盖，Cargo 缓存未必重新生成它，因此本机包装不从该共享副产物继承应用身份。用途说明仍来自官方模板，不修改系统定位权限。`make check` 使用同一环境构建 Hub CLI，避免共享 target 的 plist 被另一个默认目录身份覆盖。
+
+## Android 模式验收
+
+后续交互与演示验收默认使用锁定 macOS 宿主的 Android 手机模式。`make agent-dev` 启动后，在顶栏当前样式菜单 `OctoSense ▾` 选择 `Android`；官方 smoke 也通过 `⌘Space`、输入 `android`、回车切换，日志 `wm: desktop style android applied` 确认应用。当前启动器没有 Android 模式参数，macOS 默认样式仍为 OctoSense，因此每次验收启动后明确切换，不依赖未经确认的持久化。
+
+该模式提供手机视口与应用布局，用于检查滚动、按钮、输入和 Maps 往返；报告记录“macOS 宿主 Android 模式”。它与 Android 设备／APK 的系统权限及服务运行验证分别记录。此前桌面模式截图保留为历史证据，后续截图使用 Android 模式。本轮只核对入口并记录验收偏好，没有启动或切换实例。
