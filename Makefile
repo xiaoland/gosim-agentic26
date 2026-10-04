@@ -20,7 +20,7 @@ logs:
 tree:
 	curl --fail --silent --show-error --max-time 5 'http://127.0.0.1:$(PORT)/d'
 check:
-	$(OCTO) check bundle
+	$(AGENT) check
 shot:
 	$(OCTO) shot $(PORT) "$(SHOT)"
 smoke:
@@ -52,3 +52,7 @@ agent-shot:
 .PHONY: agent-demo
 agent-demo:
 	$(AGENT) dev --demo
+
+.PHONY: agent-build
+agent-build:
+	$(AGENT) build

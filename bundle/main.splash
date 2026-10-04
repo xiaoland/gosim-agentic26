@@ -217,11 +217,321 @@ let candidates = []
 let chosen = nil
 let used_tools = []
 let transit_count = 0
+let transit_completed = 0
 let driving_done = false
+let driving_completed = false
 let task_timer = nil
 let progress_text = ""
 let answer_text = ""
 let saved_trip = nil
+
+let viewed_route_id = ""
+let expanded_routes = false
+let expanded_reason = ""
+let picker_open = false
+let condition_open = false
+let picker_pois = []
+let picker_preview_poi = nil
+let picker_status = ""
+let picker_request = 0
+let pending_user_poi = nil
+let map_request_id = 0
+let map_route_id = ""
+let map_bytes = nil
+let map_status = ""
+let map_detail = ""
+fn invalidate_map(){ map_request_id += 1 map_bytes = nil map_route_id = "" map_status = "" }
+fn viewed_route(){ for candidate in candidates { if candidate.id == viewed_route_id { return candidate } } return nil }
+fn representative_routes(){
+    if expanded_routes { return candidates }
+    let result = [] let fastest = nil let cheapest = nil
+    for candidate in candidates {
+        if candidate.duration_seconds != nil && (fastest == nil || candidate.duration_seconds < fastest.duration_seconds) { fastest = candidate }
+        if candidate.price_cents != nil && (cheapest == nil || candidate.price_cents < cheapest.price_cents) { cheapest = candidate }
+    }
+    if chosen != nil { result.push(chosen) }
+    for candidate in [fastest cheapest viewed_route()] {
+        if candidate != nil { let exists = false for item in result { if item.id == candidate.id { exists = true } } if !exists { result.push(candidate) } }
+    }
+    return result
+}
+fn map_polyline(value){
+    if value.is_object() { value = route_get(value, "polyline") }
+    if !value.is_string() { return nil }
+    let points = value.split(";")
+    if value.len() > 12000 { return nil }
+    if points.len() < 2 || points.len() > 128 { return nil }
+    for point in points { if route_point(point) == nil { return nil } }
+    return value
+}
+fn map_geometry(candidate){
+    let paths = [] let omitted = 0
+    if candidate != nil && candidate.segments.is_array() {
+        for index segment in candidate.segments {
+            if index >= 20 || paths.len() >= 4 { omitted += 1 } else {
+            let geometries = []
+            let direct = map_polyline(route_get(segment, "polyline"))
+            if direct != nil { geometries.push(direct) } elif route_get(segment, "polyline") != nil { omitted += 1 }
+            for part in [route_get(segment, "walking") route_get(segment, "taxi")] {
+                let line = map_polyline(route_get(part, "polyline"))
+                if line != nil { geometries.push(line) } elif route_get(part, "polyline") != nil { omitted += 1 }
+                let steps = route_get(part, "steps")
+                if steps.is_array() { for index step in steps { if index < 32 && geometries.len() < 4 { let line = map_polyline(route_get(step, "polyline")) if line != nil { geometries.push(line) } elif route_get(step, "polyline") != nil { omitted += 1 } } else { omitted += 1 } } }
+            }
+            let lines = route_get(route_get(segment, "bus"), "buslines")
+            if lines.is_array() { for index line in lines { if index < 8 && geometries.len() < 4 { let polyline = map_polyline(route_get(line, "polyline")) if polyline != nil { geometries.push(polyline) } elif route_get(line, "polyline") != nil { omitted += 1 } } else { omitted += 1 } } }
+            if geometries.len() == 0 { omitted += 1 }
+            for line in geometries { if paths.len() < 4 { paths.push(line) } else { omitted += 1 } }
+            }
+        }
+    }
+    return {paths: paths omitted: omitted}
+}
+fn text_join(values, separator){ let text = "" for value in values { if text != "" { text += separator } text += value } return text }
+fn static_map_params(candidate){
+    let markers = [] let paths = [] let omitted = 0
+    if candidate != nil {
+        if route_point(route_get(candidate, "requested_origin")) != nil { markers.push(route_get(candidate, "requested_origin")) }
+        if route_point(route_get(candidate, "requested_destination")) != nil { markers.push(route_get(candidate, "requested_destination")) }
+        let geometry = map_geometry(candidate) paths = geometry.paths omitted = geometry.omitted
+    }
+    let params = "&size=640*320&scale=1"
+    if markers.len() > 0 { let styles = [] for index marker in markers { let label = "A" if index == 1 || route_point(route_get(candidate, "requested_origin")) == nil { label = "B" } styles.push("mid,0x345D4A," + label + ":" + marker) } params += "&markers=" + text_join(styles, "|").url_encode() }
+    if paths.len() > 0 { let encoded = [] for path in paths { encoded.push("4,0x345D4A,1,,:" + path) } params += "&paths=" + text_join(encoded, "|").url_encode() }
+    return {params: params markers: markers paths: paths omitted: omitted}
+}
+fn map_target_id(){ if picker_open && picker_preview_poi != nil { return "preview:" + picker_preview_poi.id } return viewed_route_id }
+fn map_result_current(token, request, route_id){ return token == run_id && request == map_request_id && route_id == map_target_id() }
+fn accept_map_bytes(bytes, token, request, route_id){
+    if !map_result_current(token, request, route_id) { return }
+    map_bytes = bytes map_route_id = route_id
+    map_status = "高德地图 © AutoNavi；" + map_detail
+    render_content()
+    start_timeout(0.01, || { if map_result_current(token, request, route_id) { ui.preview.load_image_from_data_async(bytes) } })
+}
+fn load_route_map(candidate){
+    invalidate_map()
+    if candidate == nil { return }
+    let geometry = static_map_params(candidate)
+    if geometry.markers.len() == 0 { map_status = "没有可核实的端点，地图暂不可用" render_content() return }
+    map_detail = "所选路线概览；缺失几何不补直线"
+    map_status = "地图加载中"
+    if geometry.paths.len() == 0 { map_detail = "仅端点预览：供应商未提供可展示几何" }
+    elif geometry.omitted > 0 { map_detail = "部分概览：仅展示可用的前四段以内几何，另有未展示或缺失分段；起点A/终点B" }
+    let config = read_text("private-config.json")
+    let private = nil
+    try { if config != nil { private = config.parse_json() } } { map_status = "地图暂不可用：本机配置无效" return }
+    let key = route_get(private, "amap_api_key")
+    if !key.is_string() || key.trim() == "" { map_status = "地图暂不可用：尚未配置地图服务" return }
+    let token = run_id let request = map_request_id let route_id = candidate.id
+    let waiting = {settled: false}
+    start_timeout(0.01, || {
+        if !map_result_current(token, request, route_id) { return }
+        let timer = start_timeout(20, || { if !waiting.settled && map_result_current(token, request, route_id) { waiting.settled = true map_status = "地图加载超时；仍可比较方案" render_content() } })
+        try {
+            net.http_request(net.HttpRequest{url: "https://restapi.amap.com/v3/staticmap?key=" + key.url_encode() + geometry.params method: net.HttpMethod.GET max_response_body_bytes: 2097152}) do net.HttpEvents{
+                on_response: |res| {
+                    if waiting.settled { return } waiting.settled = true stop_timer(timer)
+                    if !map_result_current(token, request, route_id) { return }
+                    if res.status_code != 200 || !image_is_png(res.body) { map_status = "地图暂不可用；仍可比较方案" render_content() return }
+                    let bytes = res.body
+                    start_timeout(0.01, || accept_map_bytes(bytes, token, request, route_id))
+                }
+                on_error: |err| { waiting.settled = true stop_timer(timer) if map_result_current(token, request, route_id) { map_status = "地图网络失败；仍可比较方案" render_content() } }
+            }
+        } { waiting.settled = true stop_timer(timer) if map_result_current(token, request, route_id) { map_status = "地图派发未完成；仍可比较方案" render_content() } }
+    })
+}
+fn image_is_png(bytes){
+    return bytes.is_array() && bytes.len() >= 33 && bytes.len() <= 2097152 && bytes[0] == 137 && bytes[1] == 80 && bytes[2] == 78 && bytes[3] == 71 && bytes[4] == 13 && bytes[5] == 10 && bytes[6] == 26 && bytes[7] == 10
+}
+fn view_route(id){
+    for candidate in candidates { if candidate.id == id { viewed_route_id = id load_route_map(candidate) render_content() return } }
+}
+fn confirm_viewed(){
+    if phase != "proposal" { show_status("当前结果尚不能确认") return }
+    let candidate = viewed_route()
+    if candidate == nil { show_status("请先选择一个方案") return }
+    let check = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
+    if !check.passed { show_status("所选方案不能确认：" + check.reason) return }
+    chosen = candidate confirm_trip()
+}
+fn open_destination_picker(){
+    if user_limits == nil { show_status("请先提供行程分钟数与预算") return }
+    picker_preview_poi = nil
+    picker_open = true picker_status = "输入地点名称；可跨城市搜索" picker_pois = []
+    render_content()
+}
+fn close_destination_picker(){ picker_request += 1 picker_open = false picker_preview_poi = nil load_route_map(viewed_route()) render_content() }
+fn preview_user_place(id){
+    for poi in picker_pois { if poi.id == id { picker_preview_poi = poi load_route_map({id: "preview:" + poi.id segments: [] requested_origin: nil requested_destination: coord_text(poi)}) render_content() return } }
+}
+fn search_user_places(){
+    let query = ui.place_query.text().trim()
+    if query == "" { picker_status = "请输入地点名称" render_content() return }
+    picker_request += 1 let request = picker_request let token = run_id let at = time_now()
+    picker_status = "正在搜索地点" picker_pois = [] picker_preview_poi = nil invalidate_map() render_content()
+    let city = ""
+    if position_record != nil && route_get(position_record, "citycode").is_string() { city = "&city=" + position_record.citycode.url_encode() }
+    // 用户搜索独立于自动机场发现，不删150104业务校验。
+    user_place_request("&citylimit=false&extensions=all&children=1&offset=8" + city + "&keywords=" + query.url_encode(), token, request, fn(data){
+        if token != run_id || request != picker_request || !picker_open { return }
+        picker_pois = parse_pois(data, at, false)
+        picker_status = "请选择名称、地址与城市吻合的地点；航站楼入口仍需核验"
+        if picker_pois.len() == 0 { picker_status = "没有可核实的地点结果，请换关键词" }
+        render_content()
+    })
+}
+fn user_place_request(params, token, request, done){
+    let config = read_text("private-config.json") let private = nil
+    try { if config != nil { private = config.parse_json() } } { picker_status = "本机地图配置无效" render_content() return }
+    let key = route_get(private, "amap_api_key")
+    if !key.is_string() || key.trim() == "" { picker_status = "本机尚未配置地点服务" render_content() return }
+    let settled = {value: false}
+    let timer = start_timeout(20, || { if !settled.value && token == run_id && request == picker_request { settled.value = true picker_status = "地点搜索超时，当前行程未改动" render_content() } })
+    start_timeout(0.01, || {
+        if token != run_id || request != picker_request { stop_timer(timer) return }
+        try {
+            net.http_request(net.HttpRequest{url: "https://restapi.amap.com/v3/place/text?key=" + key.url_encode() + params method: net.HttpMethod.GET max_response_body_bytes: 1048576}) do net.HttpEvents{
+                on_response: |res| {
+                    if settled.value { return } settled.value = true stop_timer(timer)
+                    if token != run_id || request != picker_request { return }
+                    try { if res.status_code != 200 { picker_status = "地点服务暂不可用" render_content() return } let data = res.body.to_string().parse_json() if "" + route_get(data, "status") != "1" { picker_status = "地点服务未返回有效结果" render_content() return } done(data) } { picker_status = "地点响应无效，行程未改动" render_content() }
+                }
+                on_error: |err| { settled.value = true stop_timer(timer) if token == run_id && request == picker_request { picker_status = "地点网络失败，行程未改动" render_content() } }
+            }
+        } { settled.value = true stop_timer(timer) picker_status = "地点请求未能启动" render_content() }
+    })
+}
+fn apply_user_poi(){
+    if pending_user_poi == nil || !position_current(position_record) { return false }
+    let poi = pending_user_poi
+    if time_now() - poi.queried_at > 300 || poi.city_metadata == nil || position_record.currency != "CNY" { fail_task("所选地点已过期或城市计价依据不足，请重新选择") return true }
+    if user_limits == nil || (user_limits.currency != "unspecified" && user_limits.currency != "CNY") { fail_task("用户预算币种尚未核实为人民币") return true }
+    poi.city = poi.city_metadata.city poi.citycode = poi.city_metadata.citycode poi.adcode = poi.city_metadata.adcode poi.currency = poi.city_metadata.currency
+    if !(user_limits.minutes >= 1 && user_limits.minutes <= (9007199254740991 - received_at) / 60 && user_limits.minutes % 1 == 0 && user_limits.budget_cents >= 0 && user_limits.budget_cents <= 9007199254740991 && user_limits.budget_cents % 1 == 0) { fail_task("用户时限或预算无法安全计算，未采用地点") return true }
+    arrive_by = received_at + user_limits.minutes * 60
+    constraints = {airport: poi.name terminal: "" minutes: user_limits.minutes budget_cents: user_limits.budget_cents currency: "CNY" destination_query: poi.name objective: "min_cost" departure_scene: "" inferred: false user_selected: true currency_basis: "起终点城市已核实，按高德人民币计价"}
+    destination_record = poi
+    source_records.push({id: "user-poi-" + poi.id kind: "user" source: "user-poi-selection" mock: false raw: poi.to_json() source_time: "" + poi.queried_at read_at: time_now()})
+    observe("user_destination", {destination: poi source: "explicit-user-poi" terminal_verified: false})
+    return true
+}
+fn choose_user_place(id){
+    for poi in picker_pois {
+        if poi.id == id {
+            if poi.city_metadata == nil || time_now() - poi.queried_at > 300 { picker_status = "地点城市或时效不足，请重新搜索" render_content() return }
+            pending_user_poi = poi picker_open = false picker_request += 1
+            ui.sentence.set_text("目的地改为" + poi.name)
+            if phase == "running" { cancel_task() }
+            if phase == "cancelled" { phase = "failed" }
+            clarify_current_task(true) return
+        }
+    }
+    picker_status = "选择不属于本次地点搜索，行程未改动" render_content()
+}
+let pending_maps_pick = nil
+let maps_previous_phase = "idle"
+fn cancel_maps_pick(){
+    if pending_maps_pick != nil { let ticket = pending_maps_pick pending_maps_pick = nil try { host.request("maps.cancel", {request_id: ticket.request_id}, fn(r){}) } { } }
+}
+fn maps_place_picker(){
+    if user_limits == nil { show_status("请先提供分钟数与预算，再选择目的地") return }
+    cancel_maps_pick() cancel_pending_location()
+    maps_previous_phase = phase
+    if phase == "running" { automatic_seconds += time_now() - loop_started_at }
+    if task_timer != nil { stop_timer(task_timer) task_timer = nil }
+    run_id += 1 picker_request += 1 picker_open = false phase = "picking"
+    let token = run_id let hint = "机场"
+    if destination_record != nil { hint = destination_record.name }
+    show_status("请在 Maps 搜索并选择目的地；原截止仍计时")
+    let ticket = {request_id: nil token: token}
+    pending_maps_pick = ticket
+    try {
+        ticket.request_id = host.request("maps.pick", {search_hint: hint}, fn(r){
+            if pending_maps_pick != ticket || token != run_id { return }
+            pending_maps_pick = nil
+            let data = route_get(r, "data")
+            if route_get(r, "is_ok") != true || route_get(data, "success") != true || route_get(data, "request_id") != ticket.request_id {
+                phase = maps_previous_phase
+                if phase == "running" { phase = "cancelled" }
+                let code = route_get(data, "code")
+                let text = "Maps 未能完成选点；原目标与结果保留，可使用本应用地点搜索"
+                if code == "cancelled" || code == "closed" { text = "Maps 选点已取消；原目标与结果保留" }
+                elif code == "timeout" { text = "Maps 选点超时；原目标与结果保留" }
+                show_status(text) render_content() return
+            }
+            if !route_get(data, "name").is_string() || data.name.trim() == "" || !route_get(data, "lat").is_number() || !route_get(data, "lon").is_number() || data.coordinate_system != "WGS84" || data.source != "octosense.maps.search" || !data.selected_at.is_number() || data.selected_at > time_now() + 30 || time_now() - data.selected_at > 300 || !(abs(data.lat) <= 90 && abs(data.lon) <= 180) {
+                phase = "failed" show_status("Maps 返回的地点来源或坐标无效，未采用") render_content() return
+            }
+            // 返回的是用户选择记录，没有伪造高德POI ID或机场航站楼。
+            phase = "running" run_id += 1 let return_token = run_id
+            let original = {name: data.name label: data.label lat: data.lat lon: data.lon coordinate_system: data.coordinate_system source: data.source selected_at: data.selected_at}
+            amap_request("/v3/assistant/coordinate/convert", "&coordsys=gps&locations=" + coordinate_six(data.lon) + "," + coordinate_six(data.lat), return_token, fn(converted){
+                let point = route_point(route_get(converted, "locations"))
+                if point == nil { fail_task("Maps 地点坐标转换失败，未采用") return }
+                amap_request("/v3/geocode/regeo", "&location=" + coordinate_six(point.lon) + "," + coordinate_six(point.lat) + "&extensions=base&radius=0", return_token, fn(city_data){
+                    let address = route_get(route_get(city_data, "regeocode"), "addressComponent")
+                    let city = amap_city(route_get(address, "city"), route_get(address, "citycode"), route_get(address, "adcode"), route_get(address, "province"))
+                    if route_get(address, "country") != "中国" || city == nil { fail_task("Maps 所选地点缺少有效大陆城市计价依据，未采用") return }
+                    pending_user_poi = {id: "user-maps-" + data.selected_at external_poi_id: nil name: data.name address: data.label longitude: point.lon latitude: point.lat coordinate_system: "GCJ-02" coordinate_basis: "amap-convert-from-user-selection" source: "octosense.maps.search" original_selection: original queried_at: data.selected_at returned_at: time_now() city_metadata: city}
+                    ui.sentence.set_text("目的地改为" + data.name) phase = "failed" clarify_current_task(true)
+                })
+            })
+        })
+        if !ticket.request_id.is_number() && pending_maps_pick == ticket { pending_maps_pick = nil phase = maps_previous_phase if phase == "running" { phase = "cancelled" } show_status("宿主尚不支持 Maps 选点；可使用本应用地点搜索") }
+    } { pending_maps_pick = nil phase = maps_previous_phase if phase == "running" { phase = "cancelled" } show_status("宿主拒绝 Maps 选点；可使用本应用地点搜索") }
+    render_content()
+}
+
+fn resume_task(){
+    if user_limits == nil { show_status("原任务约束无法恢复，请补充分钟数与预算") return }
+    if phase != "cancelled" { return }
+    phase = "failed" ui.sentence.set_text("继续当前行程；保留原截止与预算") clarify_current_task(true)
+}
+fn change_one_limit(text){
+    if user_limits == nil { return false }
+    let compact = text.replace(regex("[ \t]", "g"), "")
+    if compact.search("预算") < 0 && compact.search("分钟") < 0 { return false }
+    if explicit_limits(text) != nil { return false }
+    let updated = nil
+    if compact.search("预算") >= 0 {
+        let normalized = compact.replace("改为", "").replace("改成", "").replace("调整为", "").replace("调整到", "").replace("是", "")
+        updated = explicit_limits("" + user_limits.minutes + "分钟" + normalized)
+    } elif compact.search("分钟") >= 0 { updated = explicit_limits(compact + "预算" + (user_limits.budget_cents / 100)) }
+    if updated == nil || updated.currency == "unsupported" { show_status("条件修改无效，请明确数字分钟数或人民币预算") return true }
+    user_limits.minutes = updated.minutes user_limits.budget_cents = updated.budget_cents
+    if updated.currency == "CNY" { user_limits.currency = "CNY" }
+    arrive_by = received_at + user_limits.minutes * 60
+    if phase == "running" { cancel_task() }
+    if phase == "cancelled" { phase = "failed" }
+    clarify_current_task(true) return true
+}
+fn destination_label(){
+    if destination_record == nil { return "选择或纠正目的地" }
+    let basis = "根据来源核实"
+    if route_get(constraints, "user_selected") == true { basis = "你选择的地点；航站楼未核实" }
+    elif route_get(constraints, "inferred") == true { basis = "根据位置推断；航站楼未知" }
+    return destination_record.name + " · " + basis
+}
+fn open_conditions(){ condition_open = true render_content() }
+fn submit_condition(){
+    let text = ui.limit_query.text().trim()
+    ui.sentence.set_text(text) condition_open = false
+    if !change_one_limit(text) { show_status("请明确修改一个条件，例如预算改为80、改为60分钟") render_content() }
+}
+fn candidate_text(candidate){
+    let selected = "查看"
+    if candidate.id == viewed_route_id { selected = "当前查看" }
+    return selected + " · " + kind_text(candidate.kind) + " · " + money_text(candidate.price_cents) + " · " + duration_text(candidate.duration_seconds)
+}
+fn candidate_details(candidate){
+    let check = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
+    let text = check.reason + "。"
+    if candidate.duration_seconds != nil { text += "预计到达 " + beijing_clock(check.estimated_arrival_ts) + "。" }
+    text += route_description(candidate)
+    return text
+}
 
 fn field_present(obj, key){
     for k v in obj { if "" + k == key { return true } }
@@ -802,12 +1112,13 @@ fn add_candidates(data, driving, at, departure_at, tool){
         candidate.origin_complete = candidate.origin_gap_m != nil && candidate.origin_gap_m <= 25
         candidate.endpoint_gap_m = route_endpoint_gap(candidate.actual_endpoint, requested_destination)
         candidate.endpoint_complete = candidate.endpoint_gap_m != nil && candidate.endpoint_gap_m <= 25
-        let checked = route_recheck(candidate, time_now(), arrive_by, constraints.budget_cents)
+        let checked = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
         candidate.reason = checked.reason candidate.feasible = checked.passed
         candidates.push(candidate)
     }
     let summarized = []
-    for candidate in candidates {
+    // 旧候选已在前次查询观察中；本次只记录新增候选，避免多策略重复放大模型输入。
+    for candidate in normalized {
         summarized.push({id: candidate.id kind: candidate.kind duration_seconds: candidate.duration_seconds price_cents: candidate.price_cents currency: candidate.currency feasible: candidate.feasible reason: candidate.reason request_bound: candidate.request_bound origin_complete: candidate.origin_complete endpoint_complete: candidate.endpoint_complete waiting_included: candidate.waiting_included source_ts: candidate.source_ts expires_at: candidate.expires_at waiting_basis: candidate.waiting_basis taxi_wait_verified: candidate.taxi_wait_verified warnings: candidate.warnings})
     }
     observe(tool, summarized)
@@ -845,6 +1156,7 @@ fn query_transit(p, token){
     let params = "&origin=" + coord_text(position_record) + "&destination=" + coord_text(destination_record) + "&city1=" + position_record.citycode.url_encode() + "&city2=" + destination_record.citycode.url_encode() + "&ad1=" + position_record.adcode.url_encode() + "&ad2=" + destination_record.adcode.url_encode() + "&strategy=" + strategy + "&AlternativeRoute=5&show_fields=cost,polyline&date=" + day + "&time=" + hh + ":" + mm
     amap_request("/v5/direction/transit/integrated", params, token, fn(data){
         add_candidates(data, nil, at, departure_at, "query_transit")
+        transit_completed += 1
         next_action(token)
     })
 }
@@ -857,21 +1169,26 @@ fn query_driving(token){
     let params = "&origin=" + coord_text(position_record) + "&destination=" + coord_text(destination_record) + "&show_fields=cost,polyline&strategy=32"
     amap_request("/v5/direction/driving", params, token, fn(data){
         add_candidates(nil, data, at, at, "query_driving")
+        driving_completed = true
         next_action(token)
     })
 }
+fn comparison_complete(){ return transit_completed > 0 && transit_completed == transit_count && driving_completed }
 fn present_results(reason){
-    if transit_count == 0 || !driving_done { fail_task("交通候选尚未完成比较") return }
+    if !comparison_complete() { fail_task("交通候选尚未完成比较") return }
     for candidate in candidates {
-        let current = route_recheck(candidate, time_now(), arrive_by, constraints.budget_cents)
+        let current = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
         candidate.feasible = current.passed
         candidate.reason = current.reason
     }
     chosen = route_choose(candidates)
+    expanded_routes = false
+    if chosen != nil { viewed_route_id = chosen.id } else { let rows = representative_routes() if rows.len() > 0 { viewed_route_id = rows[0].id } }
+    start_timeout(0.01, || view_route(viewed_route_id))
     automatic_seconds += time_now() - loop_started_at
     phase = "proposal"
-    answer_text = reason
-    if chosen == nil { if candidates.len() == 0 { show_status("交通查询已完成，但供应商没有返回候选路线") } else { show_status("已查询，但现有候选均未通过检查；具体原因见各方案") } }
+    answer_text = ""
+    if chosen == nil { if candidates.len() == 0 { show_status("交通查询已完成，但供应商没有返回候选路线") } else { show_status("比较完成：已查候选均未通过检查") } }
     else { show_status("已找到预计满足约束的最低估价方案") }
     if task_timer != nil { stop_timer(task_timer) task_timer = nil }
     save_audit()
@@ -897,13 +1214,26 @@ fn read_sources_at(tools, index, token){
         if current_task(token) { start_timeout(0.01, || read_sources_at(tools, index + 1, token)) }
     })
 }
+fn action_progress(name){
+    if name == "read_location" { return "正在获取当前位置" }
+    if name == "read_calendar" { return "正在读取日历资料（模拟）" }
+    if name == "read_notes" { return "正在读取笔记资料（模拟）" }
+    if name == "read_sources" { return "正在读取任务所需资料" }
+    if name == "discover_airports" || name == "find_destination" { return "正在查询目的地候选" }
+    if name == "select_destination" || name == "set_constraints" { return "正在核对目的地与行程要求" }
+    if name == "query_transit" { return "正在查询公共交通" }
+    if name == "query_driving" { return "正在查询驾车对照" }
+    if name == "present" || name == "fail" { return "正在汇总已有结果" }
+    return "需要补充信息"
+}
 fn dispatch(action, token){
     if !current_task(token) { return }
     let name = action.next_action
     let p = action.parameters
     decisions.push({step: step_count next_action: name reason: action.reason parameters: p returned_at: time_now()})
     save_audit()
-    progress_text = "第 " + step_count + " 步 · " + action.reason
+    progress_text = action_progress(name)
+    show_status(progress_text)
     render_content()
     try {
         if name == "read_sources" {
@@ -929,7 +1259,9 @@ fn dispatch(action, token){
         } elif name == "ask" {
             if !p.question.is_string() || p.question.trim() == "" { fail_task("澄清问题无效") return }
             ask_user(p.question) return
-        } elif name == "fail" { fail_task(action.reason) return
+        } elif name == "fail" {
+            if comparison_complete() { present_results("") } else { fail_task(action.reason) }
+            return
         } else { fail_task("模型返回了未知操作") return }
     } { fail_task("工具参数或来源缺少必要字段") return }
     if current_task(token) { start_timeout(0.01, || next_action(token)) }
@@ -989,6 +1321,17 @@ fn request_stage(record, stage){
     record.transport_stage = stage record.stage_at = time_now()
     if stage == "before_net" || stage == "response_entry" || stage == "model_action" { save_audit() }
 }
+fn model_request_timeout(waiting, record, token){
+    if waiting.settled || !current_task(token) { return }
+    waiting.settled = true
+    if route_get(record, "dispatch_returned") == true {
+        request_finished(record, "response_timeout")
+        fail_task("等待模型响应超时，请稍后重新查询")
+    } else {
+        request_finished(record, "dispatch_incomplete")
+        fail_task("本机模型请求派发未完成，远端状态未知，请重新查询")
+    }
+}
 fn minimax_request(task, input, schema, token, record, done){
     request_stage(record, "entry")
     let config = read_text("private-config.json")
@@ -1009,19 +1352,19 @@ fn minimax_request(task, input, schema, token, record, done){
     let body_bytes = serialized_body.to_bytes()
     request_stage(record, "body_bytes")
     let waiting = {settled: false}
-    let timer = start_timeout(40, || {
-        if !waiting.settled {
-            waiting.settled = true request_finished(record, "app_timeout")
-            if current_task(token) { fail_task("模型服务响应超时，请稍后重新规划") }
-        }
-    })
+    record.dispatch_started_at = nil record.dispatch_returned_at = nil record.dispatch_returned = false record.http_status = nil
     request_stage(record, "before_net")
-    try {
+    // 准备与审计已完成；派发入口重新取得宿主的单入口预算。
+    start_timeout(0.01, || {
+        if !current_task(token) || waiting.settled { return }
+        let timer = start_timeout(40, || model_request_timeout(waiting, record, token))
+        record.dispatch_started_at = time_now()
+        try {
         net.http_request(net.HttpRequest{url: "https://api.minimax.cn/v1/chat/completions" method: net.HttpMethod.POST
             headers: {"Content-Type": ["application/json"] "Authorization": ["Bearer " + key]} body: body_bytes max_response_body_bytes: 65536}) do net.HttpEvents{
             on_response: |res| {
                 if waiting.settled { return }
-                waiting.settled = true stop_timer(timer) request_finished(record, "returned") request_stage(record, "response_entry")
+                waiting.settled = true stop_timer(timer) record.http_status = res.status_code request_finished(record, "returned") request_stage(record, "response_entry")
                 if !current_task(token) { return }
                 try {
                     if res.status_code != 200 { record.state = "http_error" fail_task("模型服务未能完成请求，请稍后重试") return }
@@ -1052,11 +1395,13 @@ fn minimax_request(task, input, schema, token, record, done){
                 if current_task(token) { fail_task("模型网络请求失败，请稍后重试") }
             }
         }
+        record.dispatch_returned = true record.dispatch_returned_at = time_now()
         request_stage(record, "after_net")
     } {
         waiting.settled = true stop_timer(timer) request_finished(record, "request_rejected")
-        if current_task(token) { fail_task("模型请求未能启动，请检查本机配置") }
-    }
+        if current_task(token) { fail_task("本机模型请求派发未完成，远端状态未知，请重新查询") }
+        }
+    })
 }
 fn navigation_tool_state(){
     let queried = [] let remaining = [] let available = ["ask" "fail"]
@@ -1087,16 +1432,22 @@ fn navigation_tool_state(){
         if remaining.len() > 0 { available.push("query_transit") }
         if !driving_done { available.push("query_driving") }
     }
-    let can_present = transit_count > 0 && driving_done
+    let can_present = comparison_complete()
     if can_present { available.push("present") }
-    return {available_actions: available available_source_tools: source_tools source_records: sources location_mode: location_mode() position_current: position_valid destination: destination_record destination_inferred: route_get(constraints, "inferred") airport_candidates: poi_records queried_transit_strategies: queried remaining_transit_strategies: remaining driving_done: driving_done can_present: can_present}
+    return {available_actions: available available_source_tools: source_tools source_records: sources location_mode: location_mode() position_current: position_valid destination: destination_record destination_inferred: route_get(constraints, "inferred") airport_candidates: poi_records queried_transit_strategies: queried remaining_transit_strategies: remaining driving_done: driving_done driving_completed: driving_completed completed_transit_queries: transit_completed can_present: can_present}
 }
 
 fn next_action(token){
     if !current_task(token) { return }
     if step_count >= 12 || automatic_seconds + time_now() - loop_started_at >= 180 { fail_task("本次自动规划达到12步或180秒上限，请重新规划") return }
+    if pending_user_poi != nil && constraints == nil {
+        // 用户已选定地点；刷新起点是采用的前置条件，不再让模型决定是否补齐。
+        if !position_current(position_record) { show_status("正在刷新出发位置以采用所选地点") read_sources_at(["read_location"], 0, token) return }
+        apply_user_poi()
+        if !current_task(token) { return }
+    }
     step_count += 1
-    show_status("正在理解背景与查询下一步")
+    show_status("正在考虑下一步")
     let request_record = {step: step_count started_at: time_now() completed_at: nil wall_seconds: nil input_bytes: 0 transport_stage: "created" stage_at: nil state: "pending" meta: nil}
     model_requests.push(request_record)
     let now_utc = local_time()
@@ -1123,6 +1474,7 @@ fn next_action(token){
     })
 }
 fn start_task(){
+    cancel_maps_pick()
     let text = ui.sentence.text().trim()
     if text == "" { show_status("请用一句话说明行程、时限与预算") return }
     cancel_pending_location()
@@ -1130,21 +1482,25 @@ fn start_task(){
     if task_timer != nil { stop_timer(task_timer) }
     let token = run_id
     received_at = time_now() arrive_by = 0 loop_started_at = received_at automatic_seconds = 0 step_count = 0 protocol_retry_count = 0
+    pending_user_poi = nil condition_open = false invalidate_map() picker_request += 1 picker_open = false viewed_route_id = "" expanded_routes = false
     request_text = text user_limits = explicit_limits(text) replies = [] observations = [] model_requests = [] decisions = [] source_snapshots = [] source_records = [] calendar_events = [] note_records = []
     position_record = nil constraints = nil destination_record = nil poi_records = [] candidates = [] chosen = nil used_tools = []
-    transit_count = 0 driving_done = false progress_text = "" answer_text = "" phase = "running"
+    transit_count = 0 transit_completed = 0 driving_done = false driving_completed = false progress_text = "" answer_text = "" phase = "running"
     task_timer = start_timeout(180, || { if current_task(token) { fail_task("本次规划达到时间上限") } })
     save_audit()
     render_content()
     start_timeout(0.01, || next_action(token))
 }
-fn clarify(){
-    if phase != "asking" && phase != "proposal" && phase != "failed" && phase != "needs_replan" && phase != "confirmed" { return }
+fn clarify(){ clarify_current_task(false) }
+fn clarify_current_task(preserve_destination){
+    if phase != "asking" && phase != "proposal" && phase != "failed" && phase != "needs_replan" && phase != "confirmed" && phase != "cancelled" { return }
     let correction = phase != "asking"
     let text = ui.sentence.text().trim()
     if text == "" { show_status("请输入要补充的信息") return }
     let declaration = declared_currency(text)
     if correction && declaration == "unsupported" { show_status("当前任务保持原预算币种；更改币种请提供完整分钟数与预算的新行程指令") return }
+    // 普通补充可以纠正地点；旧选择仍作为来源保留，不自动重施为硬约束。
+    if !preserve_destination { pending_user_poi = nil }
     replies.push(text)
     let updated_limits = explicit_limits(text)
     if updated_limits != nil && !correction { user_limits = updated_limits }
@@ -1152,7 +1508,8 @@ fn clarify(){
     let clarification = {id: "clarification-" + replies.len() kind: "user" source: "user-clarification" mock: false source_time: "" + time_now() raw: text read_at: time_now()}
     source_records.push(clarification)
     observe("clarification", clarification)
-    constraints = nil destination_record = nil poi_records = [] candidates = [] chosen = nil transit_count = 0 driving_done = false
+    invalidate_map() viewed_route_id = "" expanded_routes = false
+    constraints = nil destination_record = nil poi_records = [] candidates = [] chosen = nil transit_count = 0 transit_completed = 0 driving_done = false driving_completed = false
     used_tools.retain(fn(name){ return name == "read_calendar" || name == "read_notes" || name == "read_location" })
     if correction || !position_current(position_record) {
         cancel_pending_location()
@@ -1173,10 +1530,11 @@ fn clarify(){
     next_action(run_id)
 }
 fn cancel_task(){
+    cancel_maps_pick()
     cancel_pending_location()
-    run_id += 1 phase = "cancelled"
+    run_id += 1 phase = "cancelled" picker_request += 1 invalidate_map()
     if task_timer != nil { stop_timer(task_timer) task_timer = nil }
-    show_status("任务已取消") save_audit() render_content()
+    show_status("任务已停止；原截止与预算保留") save_audit() render_content()
 }
 fn confirm_trip(){
     if phase != "proposal" || chosen == nil { return }
@@ -1190,22 +1548,24 @@ fn confirm_trip(){
     let trip = {schema: 2 id: "trip-" + received_at state: "confirmed" request: request_text clarifications: replies received_at: received_at arrive_by: arrive_by confirmed_at: time_now() constraints: constraints user_limits: user_limits source_records: source_records source_snapshots: source_snapshots destination: destination_record selected_route: chosen tool_observations: observations model: "MiniMax-M3"}
     try {
         let data = trip.to_json()
-        if fs.write("trip.json", data) != nil { show_status("Trip 保存失败，方案仍保留") return }
-        if fs.read("trip.json") != data { show_status("Trip 保存后读回不一致，请重试") return }
+        if fs.write("trip.json", data) != nil { show_status("行程保存失败，方案仍保留") return }
+        if fs.read("trip.json") != data { show_status("行程保存后核验未通过，请重试") return }
         let back = fs.read("trip.json").parse_json()
-        if back.schema != 2 || back.state != "confirmed" || back.selected_route.id != chosen.id { show_status("Trip 确认状态无法验证") return }
-        saved_trip = back phase = "confirmed" show_status("Trip 已确认并读回；尚未开始导航") save_audit() render_content()
-    } { show_status("Trip 保存或读回失败，方案仍保留") }
+        if back.schema != 2 || back.state != "confirmed" || back.selected_route.id != chosen.id { show_status("行程确认状态无法验证") return }
+        saved_trip = back phase = "confirmed" show_status("行程已确认；尚未开始导航") save_audit() render_content()
+    } { show_status("行程保存或核验失败，方案仍保留") }
 }
 fn restore_trip(){
     if !fs.exists("trip.json") { return }
     try {
         let trip = fs.read("trip.json").parse_json()
-        if trip.schema != 2 || trip.state != "confirmed" || !trip.selected_route.is_object() { show_status("本地 Trip 格式无效，请重新规划") return }
+        if trip.schema != 2 || trip.state != "confirmed" || !trip.selected_route.is_object() { show_status("本地行程格式无效，请重新规划") return }
         let stored = route_get(trip, "constraints")
-        if !stored.is_object() || !stored.minutes.is_number() || !stored.budget_cents.is_number() || stored.currency != "CNY" || !trip.received_at.is_number() || !trip.arrive_by.is_number() || !trip.request.is_string() || !trip.source_records.is_array() || !trip.source_snapshots.is_array() { show_status("本地 Trip 格式无效，请重新规划") return }
-        if !(trip.received_at >= 0 && stored.minutes >= 1 && stored.minutes % 1 == 0 && stored.minutes <= (9007199254740991 - trip.received_at) / 60 && stored.budget_cents >= 0 && stored.budget_cents <= 9007199254740991 && stored.budget_cents % 1 == 0 && trip.arrive_by == trip.received_at + stored.minutes * 60) { show_status("本地 Trip 时间或预算无效，请重新规划") return }
+        if !stored.is_object() || !stored.minutes.is_number() || !stored.budget_cents.is_number() || stored.currency != "CNY" || !trip.received_at.is_number() || !trip.arrive_by.is_number() || !trip.request.is_string() || !trip.source_records.is_array() || !trip.source_snapshots.is_array() { show_status("本地行程格式无效，请重新规划") return }
+        if !(trip.received_at >= 0 && stored.minutes >= 1 && stored.minutes % 1 == 0 && stored.minutes <= (9007199254740991 - trip.received_at) / 60 && stored.budget_cents >= 0 && stored.budget_cents <= 9007199254740991 && stored.budget_cents % 1 == 0 && trip.arrive_by == trip.received_at + stored.minutes * 60) { show_status("本地行程时间或预算无效，请重新规划") return }
         saved_trip = trip chosen = trip.selected_route constraints = stored source_records = trip.source_records source_snapshots = trip.source_snapshots destination_record = trip.destination
+        pending_user_poi = nil
+        if route_get(stored, "user_selected") == true && destination_record.is_object() { pending_user_poi = destination_record }
         for source in source_records { if source.kind == "location" { position_record = source.raw.parse_json() } }
         user_limits = explicit_limits(trip.request)
         for reply in trip.clarifications {
@@ -1218,10 +1578,11 @@ fn restore_trip(){
         if saved_limits.is_object() && saved_limits.minutes == stored.minutes && saved_limits.budget_cents == stored.budget_cents && (saved_limits.currency == "CNY" || saved_limits.currency == "unspecified") { user_limits = saved_limits }
         if user_limits == nil || user_limits.minutes != stored.minutes || user_limits.budget_cents != stored.budget_cents || (user_limits.currency != "CNY" && user_limits.currency != "unspecified") { received_at = trip.received_at arrive_by = trip.arrive_by user_limits = nil phase = "asking" answer_text = "原行程期限与预算已保存，但用户约束声明无法恢复，请补充原数字分钟数与预算。" show_status("旧行程需要补充约束声明，原截止未重置") render_content() return }
         replies = trip.clarifications observations = trip.tool_observations
-        received_at = trip.received_at arrive_by = trip.arrive_by request_text = trip.request candidates = [chosen] phase = "confirmed"
+        received_at = trip.received_at arrive_by = trip.arrive_by request_text = trip.request candidates = [chosen] viewed_route_id = chosen.id phase = "confirmed"
         ui.sentence.set_text(trip.request)
-        show_status("已读回确认的 Trip；尚未开始导航") render_content()
-    } { show_status("本地 Trip 无法读取，请重新规划") }
+        if !route_recheck(chosen, time_now(), arrive_by, constraints.budget_cents).passed || !sources_current() { show_status("已恢复历史行程；数据已过期或需重新检查") } else { show_status("已恢复确认的行程；尚未开始导航") }
+        render_content()
+    } { show_status("本地行程无法读取，请重新规划") }
 }
 fn money_text(cents){ if cents == nil { return "费用未知" } return "¥" + (cents / 100) }
 fn duration_text(seconds){ if seconds == nil { return "耗时未知" } let remainder = seconds % 60 let minutes = (seconds - remainder) / 60
@@ -1259,24 +1620,73 @@ fn segment_description(segment){
     if route_get(segment, "taxi").is_object() { parts.push("打车接续（供应商综合估价）") }
     let text = ""
     for part in parts { if text != "" { text += "；" } text += part }
-    if text == "" { return "路线衔接" }
+    if text == "" {
+        let road = route_get(segment, "road")
+        if road.is_string() { return road }
+    }
+    return text
+}
+fn route_description(candidate){
+    if !candidate.segments.is_array() { return "" }
+    let text = "" let shown = 0 let omitted = 0
+    for segment in candidate.segments {
+        let description = segment_description(segment)
+        if description != "" {
+            if shown < 3 { if text != "" { text += "；" } text += description shown += 1 }
+            else { omitted += 1 }
+        }
+    }
+    if omitted > 0 { text += "（另有 " + omitted + " 段）" }
+    if text != "" { return "主要路段：" + text + "。" }
+    return ""
+}
+fn comparison_summary(){
+    let fastest = nil let cheapest = nil let unknown_prices = 0
+    for candidate in candidates {
+        if candidate.duration_seconds != nil { if fastest == nil || candidate.duration_seconds < fastest.duration_seconds { fastest = candidate } }
+        if candidate.price_cents == nil { unknown_prices += 1 }
+        elif cheapest == nil || candidate.price_cents < cheapest.price_cents { cheapest = candidate }
+    }
+    let text = "已取得 " + candidates.len() + " 条候选。"
+    if fastest != nil {
+        text += "最短已知耗时 " + fastest.duration_seconds + " 秒（" + duration_text(fastest.duration_seconds) + "）。"
+        if !fastest.waiting_included { text += "该驾车耗时不含候车与接驳。" }
+    }
+    if cheapest != nil { text += "最低已知估价 " + money_text(cheapest.price_cents) + "。" }
+    if unknown_prices > 0 { text += unknown_prices + " 条候选费用未知。" }
+    text += "这些数值可能来自不同方案，不代表存在可用路线。"
+    return text
+}
+fn source_label(){
+    let mock_context = false let mock_location = false
+    for source in source_records {
+        if source.mock == true && (source.kind == "calendar" || source.kind == "note") { mock_context = true }
+        if source.mock == true && source.kind == "location" { mock_location = true }
+    }
+    if position_record != nil && position_record.mock == true { mock_location = true }
+    let text = ""
+    if mock_context { text = "日历与机票笔记为模拟来源。" }
+    if mock_location { text += "出发位置为模拟位置，并非当前设备定位。" }
     return text
 }
 fn query_task(){
     let text = ui.sentence.text().trim()
+    if phase == "picking" { show_status("请先完成或取消 Maps 选点") return }
+    if phase != "idle" && phase != "asking" && change_one_limit(text) { return }
+    if phase == "cancelled" && (text == request_text || text == "继续" || text == "继续当前行程；保留原截止与预算") { resume_task() return }
     if phase == "proposal" && text == "确认" {
         if chosen == nil { show_status("没有通过检查的方案，不能确认；请输入行程修正后再查询") return }
-        confirm_trip() return
+        confirm_viewed() return
     }
     if phase == "asking" { clarify() return }
-    if (phase == "proposal" || phase == "failed" || phase == "needs_replan" || phase == "confirmed") && user_limits != nil && explicit_limits(text) == nil { clarify() return }
+    if (phase == "proposal" || phase == "failed" || phase == "needs_replan" || phase == "confirmed" || phase == "cancelled") && user_limits != nil && explicit_limits(text) == nil { clarify() return }
     start_task()
 }
 
 fn result_text(){
     let text = ""
     let recommendation = ""
-    if phase != "idle" && location_mode() == "demo" { text = "日历与机票笔记为模拟来源。\n" }
+    if phase != "idle" && source_label() != "" { text = source_label() + "\n" }
     if phase == "asking" { text += answer_text + "\n请在输入框补充后点查询。" }
     if constraints != nil && route_get(constraints, "inferred") == true && destination_record != nil {
         text += "暂按 " + constraints.airport + " 规划，这是基于位置与机场查询的推断；未读取真实机票，航站楼未确定。\n"
@@ -1285,6 +1695,7 @@ fn result_text(){
     if constraints != nil { text += "\n前往 " + constraints.destination_query + "；" + constraints.minutes + " 分钟内；预算 " + money_text(constraints.budget_cents) + "；到达期限 " + beijing_clock(arrive_by) + "（从首次指令起算）。\n" }
     if candidates.len() > 0 {
         if phase == "failed" { text += "比较未完成，仅已有结果：\n" }
+        if phase == "failed" || phase == "proposal" { text += comparison_summary() + "\n" }
         let checked_at = time_now()
         if phase == "confirmed" && saved_trip != nil { checked_at = saved_trip.confirmed_at }
         for index candidate in candidates {
@@ -1292,7 +1703,8 @@ fn result_text(){
             if chosen != nil && candidate.id == chosen.id && check.passed { recommendation = "推荐方案 " + (index + 1) }
             text += "\n方案 " + (index + 1) + "：" + kind_text(candidate.kind) + "；" + money_text(candidate.price_cents) + "；" + duration_text(candidate.duration_seconds) + "。\n" + check.reason + "。\n"
             if candidate.duration_seconds != nil { text += "预计到达 " + beijing_clock(check.estimated_arrival_ts) + "；原始截止 " + beijing_clock(arrive_by) + "。\n" }
-            if candidate.segments.is_array() { for segment in candidate.segments { text += segment_description(segment) + "。\n" } }
+            let description = route_description(candidate)
+            if description != "" { text += description + "\n" }
         }
         text += "时间与费用为供应商估计，不保证实际到达或成交价。输入修正信息可继续当前任务；完整分钟数与预算指令会开始新行程。\n"
     } elif phase == "failed" {
@@ -1303,19 +1715,74 @@ fn result_text(){
         if recommendation != "" { text += "\n" + recommendation + "，为已查且通过检查的最低估价方案。输入“确认”并点查询后保存行程；尚未开始导航。" }
         else { text += "\n原推荐已不满足确认条件，请输入行程重新查询。" }
     }
-    if phase == "confirmed" { text += "\n行程已确认、保存并读回，重启可恢复；尚未开始导航。" }
+    if phase == "confirmed" { text += "\n行程已保存，重启可恢复；尚未开始导航。" }
     return text.trim()
 }
 start_timeout(0.05, || restore_trip())
-SolidView{width: Fill height: Fill flow: Down padding: 18 spacing: 10 draw_bg.color: #xf7f7f7
-    sentence := TextInput{width: Fill height: 56 text: "40 分钟内到机场，预算 50，尽量便宜。" empty_text: "描述行程或补充信息"
+SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.color: #xf7f7f7
+    sentence := TextInput{width: Fill height: 48 on_return: || query_task() text: "40 分钟内到机场，预算 50，尽量便宜。" empty_text: "描述行程、纠正地点或修改预算"
         draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: muted}}
     View{width: Fill height: Fit flow: Right spacing: 10
-        ButtonFlat{text: "查询" width: 90 height: 40 on_click: || query_task() draw_text +: {color: ink color_hover: ink color_focus: ink color_down: ink}}
-        ButtonFlat{text: "终止" width: 90 height: 40 on_click: || cancel_task() draw_text +: {color: ink color_hover: ink color_focus: ink color_down: ink}}
+        ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "查询" width: 120 height: 36 on_click: || query_task()}
+        ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "终止" width: 90 height: 36 on_click: || cancel_task()}
     }
-    status := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style.font_size: 13}
-    content := ScrollYView{width: Fill height: Fill flow: Down spacing: 10 on_render: || {
-        Label{width: Fill text: result_text() draw_text.color: ink draw_text.text_style.font_size: 14}
+    status := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 15}}
+    content := ScrollYView{width: Fill height: Fill flow: Down spacing: 8 on_render: || {
+        if condition_open {
+            View{width: Fill height: Fit flow: Down spacing: 8 padding: 12 show_bg: true draw_bg.color: #xffffff
+                Label{width: Fill draw_text.color: ink text: "修改一项条件；改预算不重置截止，改分钟数从首次指令计算"}
+                limit_query := TextInput{draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: muted} width: Fill height: 40 empty_text: "预算改为80 / 改为60分钟" on_return: || submit_condition()}
+                View{flow: Right width: Fill height: Fit spacing: 8
+                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "应用修改" on_click: || submit_condition()}
+                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "返回" on_click: || { condition_open = false render_content() }}
+                }
+            }
+        } elif picker_open {
+            View{width: Fill height: Fit flow: Down spacing: 8 padding: 12 show_bg: true draw_bg.color: #xffffff
+                Label{text: "选择目的地（允许跨城）" draw_text.color: ink}
+                place_query := TextInput{draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: muted} width: Fill height: 40 empty_text: "搜索地点或航站楼" on_return: || search_user_places()}
+                View{flow: Right width: Fill height: Fit spacing: 8
+                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "搜索" on_click: || search_user_places()}
+                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "返回" on_click: || close_destination_picker()}
+                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "在 Maps 中选择" on_click: || maps_place_picker()}
+                }
+                Label{width: Fill text: picker_status draw_text.color: muted}
+                if picker_preview_poi != nil {
+                    if map_bytes != nil { preview := Image{width: Fill height: 160 fit: ImageFit.Smallest} start_timeout(0.01, || { if map_bytes != nil && map_route_id == map_target_id() { ui.preview.load_image_from_data_async(map_bytes) } }) }
+                    Label{width: Fill text: map_status draw_text.color: muted}
+                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "采用此地点" on_click: || choose_user_place(picker_preview_poi.id)}
+                }
+                for poi in picker_pois {
+                    ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} width: Fill text: poi.name on_click: || preview_user_place(poi.id)}
+                    Label{width: Fill text: "" + poi.address + " · " + route_get(poi.city_metadata, "city") draw_text.color: muted}
+                }
+            }
+        } else {
+            if phase != "idle" {
+                ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} width: Fill text: destination_label() on_click: || open_destination_picker()}
+                if position_record != nil { Label{width: Fill text: "起点：" + route_get(position_record, "name") + "（不支持手选起点）" draw_text.color: muted} }
+                if constraints != nil { Label{width: Fill text: "" + constraints.minutes + " 分钟 · " + money_text(constraints.budget_cents) + " · 原截止 " + beijing_clock(arrive_by) draw_text.color: ink} }
+                if user_limits != nil { ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "修改预算或时限" on_click: || open_conditions()} }
+                if source_label() != "" { Label{width: Fill text: source_label() draw_text.color: muted} }
+                if phase == "cancelled" { ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "继续当前任务" on_click: || resume_task()} }
+                if phase == "asking" { Label{width: Fill text: answer_text draw_text.color: ink} }
+                if phase == "failed" || phase == "cancelled" { Label{width: Fill text: "比较未完成，已有结果不能证明不存在可行路线。" draw_text.color: muted} }
+                if candidates.len() > 0 {
+                    Label{width: Fill text: comparison_summary() draw_text.color: ink}
+                    if map_bytes != nil { preview := Image{width: Fill height: 160 fit: ImageFit.Smallest} start_timeout(0.01, || { let id = map_route_id if map_bytes != nil && id == viewed_route_id { ui.preview.load_image_from_data_async(map_bytes) } }) }
+                    Label{width: Fill text: map_status draw_text.color: muted}
+                    for candidate in representative_routes() {
+                        View{width: Fill height: Fit flow: Down spacing: 5 padding: 10 show_bg: true draw_bg.color: #xffffff
+                            ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} width: Fill text: candidate_text(candidate) on_click: || view_route(candidate.id)}
+                            Label{width: Fill text: candidate_details(candidate) draw_text.color: ink}
+                        }
+                    }
+                    if candidates.len() > representative_routes().len() { ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "查看全部候选" on_click: || { expanded_routes = true render_content() }} }
+                    elif expanded_routes { ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "收起其它候选" on_click: || { expanded_routes = false render_content() }} }
+                    if phase == "proposal" { ButtonFlat{draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink} text: "采用当前查看方案" on_click: || confirm_viewed()} }
+                    if phase == "confirmed" { Label{width: Fill text: "历史已保存行程；以下按当前时间重新检查，尚未开始导航" draw_text.color: ink} }
+                }
+            }
+        }
     }}
 }

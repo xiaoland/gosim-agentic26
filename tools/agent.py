@@ -30,6 +30,7 @@ SESSION = STATE / 'session.json'
 SELECTION = BUILD / 'system-apps.json'
 STAGE = BUILD / 'system-apps/navigation/bundle'
 LOCK = json.loads((ROOT / 'toolchain/agent-runtime.lock.json').read_text())
+SYSTEM_APPS = ('navigation', 'maps', 'mail')
 
 
 def require(ok, message):
@@ -140,24 +141,25 @@ def host_env(hidden=False):
 
 
 def verify_overlay(source, spec):
-    require(output('git', 'rev-parse', 'HEAD', cwd=source) == spec['revision'], '定位补丁的上游版本不符。')
+    require(output('git', 'rev-parse', 'HEAD', cwd=source) == spec['revision'], '宿主覆盖补丁的上游版本不符。')
     patch = (ROOT / spec['patch']).resolve()
     require(patch.is_relative_to(ROOT / 'toolchain/patches')
-            and hashlib.sha256(patch.read_bytes()).hexdigest() == spec['patch_sha256'], '定位补丁摘要不符。')
+            and hashlib.sha256(patch.read_bytes()).hexdigest() == spec['patch_sha256'], '宿主覆盖补丁摘要不符。')
     require(not output('git', 'diff', '--name-only', cwd=source)
             and not output('git', 'ls-files', '--others', '--exclude-standard', cwd=source),
-            '定位工具链有未审核改动，拒绝构建。')
-    require(output('git', 'write-tree', cwd=source) == spec['tree'], '定位工具链源码树与固定补丁不符。')
+            '宿主工具链有未审核改动，拒绝构建。')
+    require(output('git', 'write-tree', cwd=source) == spec['tree'], '宿主工具链源码树与固定补丁不符。')
 
 
 def apply_overlay(source, spec):
-    require(output('git', 'rev-parse', 'HEAD', cwd=source) == spec['revision'], '定位补丁的上游版本不符。')
+    require(output('git', 'rev-parse', 'HEAD', cwd=source) == spec['revision'], '宿主覆盖补丁的上游版本不符。')
     patch = (ROOT / spec['patch']).resolve()
-    require(hashlib.sha256(patch.read_bytes()).hexdigest() == spec['patch_sha256'], '定位补丁摘要不符。')
+    require(hashlib.sha256(patch.read_bytes()).hexdigest() == spec['patch_sha256'], '宿主覆盖补丁摘要不符。')
     tree = output('git', 'write-tree', cwd=source)
     if tree != spec['tree']:
-        require(tree == output('git', 'rev-parse', 'HEAD^{tree}', cwd=source)
-                and not output('git', 'status', '--porcelain', cwd=source), '保留未知工具链修改；请选择新的 AGENTIC26_AGENT_TOOLCHAIN。')
+        require(tree == spec.get('base_tree', output('git', 'rev-parse', 'HEAD^{tree}', cwd=source))
+                and not output('git', 'diff', '--name-only', cwd=source)
+                and not output('git', 'ls-files', '--others', '--exclude-standard', cwd=source), '保留未知工具链修改；请选择新的 AGENTIC26_AGENT_TOOLCHAIN。')
         command('git', 'apply', '--check', patch, cwd=source)
         command('git', 'apply', '--index', patch, cwd=source)
     verify_overlay(source, spec)
@@ -169,10 +171,13 @@ def verify_source():
     require(output('git', 'rev-parse', 'HEAD') == spec['revision'], '隔离 OctoSense 版本与 agent-runtime.lock.json 不符。')
     overlays = LOCK['location_overlays']
     require(overlays['octosense']['revision'] == spec['revision']
-            and overlays['app_hub']['revision'] == LOCK['app_hub_revision'], '定位补丁与固定上游版本不符。')
-    verify_overlay(SOURCE, overlays['octosense'])
-    verify_overlay(SOURCE / '.sources/app-hub', overlays['app_hub'])
-    for name, expected in [('Cargo.lock', overlays['octosense']['cargo_lock_sha256']),
+            and overlays['app_hub']['revision'] == LOCK['app_hub_revision'], '宿主覆盖补丁与固定上游版本不符。')
+    maps = LOCK['maps_overlays']
+    for name, source in [('octosense', SOURCE), ('app_hub', SOURCE / '.sources/app-hub')]:
+        require(maps[name]['base_tree'] == overlays[name]['tree'], 'Maps 覆盖补丁的定位基线不符。')
+        require(hashlib.sha256((ROOT / overlays[name]['patch']).read_bytes()).hexdigest() == overlays[name]['patch_sha256'], '定位基线补丁摘要不符。')
+        verify_overlay(source, maps[name])
+    for name, expected in [('Cargo.lock', maps['octosense']['cargo_lock_sha256']),
                            ('runtime-patches.lock.json', spec['runtime_patches_lock_sha256'])]:
         require(hashlib.sha256((SOURCE / name).read_bytes()).hexdigest() == expected, f'官方 {name} 摘要不符。')
     checked = subprocess.run([sys.executable, str(SOURCE / 'tools/setup.py'), '--check'], cwd=SOURCE,
@@ -186,13 +191,15 @@ def verify_source():
             '官方运行时依赖与 agent-runtime.lock.json 不符。')
 
 
-def bundle_files(values):
+def bundle_files(values, root=None):
+    root = ROOT / 'bundle' if root is None else root
+    require(root.is_dir() and not root.is_symlink(), '应用 bundle 目录缺失或是符号链接。')
     files = {}
-    for path in sorted((ROOT / 'bundle').rglob('*')):
+    for path in sorted(root.rglob('*')):
         require(not path.is_symlink(), 'bundle 中不能包含符号链接。')
         if not path.is_file():
             continue
-        rel = path.relative_to(ROOT / 'bundle').as_posix()
+        rel = path.relative_to(root).as_posix()
         require(path.name != 'private-config.json' and not path.name.startswith('.env')
                 and path.suffix not in ('.key', '.cert') and '.local-state' not in path.parts,
                 'bundle 包含私有配置文件，拒绝打包。')
@@ -210,6 +217,35 @@ def source_digest(files):
     return digest.hexdigest()
 
 
+def official_bundles(values):
+    bundles = {}
+    for name in SYSTEM_APPS[1:]:
+        files = bundle_files(values, SOURCE / 'apps' / name / 'bundle')
+        require(set(files) == {'manifest.json', 'main.splash'}
+                and json.loads(files['manifest.json'])['id'] == 'os.' + name,
+                f'固定官方 {name} bundle 的文件集合或 id 不符。')
+        bundles[name] = files
+    return bundles
+
+
+def selection_bytes():
+    return json_bytes({'schema': 1, 'source': 'system-apps', 'apps': list(SYSTEM_APPS), 'assets': {}})
+
+
+def write_staged_bundle(root, files):
+    root.mkdir(parents=True, exist_ok=True)
+    require(not root.is_symlink(), '暂存 bundle 不能是符号链接。')
+    for path in root.rglob('*'):
+        require(not path.is_symlink(), '暂存 bundle 中不能包含符号链接。')
+        if path.is_file() and path.relative_to(root).as_posix() not in files:
+            path.unlink()
+    for name, data in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.is_file() or path.read_bytes() != data:
+            path.write_bytes(data)
+
+
 def stage(values):
     files = bundle_files(values)
     digest = source_digest(files)
@@ -221,46 +257,77 @@ def stage(values):
     manifest['id'] = runtime_id
     manifest['integrity']['bundle_blake3'] = ''
     files['manifest.json'] = json_bytes(manifest)
-    STAGE.mkdir(parents=True, exist_ok=True)
-    for path in STAGE.rglob('*'):
-        if path.is_file() and path.relative_to(STAGE).as_posix() not in files:
-            path.unlink()
-    for name, data in files.items():
-        path = STAGE / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.is_file() or path.read_bytes() != data:
-            path.write_bytes(data)
-    selection = json_bytes({'schema': 1, 'source': 'system-apps', 'apps': ['navigation'], 'assets': {}})
+    metadata = {'source_sha256': digest, 'source_id': app_id, 'runtime_id': runtime_id}
+    write_staged_bundle(STAGE, files)
+    metadata['system_apps'] = {'navigation': dict(metadata)}
+    for name, official_files in official_bundles(values).items():
+        write_staged_bundle(STAGE.parents[1] / name / 'bundle', official_files)
+        metadata['system_apps'][name] = {'source_sha256': source_digest(official_files),
+                                       'source_id': 'os.' + name, 'runtime_id': 'os.' + name}
+    selection = selection_bytes()
     if not SELECTION.is_file() or SELECTION.read_bytes() != selection:
         SELECTION.write_bytes(selection)
-    return {'source_sha256': digest, 'source_id': app_id, 'runtime_id': runtime_id}, files
+    return metadata, files
 
 
-def build(values):
-    verify_source()
-    metadata, files = stage(values)
-    spec = LOCK['build']
-    command('cargo', 'build', '--locked', '-p', spec['package'], '--bin', spec['binary'],
-            '--no-default-features', '--features', ','.join(spec['features']), '--target-dir', TOOLCHAIN / 'target', env=host_env())
-    require(source_digest(bundle_files(values)) == metadata['source_sha256'], '构建期间 bundle 已改变；请重新运行命令。')
-    packs = sorted((TOOLCHAIN / 'target/debug/build').glob('octosense-app-hub-app-*/out/system-navigation.pack.json'),
-                   key=lambda p: p.stat().st_mtime, reverse=True)
-    require(bool(packs), '未找到官方生成的 system-app 包。')
-    packed = json.loads(packs[0].read_bytes())['files']
-    require(set(packed) == set(files), '官方 system-app 包的文件集合与当前源码不符。')
-    decoded = {name: base64.b64decode(data) for name, data in packed.items()}
+def verify_pack(path, files, runtime_id, values):
+    require(path.is_file(), f'未找到官方生成的 {path.name}。')
+    pack = json.loads(path.read_bytes())
+    require(pack['schema'] == 1 and set(pack['files']) == set(files),
+            '官方 system-app 包的 schema 或文件集合与当前源码不符。')
+    decoded = {name: base64.b64decode(data, validate=True) for name, data in pack['files'].items()}
     for name, data in decoded.items():
         no_secrets(data, values, '官方 system-app 包')
         if name != 'manifest.json':
             require(data == files[name], '官方 system-app 包含旧源码；拒绝启动。')
     packed_manifest = json.loads(decoded['manifest.json'])
-    require(packed_manifest['id'] == metadata['runtime_id'], '官方 system-app id 不符。')
+    require(packed_manifest['id'] == runtime_id, '官方 system-app id 不符。')
+    bundle_digest = packed_manifest['integrity']['bundle_blake3']
+    require(isinstance(bundle_digest, str) and re.fullmatch(r'[0-9a-f]{64}', bundle_digest),
+            '官方 system-app 缺少有效的 bundle 摘要。')
     expected_manifest = json.loads(files['manifest.json'])
-    expected_manifest['integrity']['bundle_blake3'] = packed_manifest['integrity']['bundle_blake3']
+    expected_manifest['integrity']['bundle_blake3'] = bundle_digest
     require(packed_manifest == expected_manifest, '官方 system-app 清单与当前源码不符。')
-    metadata['bundle_blake3'] = packed_manifest['integrity']['bundle_blake3']
+    return bundle_digest
+
+
+def build(values):
+    verify_source()
+    metadata, files = stage(values)
+    bundles = {'navigation': files, **official_bundles(values)}
+    spec = LOCK['build']
+    args = ['cargo', 'build', '--locked', '-p', spec['package'], '--bin', spec['binary'],
+            '--no-default-features', '--features', ','.join(spec['features']),
+            '--target-dir', str(TOOLCHAIN / 'target'), '--message-format=json']
+    print('+', ' '.join(args), flush=True)
+    result = subprocess.run(args, cwd=SOURCE, env=host_env(), stdout=subprocess.PIPE, text=True)
+    out_dirs = set()
+    for line in result.stdout.splitlines():
+        event = json.loads(line)
+        if event.get('reason') == 'compiler-message':
+            print(event['message'].get('rendered') or event['message']['message'], end='', flush=True)
+        if event.get('reason') == 'build-script-executed' and re.search(
+                r'(?:^|[#/])octosense-app-hub-app(?:[@ ]|$)', event.get('package_id', '')):
+            out_dirs.add(Path(event['out_dir']))
+    require(result.returncode == 0, '官方宿主构建失败。')
+    require(len(out_dirs) == 1, '本次构建未唯一报告官方 system-app 输出目录；拒绝使用旧包。')
+    out_dir = out_dirs.pop()
+    require(source_digest(bundle_files(values)) == metadata['source_sha256'], '构建期间 bundle 已改变；请重新运行命令。')
+    current_official = official_bundles(values)
+    require(SELECTION.read_bytes() == selection_bytes(), '构建期间 system-app 选择已改变。')
+    for name, staged_files in bundles.items():
+        app = metadata['system_apps'][name]
+        if name != 'navigation':
+            require(source_digest(current_official[name]) == app['source_sha256']
+                    and current_official[name] == staged_files, '构建期间官方 bundle 已改变。')
+        require(bundle_files(values, STAGE.parents[1] / name / 'bundle') == staged_files,
+                '构建期间暂存 bundle 已改变。')
+        app['bundle_blake3'] = verify_pack(out_dir / f'system-{name}.pack.json', staged_files, app['runtime_id'], values)
+    metadata['bundle_blake3'] = metadata['system_apps']['navigation']['bundle_blake3']
     metadata['host_revision'] = LOCK['octosense']['revision']
-    metadata['host_overlay_tree'] = LOCK['location_overlays']['octosense']['tree']
+    metadata['host_overlay_tree'] = LOCK['maps_overlays']['octosense']['tree']
+    metadata['hub_overlay_tree'] = LOCK['maps_overlays']['app_hub']['tree']
+    metadata['host_binary_sha256'] = hashlib.sha256(BINARY.read_bytes()).hexdigest()
     (BUILD / 'build.json').write_bytes(json_bytes(metadata))
     print('当前源码 SHA-256:', metadata['source_sha256'], flush=True)
     return metadata
@@ -283,8 +350,10 @@ def bootstrap():
         command('git', 'remote', 'add', 'origin', spec['url'], cwd=hub)
         command('git', 'fetch', '--depth', '1', 'origin', spec['revision'], cwd=hub)
         command('git', 'checkout', '--detach', 'FETCH_HEAD', cwd=hub)
-    apply_overlay(hub, LOCK['location_overlays']['app_hub'])
-    apply_overlay(SOURCE, LOCK['location_overlays']['octosense'])
+    for name, source in [('app_hub', hub), ('octosense', SOURCE)]:
+        if output('git', 'write-tree', cwd=source) != LOCK['maps_overlays'][name]['tree']:
+            apply_overlay(source, LOCK['location_overlays'][name])
+        apply_overlay(source, LOCK['maps_overlays'][name])
     command(sys.executable, SOURCE / 'tools/setup.py', '--no-hub', '--cache', ROOT.parent / '.octosense-agentic26')
     build(env_values(required=False))
 
@@ -451,13 +520,44 @@ def doctor():
     verify_source()
     values = env_values()
     bundle_files(values)
+    for name, files in official_bundles(values).items():
+        require(bundle_files(values, STAGE.parents[1] / name / 'bundle') == files,
+                f'暂存 {name} 与固定官方 bundle 不符；请重新构建。')
+    require(SELECTION.is_file() and SELECTION.read_bytes() == selection_bytes(),
+            '开发宿主必须选择 Navigation、Maps、Mail；请重新构建。')
     require(BINARY.is_file(), '缺少官方宿主二进制；运行 make agent-bootstrap。')
-    print('固定官方源码、定位覆盖补丁、运行时补丁、MiniMax-M3 单 provider/无 fallback 配置及 bundle 凭据边界通过；未调用外部服务。')
+    require((BUILD / 'build.json').is_file(), '缺少当前构建记录；运行 make agent-build。')
+    metadata = json.loads((BUILD / 'build.json').read_bytes())
+    require(metadata['source_sha256'] == source_digest(bundle_files(values))
+            and metadata['host_overlay_tree'] == LOCK['maps_overlays']['octosense']['tree']
+            and metadata['hub_overlay_tree'] == LOCK['maps_overlays']['app_hub']['tree']
+            and metadata['host_binary_sha256'] == hashlib.sha256(BINARY.read_bytes()).hexdigest(),
+            '构建记录、应用源码或宿主二进制已改变；运行 make agent-build。')
+    print('固定官方源码、定位与 Maps 窄选点覆盖补丁、运行时补丁、MiniMax-M3 单 provider/无 fallback 配置及 Navigation／固定官方 Maps、Mail 包和选择、凭据边界通过；未调用外部服务。')
+
+
+def check():
+    verify_source()
+    values = env_values(required=False)
+    bundle_files(values)
+    command('cargo', 'build', '--locked', '-p', 'octosense-app-hub', '--bin', 'hub',
+            '--target-dir', TOOLCHAIN / 'target', env=host_env())
+    harness_root = Path(os.environ.get('AGENTIC26_TOOLCHAIN', ROOT.parent / '.octosense-agentic26')).expanduser().resolve()
+    harness = harness_root / 'OctoScript-App-Design-Flow/tools/octo'
+    require(harness.is_file(), '缺少固定官方检查 harness；先运行 make bootstrap。')
+    harness_lock = json.loads((ROOT / 'toolchain/sources.lock.json').read_bytes())['repositories']['OctoScript-App-Design-Flow']
+    require(output('git', 'rev-parse', 'HEAD', cwd=harness.parent.parent) == harness_lock['revision']
+            and not output('git', 'diff', 'HEAD', '--', 'tools/octo', cwd=harness.parent.parent),
+            '官方检查 harness 与固定版本不符。')
+    env = host_env()
+    env.update(OCTOSENSE_APP_HUB=str(SOURCE / '.sources/app-hub'), OCTO_HUB=str(TOOLCHAIN / 'target/debug/hub'))
+    command(sys.executable, harness, 'check', ROOT / 'bundle', cwd=ROOT, env=env)
+    no_secrets((ROOT / 'bundle/manifest.json').read_bytes(), values, '盖摘要后的清单')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('bootstrap', 'doctor', 'init-demo', 'dev', 'hidden', 'stop', 'status', 'tree', 'logs', 'shot'))
+    parser.add_argument('action', choices=('bootstrap', 'doctor', 'check', 'build', 'init-demo', 'dev', 'hidden', 'stop', 'status', 'tree', 'logs', 'shot'))
     parser.add_argument('--demo', action='store_true', help='明确使用模拟定位；默认请求系统实时定位。')
     parser.add_argument('--output', type=Path, default=BUILD / 'screenshot.png')
     args = parser.parse_args()
@@ -465,6 +565,10 @@ def main():
         bootstrap()
     elif args.action == 'doctor':
         doctor()
+    elif args.action == 'check':
+        check()
+    elif args.action == 'build':
+        build(env_values(required=False))
     elif args.action == 'init-demo':
         init_demo()
     elif args.action in ('dev', 'hidden'):

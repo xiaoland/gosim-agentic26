@@ -1,0 +1,404 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 4a48adb..7b3dbae 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1721,7 +1721,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
+ dependencies = [
+  "quote",
+- "syn 3.0.5",
++ "syn 2.0.119",
+ ]
+ 
+ [[package]]
+@@ -7450,8 +7450,6 @@ dependencies = [
+ [[package]]
+ name = "octosense-app-contract"
+ version = "1.0.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "6df5ab53906a90e05be4e32693728539486f404bd8639d2782534338631200bf"
+ dependencies = [
+  "blake3",
+  "serde",
+@@ -10596,7 +10594,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+ dependencies = [
+  "fastrand",
+- "getrandom 0.4.3",
++ "getrandom 0.3.4",
+  "once_cell 1.21.4",
+  "rustix",
+  "windows-sys 0.61.2",
+diff --git a/Cargo.toml b/Cargo.toml
+index ade2e4d..f7bb885 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -267,6 +267,8 @@ ruma = { git = "https://github.com/project-robius/ruma.git", branch = "tsp" }
+ # 18fcd3f1 (octos main no longer vendors it). Not an octos crate: `cargo tree
+ # -i octos-core` still sees one octos source.
+ [patch.crates-io]
++# Same-version contract overlay: the foreground Maps picker capability.
++octosense-app-contract = { path = ".sources/app-hub/crates/app-contract" }
+ nix = { git = "https://github.com/octos-org/octos.git", rev = "18fcd3f16e527d2b601d7ae244f056fb711bb6b8" }
+ 
+ # Navigation local overlay: cancel-aware one-shot location service.
+diff --git a/apps/maps/bundle/main.splash b/apps/maps/bundle/main.splash
+index 4355760..cff00c6 100644
+--- a/apps/maps/bundle/main.splash
++++ b/apps/maps/bundle/main.splash
+@@ -1,3 +1,55 @@
++let picker_id = 0
++let picker_polling = false
++fn picker_ui(){
++    ui.cancel_picker.set_visible(picker_id > 0)
++    ui.choose_box.set_visible(picker_id > 0)
++    ui.directions.set_visible(picker_id == 0)
++}
++fn poll_picker(){
++    if picker_polling { return }
++    picker_polling = true
++    host.request("maps.pending", {}, fn(r){
++        picker_polling = false
++        if !r.is_ok { return }
++        if r.data.active == true {
++            if picker_id != r.data.selection_id {
++                picker_id = r.data.selection_id
++                place = nil
++                // The native setter ignores empty strings; an incomplete polyline decodes to no route.
++                ui.plan_map.set_nav_polyline("?")
++                ui.plan_map.set_route_markers("")
++                finding = ""
++                ui.search.set_text(r.data.search_hint)
++                search_for(r.data.search_hint)
++                show("search")
++                ui.search_hint.set_text("Choose a destination to return to Navigation")
++                picker_ui()
++            }
++        } elif picker_id > 0 {
++            picker_id = 0
++            show("search")
++            picker_ui()
++        }
++    })
++}
++fn accept_picker(){
++    if picker_id == 0 || place == nil { return }
++    let token = picker_id
++    host.request("maps.select", {selection_id: token name: place.name label: place.label lat: place.lat lon: place.lon}, fn(r){
++        if picker_id != token { return }
++        if r.is_ok && r.data.success { picker_id = 0; picker_ui() }
++        else { ui.picker_note.set_text("This selection could not be returned. Choose again or cancel.") }
++    })
++}
++fn dismiss_picker(){
++    if picker_id == 0 { return }
++    let token = picker_id
++    host.request("maps.dismiss", {selection_id: token}, fn(r){
++        if picker_id != token { return }
++        if r.is_ok && r.data.success { picker_id = 0; picker_ui() }
++    })
++}
++
+ let origin = {lat: 37.3350 lon: -121.8850 name: "San Jose (downtown)" picked: false}
+ let q = ""
+ let loaded_q = ""
+@@ -50,6 +102,7 @@ fn read_hits(){
+     ui.results.render()
+ }
+ fn pick(p){
++    if picker_id > 0 { place = p; show("place"); return }
+     if finding == "stop" {
+         stops.push({lat: p.lat lon: p.lon name: p.name})
+         finding = ""
+@@ -172,9 +225,19 @@ fn progress(){
+     sys.navsecs(km * 1000 / 15.2) * 15.2
+ }
+ fn tick(){
+-    fix_origin()
++    poll_picker()
++    if picker_id == 0 { fix_origin() }
+     if screen == "search" || screen == "origin" || screen == "stop" { read_hits() }
+-    if screen == "place" {
++    if screen == "place" && picker_id > 0 {
++        let key = "picker:" + picker_id + ":" + place.lat + "," + place.lon
++        if shown_route != key {
++            ui.plan_map.set_route_markers("" + place.lat + "," + place.lon + ",2")
++            ui.plan_map.nav_center_origin()
++            ui.peta.set_text("Selected destination · route not started")
++            shown_route = key
++        }
++    }
++    if screen == "place" && picker_id == 0 {
+         ui.peta.set_text(sys.navroute(origin.lat, origin.lon, place.lat, place.lon, "min") + "  ·  " + sys.navroute(origin.lat, origin.lon, place.lat, place.lon, "km"))
+         draw_route(ui.plan_map)
+     }
+@@ -247,6 +310,7 @@ View{width: Fill height: Fill flow: Overlay show_bg: true draw_bg.color: #xe8eae
+     }
+     View{width: Fill height: Fill flow: Down padding: Inset{left: 10 right: 10 top: 10 bottom: 16}
+         search_panel := Panel{
++            cancel_picker := Link{visible: false text: "Cancel selection" on_click: || dismiss_picker()}
+             search_hint := Label{text: "Where to?" draw_text.color: secondary draw_text.text_style.font_size: 12}
+             search := TextInput{width: Fill height: 40 empty_text: "Search Maps"
+                 on_return: |text| search_for(text)
+@@ -276,7 +340,12 @@ View{width: Fill height: Fill flow: Overlay show_bg: true draw_bg.color: #xe8eae
+             pcat := Label{width: Fill text: "" draw_text.color: #xe37400 draw_text.text_style.font_size: 12}
+             paddr := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
+             peta := Label{width: Fill text: "" draw_text.color: #x188038 draw_text.text_style.font_size: 13}
+-            Primary{text: "Directions" on_click: || show("route")}
++            choose_box := View{visible: false width: Fill height: Fit flow: Down spacing: 6
++                Primary{text: "Use this destination" on_click: || accept_picker()}
++                Link{text: "Cancel selection" on_click: || dismiss_picker()}
++                picker_note := Label{width: Fill text: "" draw_text.color: secondary}
++            }
++            directions := Primary{text: "Directions" on_click: || show("route")}
+         }
+         route_panel := Panel{visible: false
+             modes := View{width: Fill height: Fit flow: Right spacing: 6 on_render: || {
+diff --git a/apps/maps/bundle/manifest.json b/apps/maps/bundle/manifest.json
+index ae4a52f..3f2fc27 100644
+--- a/apps/maps/bundle/manifest.json
++++ b/apps/maps/bundle/manifest.json
+@@ -9,7 +9,8 @@
+   "capabilities": [
+     "storage",
+     "net",
+-    "location"
++    "location",
++    "maps"
+   ],
+   "network": {
+     "hosts": [
+diff --git a/crates/shell/src/apps.rs b/crates/shell/src/apps.rs
+index 5290cff..b7c79e1 100644
+--- a/crates/shell/src/apps.rs
++++ b/crates/shell/src/apps.rs
+@@ -160,6 +160,7 @@ fn register_host_services() {
+     ONCE.call_once(|| {
+         crate::glance::register();
+         crate::location::register();
++        crate::maps_pick::register();
+         let demo = std::env::var("MAKEPAD_APP_CONFIG")
+             .ok()
+             .and_then(|text| makepad_strict_json::parse(text.as_bytes()).ok())
+diff --git a/crates/shell/src/lib.rs b/crates/shell/src/lib.rs
+index 107d50b..95b7bd7 100644
+--- a/crates/shell/src/lib.rs
++++ b/crates/shell/src/lib.rs
+@@ -70,6 +70,8 @@ pub mod ext;
+ pub mod glance;
+ #[cfg(any(feature = "app-hub", native_mobile))]
+ pub mod location;
++#[cfg(any(feature = "app-hub", native_mobile))]
++pub mod maps_pick;
+ pub mod glance_card;
+ pub mod glance_panel;
+ pub mod system_chat;
+@@ -5869,6 +5871,34 @@ impl App {
+                 location::foreground_app(launch_id, &apps::card_apps())
+             });
+             location::pump(cx, event, foreground.as_deref());
++            let focused = self.state.as_ref().and_then(|s| s.layout.focused_client());
++            let clients: Vec<_> = self.state.as_ref().map(|s| s.clients.iter().map(|(id,c)| (*id,c.app.clone())).collect()).unwrap_or_default();
++            let registry = apps::card_apps();
++            let mut instances = Vec::new();
++            for (client, launch_id) in &clients {
++                let Some(app) = location::foreground_app(&launch_id, &registry) else { continue; };
++                let Some(instance) = self.module_host.get(*client) else { continue; };
++                let splash = instance.root.splash(cx, ids!(card));
++                let heap = splash.borrow_mut().and_then(|mut view| view.isolate_heap_key(cx));
++                if let Some(heap) = heap { instances.push(maps_pick::Instance { client: *client, app, heap }); }
++            }
++            for action in maps_pick::tick(cx, &instances, &clients.iter().map(|(id,_)| *id).collect::<Vec<_>>(), focused) {
++                match action {
++                    maps_pick::Action::Open => {
++                        if clients::find_app("maps").is_some_and(|app| app.bin == "card") {
++                            self.launch_app(cx, "maps");
++                            if let Some(client) = self.state.as_ref().and_then(|s| s.layout.focused_client()) {
++                                if self.state.as_ref().and_then(|s| s.clients.get(&client)).is_some_and(|c| c.app == "maps") { maps_pick::window_opened(client); }
++                                else { maps_pick::unavailable(); }
++                            } else { maps_pick::unavailable(); }
++                        }
++                        else { maps_pick::unavailable(); }
++                    }
++                    maps_pick::Action::Return(client) => {
++                        if self.state.as_ref().is_some_and(|s| s.clients.contains_key(&client)) { self.activate_client(cx, client); }
++                    }
++                }
++            }
+         }
+         // A quit that waited on instances asking the person goes ahead once
+         // the last of them confirmed (or failed and has nothing left to ask).
+diff --git a/crates/shell/src/maps_pick.rs b/crates/shell/src/maps_pick.rs
+new file mode 100644
+index 0000000..426c457
+--- /dev/null
++++ b/crates/shell/src/maps_pick.rs
+@@ -0,0 +1,168 @@
++//! Foreground Maps search selection, returned to the exact requesting isolate.
++//! No app chooses its caller identity, window, source label or selection time.
++use makepad_widgets::{Cx, Timer};
++use makepad_widgets::makepad_platform::SignalToUI;
++use octosense_appstore::services::{HostService, Replier, ServiceCall, ServiceHost};
++use serde_json::{json, Value};
++use std::sync::{Mutex, atomic::{AtomicU64, Ordering}};
++use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
++
++pub struct Instance { pub client: u64, pub app: String, pub heap: usize }
++pub enum Action { Open, Return(u64) }
++struct Request {
++    token: u64, app: String, reply: Replier, hint: String, deadline: Instant,
++    caller: Option<u64>, map_client: Option<u64>, maps: Option<(u64, usize)>, opened: bool,
++}
++struct State { request: Option<Request>, returns: Vec<u64>, timer: Option<Timer> }
++static STATE: Mutex<State> = Mutex::new(State { request: None, returns: Vec::new(), timer: None });
++static NEXT: AtomicU64 = AtomicU64::new(1);
++fn finish(state: &mut State, mut value: Value) {
++    if let Some(request) = state.request.take() {
++        value["request_id"] = json!(request.reply.request_id());
++        request.reply.send(Ok(value));
++        if let Some(client) = request.caller { state.returns.push(client); }
++        SignalToUI::set_ui_signal();
++    }
++}
++fn failure(state: &mut State, code: &str) { finish(state, json!({"success":false,"code":code})); }
++fn text(value: &Value, name: &str, max: usize) -> Option<String> {
++    value.get(name)?.as_str().filter(|v| v.len() <= max && !v.chars().any(char::is_control)).map(str::to_string)
++}
++fn fields(value: &Value, keys: &[&str]) -> bool {
++    value.as_object().is_some_and(|o| o.len() == keys.len() && keys.iter().all(|k| o.contains_key(*k)))
++}
++struct MapsService;
++impl HostService for MapsService {
++    fn family(&self) -> &'static str { "maps" }
++    fn timeout(&self, call: &ServiceCall) -> Duration {
++        Duration::from_secs(if call.method() == "pick" { 305 } else { 60 })
++    }
++    fn call(&mut self, call: ServiceCall, reply: Replier, _host: &mut dyn ServiceHost) {
++        let request_id = reply.request_id();
++        let refuse = |code: &str| reply.clone().send(Ok(json!({"success":false,"request_id":request_id,"code":code})));
++        if call.from_sheet { refuse("invalid_caller"); return; }
++        let mut state = STATE.lock().unwrap();
++        match call.method() {
++            "pick" => {
++                if !call.may_prompt || call.app_id == "os.maps" { refuse("background_not_allowed"); return; }
++                let Some(hint) = text(&call.args, "search_hint", 256).filter(|_| fields(&call.args, &["search_hint"])) else { refuse("invalid_arguments"); return; };
++                if let Some(current) = state.request.as_ref() {
++                    if current.reply.is_pending() && current.reply.isolate_key() != reply.isolate_key() { refuse("picker_busy"); return; }
++                    failure(&mut state, "superseded");
++                }
++                let token = NEXT.fetch_add(1, Ordering::Relaxed);
++                if token == 0 { refuse("unavailable"); return; }
++                state.request = Some(Request { token, app: call.app_id, reply, hint,
++                    deadline: Instant::now()+Duration::from_secs(300), caller: None, map_client: None, maps: None, opened: false });
++                SignalToUI::set_ui_signal();
++            }
++            "cancel" => {
++                let Some(id) = call.args.get("request_id").and_then(Value::as_u64).filter(|id| *id>0 && fields(&call.args, &["request_id"])) else { refuse("invalid_arguments"); return; };
++                let matches = state.request.as_ref().is_some_and(|r| r.app == call.app_id && r.reply.isolate_key() == reply.isolate_key() && r.reply.request_id() == id);
++                if matches { failure(&mut state, "cancelled"); }
++                reply.send(Ok(json!({"success":true,"cancelled":matches})));
++            }
++            "pending" | "select" | "dismiss" => {
++                if call.app_id != "os.maps" { refuse("invalid_caller"); return; }
++                let Some(request) = state.request.as_ref() else { reply.send(Ok(json!({"active":false,"success":false,"code":"stale_request"}))); return; };
++                if !request.reply.is_pending() || !request.maps.is_some_and(|(_, heap)| heap == reply.isolate_key()) { refuse("invalid_caller"); return; }
++                if call.method() == "pending" {
++                    if !fields(&call.args, &[]) { refuse("invalid_arguments"); return; }
++                    reply.send(Ok(json!({"active":true,"selection_id":request.token,"search_hint":request.hint})));
++                    return;
++                }
++                if call.args.get("selection_id").and_then(Value::as_u64) != Some(request.token) { refuse("stale_request"); return; }
++                if call.method() == "dismiss" {
++                    if !fields(&call.args, &["selection_id"]) { refuse("invalid_arguments"); return; }
++                    failure(&mut state, "cancelled"); reply.send(Ok(json!({"success":true}))); return;
++                }
++                if !fields(&call.args, &["selection_id","name","label","lat","lon"]) { refuse("invalid_arguments"); return; }
++                let (Some(name), Some(label), Some(lat), Some(lon)) = (text(&call.args,"name",256).filter(|n| !n.trim().is_empty()),text(&call.args,"label",1024),call.args.get("lat").and_then(Value::as_f64),call.args.get("lon").and_then(Value::as_f64)) else { refuse("invalid_arguments"); return; };
++                if !lat.is_finite() || !lon.is_finite() || !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) { refuse("invalid_arguments"); return; }
++                let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else { refuse("unavailable"); return; };
++                finish(&mut state, json!({"success":true,"name":name,"label":label,"lat":lat,"lon":lon,"coordinate_system":"WGS84","source":"octosense.maps.search","selected_at":now.as_secs()}));
++                reply.send(Ok(json!({"success":true})));
++            }
++            _ => refuse("invalid_arguments"),
++        }
++    }
++}
++pub fn register() { octosense_appstore::services::register_host_service(Box::new(MapsService)); }
++
++/// The shell supplies live card heaps and client ids, never script arguments.
++pub fn tick(cx: &mut Cx, instances: &[Instance], live: &[u64], focused: Option<u64>) -> Vec<Action> {
++    let mut state = STATE.lock().unwrap();
++    let mut actions: Vec<Action> = state.returns.drain(..).map(Action::Return).collect();
++    if state.request.is_some() && state.timer.is_none() { state.timer = Some(cx.start_interval(0.2)); }
++    if let Some(r) = state.request.as_ref() {
++        let caller = instances.iter().find(|i| i.heap == r.reply.isolate_key() && i.app == r.app);
++        let code = if !r.reply.is_pending() || caller.is_none() { Some("caller_closed") }
++            else if Instant::now() >= r.deadline { Some("timeout") }
++            else if r.map_client.is_some_and(|client| !live.contains(&client)) { Some("closed") }
++            else if r.maps.is_some_and(|(client,heap)| !instances.iter().any(|i| i.client==client && i.heap==heap && i.app=="os.maps")) { Some("closed") }
++            else { None };
++        if let Some(code) = code {
++            if code=="caller_closed" { state.request.take(); } else { failure(&mut state, code); }
++        } else {
++            let caller = caller.unwrap().client;
++            let r = state.request.as_mut().unwrap();
++            if !r.opened {
++                if focused != Some(caller) { failure(&mut state,"background_not_allowed"); }
++                else { r.caller=Some(caller); r.opened=true; actions.push(Action::Open); }
++            } else if r.maps.is_none() {
++                if let Some(maps) = instances.iter().find(|i| i.app=="os.maps" && r.map_client==Some(i.client)) { r.maps=Some((maps.client,maps.heap)); }
++            }
++        }
++    }
++    actions.extend(state.returns.drain(..).map(Action::Return));
++    if state.request.is_none() { if let Some(timer)=state.timer.take() { cx.stop_timer(timer); } }
++    actions
++}
++pub fn window_opened(client: u64) {
++    if let Some(request) = STATE.lock().unwrap().request.as_mut() { request.map_client=Some(client); }
++}
++pub fn unavailable() { failure(&mut STATE.lock().unwrap(),"unavailable"); }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use octosense_appstore::services::{dispatch,take_replies_for,cancel_heap};
++    struct Host;
++    impl ServiceHost for Host { fn open_sheet(&mut self,_:String){} fn close_sheet(&mut self){} }
++    fn send(app:&str,heap:usize,id:u64,method:&str,args:Value) {
++        dispatch(ServiceCall { app_id:app.into(),service:format!("maps.{method}"),args,from_sheet:false,may_prompt:true,host_dir:std::env::temp_dir() },heap,id,&mut Host);
++    }
++    fn answer(heap:usize)->Value {
++        let r=take_replies_for(&[heap]);assert_eq!(r.len(),1);serde_json::from_str(r[0].2.as_ref().unwrap()).unwrap()
++    }
++    #[test]
++    fn selection_is_once_only_and_bound_to_both_real_isolates() {
++        register();
++        send("os.nav",91001,1,"pick",json!({"search_hint":"机场"}));
++        let token=STATE.lock().unwrap().request.as_ref().unwrap().token;
++        { let mut s=STATE.lock().unwrap();let r=s.request.as_mut().unwrap();r.caller=Some(41);r.map_client=Some(42);r.maps=Some((42,91002)); }
++        send("os.nav",91001,2,"select",json!({"selection_id":token,"name":"forged","label":"","lat":1,"lon":1}));
++        assert_eq!(answer(91001)["code"],"invalid_caller");
++        send("os.maps",91003,1,"dismiss",json!({"selection_id":token}));
++        assert_eq!(answer(91003)["code"],"invalid_caller");
++        send("os.maps",91002,1,"select",json!({"selection_id":token+1,"name":"old","label":"","lat":1,"lon":1}));
++        assert_eq!(answer(91002)["code"],"stale_request");
++        send("os.nav",91004,1,"cancel",json!({"request_id":1}));
++        assert_eq!(answer(91004)["cancelled"],false);
++        send("os.maps",91002,2,"select",json!({"selection_id":token,"name":"Public test place","label":"Fixture only","lat":39.96491,"lon":116.31604}));
++        assert_eq!(answer(91002)["success"],true);
++        let selected=answer(91001);assert_eq!(selected["request_id"],1);assert_eq!(selected["coordinate_system"],"WGS84");assert!(selected["selected_at"].as_u64().unwrap()>0);
++        send("os.maps",91002,3,"select",json!({"selection_id":token,"name":"duplicate","label":"","lat":1,"lon":1}));
++        assert_eq!(answer(91002)["code"],"stale_request");assert!(take_replies_for(&[91001]).is_empty());
++        send("os.nav",91001,3,"pick",json!({"search_hint":""}));
++        send("os.nav",91001,4,"pick",json!({"search_hint":"new"}));
++        assert_eq!(answer(91001)["code"],"superseded");
++        send("os.nav",91001,5,"cancel",json!({"request_id":3}));
++        assert_eq!(answer(91001)["cancelled"],false);
++        send("os.nav",91001,6,"cancel",json!({"request_id":4}));
++        let replies=take_replies_for(&[91001]);assert_eq!(replies.len(),2);
++        assert!(replies.iter().any(|(_,id,r)|*id==4 && serde_json::from_str::<Value>(r.as_ref().unwrap()).unwrap()["code"]=="cancelled"));
++        assert!(STATE.lock().unwrap().request.is_none());
++        for heap in [91001,91002,91003,91004] {cancel_heap(heap);}
++    }
++}

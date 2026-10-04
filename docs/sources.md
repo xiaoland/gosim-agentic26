@@ -40,6 +40,16 @@ Project 中 ChatGPT 给出的架构/赛事解释是二手材料。“最晚出�
 - [model.complete 参数与选择逻辑](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/ai-providers/host-service/src/complete/mod.rs)及[请求封装](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/ai-providers/host-service/src/complete/wire.rs)：只接受 task、input、schema、class、allow_urls；拒绝额外字段。它按宿主提供方顺序与 fast／strong 分类选模型，可能尝试其他提供方；本项目隔离配置只允许 MiniMax-M3 且无 fallback。返回经 schema 校验的 JSON，没有原生工具调用或历史透传；应用侧 callback 循环已完成两轮真实调用与工具结果回传。该版本不透传 thinking／extra_body；input、schema 上限分别为 32、8 KiB，宿主服务等待上限为 60 秒。
 - [当前锁定 SCRIPT-API](https://github.com/OctoSense-org/OctoScript-App-Design-Flow/blob/e08517254d9b2c316352eec4f959810d9ad22d40/docs/SCRIPT-API.md#network)记录 `net.http_request` 的 HTTPS 请求及 `fs` 的应用隔离存储访问。接口存在不等于模型凭据通道或多源文件导入已实现；网络主机声明及权限仍须满足。
 
+## 0.2 应用联动调查
+
+2026-10-03 对照固定 OctoSense `d405d5c` 与官方最新 `4a541777298eb4f85d9ac8ec2b83fab9e12ce909`。最新版本已经有 [Calendar 服务](https://github.com/OctoSense-org/OctoSense/blob/4a541777298eb4f85d9ac8ec2b83fab9e12ce909/apps/calendar/host-service/src/lib.rs)，但只接受 `os.calendar` 调用，工具没有跨应用共享声明；其 [脚本界面](https://github.com/OctoSense-org/OctoSense/blob/4a541777298eb4f85d9ac8ec2b83fab9e12ce909/apps/calendar/bundle/main.splash)仍是说明页。固定版本没有该 bundle，不能据此说整个生态没有 Calendar，也不能据新版服务存在就说 Navigation 已能读取日历。新版 [native-apps.json](https://github.com/OctoSense-org/OctoSense/blob/4a541777298eb4f85d9ac8ec2b83fab9e12ce909/native-apps.json)声明了 Reminders 原生模块与部分只读工具，当前 `app-hub` 构建未启用该原生 feature；只读声明不代表创建提醒已可用。本轮只读调查，没有升级产品工具链。
+
+固定 Maps 的原生界面、Mail 的空账户页面和账户表单打开/取消已在无凭据的隔离实例实测；没有账户登录、邮件读取或真实导航。固定官方 Maps 本身没有跨应用选点回传契约；0.2 的本地窄桥已在隔离探针中验证，属于本仓库扩展。Mail 账户按调用 app 授权，`mail.message` 读取正文会将消息标为已读并尝试同步该标记，不能将它归为纯只读操作。
+
+[高德静态地图](https://lbs.amap.com/api/webservice/guide/api/staticmaps)支持标记与折线；使用公开样例坐标和现有配置取得 PNG 后，已在固定 Makepad 的原生 `Image` 中以字节加载并查看。该证据分别证明服务结果与原生显示，不证明真实用户路线已接入地图，也不证明自由选点或跨应用联动。实验与方案归 [0.2 任务包](../tasks/interaction-integration/packet.md)。
+
+2026-10-04 本地 Maps 扩展隔离验证了搜索结果选择、取消、关闭、非法调用方和旧票据；另用原 Maps 的真实 Photon 搜索输入“深圳宝安国际机场”，选中实际结果并将名称、WGS84 坐标返回原请求实例。公开搜索未读取设备定位或服务 Key；搜索探针底图未显示，不能把它视为瓦片渲染验收。回传源为 `octosense.maps.search`，不是高德 POI 或航站楼核验结果。最终覆盖版本以 `toolchain/agent-runtime.lock.json` 为准。
+
 ## MiniMax M3
 
 应用模型由用户指定，不再是待选提供方。[MiniMax M3 官方页面](https://www.minimaxi.com/models/text/m3)使用模型标识 `MiniMax-M3`；[OpenAI 兼容接口文档](https://platform.minimax.cn/docs/api-reference/text-openai-api)列出该模型和函数工具支持，国内平台 Base URL 为 `https://api.minimax.cn/v1`。本机配置采用此地址，其他地区账户应使用所属平台的地址；不自行改为文档示例中的其他模型。

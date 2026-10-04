@@ -18,7 +18,7 @@
 
 ## 当前任务
 
-[一句话机场 Navigation Agent](../tasks/capability-boundary/packet.md)保存当前直接服务接入方案、官方运行时调查、授权、待验证前提与下一步。已完成的[本地开发与调试闭环](../tasks/local-development/packet.md)和[能力层项目初始化](../tasks/initialization/packet.md)保留各自验证与发布依据。此入口不重复 packet 的进度；后续非简单任务建立或接续对应 packet，并维护有效导航。
+[交互优化与应用联动](../tasks/interaction-integration/packet.md)保存当前任务、授权与实际宿主接口核对。[一句话机场 Navigation Agent](../tasks/capability-boundary/packet.md)保留直接服务接入方案、0.1 用户验收及历史运行证据。已完成的[本地开发与调试闭环](../tasks/local-development/packet.md)和[能力层项目初始化](../tasks/initialization/packet.md)保留各自验证与发布依据。此入口不重复 packet 的进度；后续非简单任务建立或接续对应 packet，并维护有效导航。
 
 ## 采用的 SVC 范围
 

@@ -30,12 +30,12 @@ make agent-dev
 ```
 
 `agent-bootstrap` 默认在仓库同级 `.octosense-agentic26-host-bridge/` 准备固定源码，
-使用官方 `tools/setup.py --no-hub` 应用已锁定的运行时补丁，再执行 `cargo build --locked`。
+按定位覆盖、Maps 覆盖的顺序验证源码树，再使用官方 `tools/setup.py --no-hub` 应用已锁定的运行时补丁并执行 `cargo build --locked`。
 可用 `AGENTIC26_AGENT_TOOLCHAIN` 指定另一隔离目录。启动器拒绝版本或源码摘要不符，
 不会覆盖旧工具链或个人全局模型配置。
 
 应用通过官方 `OCTOSENSE_SYSTEM_APPS` 编译进宿主。启动前复制当前 `bundle/` 到
-忽略的 `build/agent/`，仅在这份副本中为 id 加 `os.` 前缀以进入 stock shell 的应用列表，
+忽略的 `build/agent/`，仅在这份副本中为 id 加 `os.` 前缀以进入 shell 的应用列表，并嵌入固定 Maps 与 Mail 官方 bundle，
 由官方 packer 重新盖摘要。每次启动都增量构建，并核对生成包与当前源码；
 因此编辑 `main.splash` 后需重新执行 `agent-dev` 或 `agent-hidden`。
 输出和 `build/agent/build.json` 记录源码 SHA-256 与实际包的 BLAKE3，避免误用旧内嵌界面。
@@ -78,3 +78,9 @@ localhost 端口。`.local-state/agent/session.json` 记录 PID、端口、进�
 默认 `agent-dev`／`agent-hidden` 使用真实位置；启动器清除假 GPS 注入环境。`agent-demo` 明确使用演示位置，不是实时定位失败后的自动兜底。真实位置来自有权限的前台应用一次请求，宿主取消、关闭或切换应用后停止采集；当前前台判断指宿主内部选中应用，不等于已验证系统窗口失焦策略。系统授权由用户选择，不能由启动器修改 macOS 定位权限。
 
 正式启动器将已锁定构建复制到隔离目录的 `OctoSense Navigation.app/Contents/MacOS/octosense`，补齐 executable、package type 与定位用途 plist，直接执行包内二进制。该启动方式已观察到系统定位授权和真实样本；`open` 的 LaunchServices 启动仍未验证成功，本地包装不含签名或发布承诺。
+
+## Maps 选点覆盖与包检查
+
+`agent-runtime.lock.json` 的 maps_overlays 记录定位基树、增量 patch 摘要、最终源码树和锁文件。原定位 patch 保持独立；bootstrap 可以接续已应用的完整组合，未知修改仍拒绝。Maps 选择模式修改也属于受校验的覆盖，暂存包须与该固定源码一致，不将其称为未修改的官方 Maps。Navigation、Maps 和 Mail 的实际编译产物都逐文件核对；Mail 保留官方入口不表示 Navigation 获得邮箱账户权限。
+
+Maps 能力的同版本 app-contract 通过本地 path patch 进入实际权限策略，Cargo.lock 同步锁定。`make check` 构建同一组合的 Hub CLI，再调用固定 OctoScript-App-Design-Flow harness 完成摘要、验证与预检；无需扩展旧 card-host 的闭名单。应用脚本仍在 bundle，宿主覆盖仅供可复现本地运行，不能把这组 Rust 代码当作初赛 OctoScript 应用包。

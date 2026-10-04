@@ -1,0 +1,51 @@
+diff --git a/crates/app-contract/src/manifest.rs b/crates/app-contract/src/manifest.rs
+index 9b7bf0e..ffc4558 100644
+--- a/crates/app-contract/src/manifest.rs
++++ b/crates/app-contract/src/manifest.rs
+@@ -67,6 +67,8 @@ pub const KNOWN_CAPABILITIES: &[&str] = &[
+     // person signs in to on the host's own sheet. The app never holds the
+     // password or the connection.
+     "mail",
++    // Ask Maps for one foreground search result, returned to this app.
++    "maps",
+     // See and arrange the assistant's LLM providers through the host's llm
+     // service. Keys are typed, shown as a QR and scanned only on the host's
+     // own sheets; the app sees masked status, never a key.
+diff --git a/crates/app-hub/src/index.rs b/crates/app-hub/src/index.rs
+index 902db86..e67d6bb 100644
+--- a/crates/app-hub/src/index.rs
++++ b/crates/app-hub/src/index.rs
+@@ -90,6 +90,7 @@ impl Entry {
+                 "prompt" => "Ask you questions".to_string(),
+                 "ledger.read" => "Read your shared data".to_string(),
+                 "location" => "Use your location".to_string(),
++                "maps" => "Choose a place in Maps".to_string(),
+                 "camera" => "Use the camera".to_string(),
+                 "clipboard" => "Use the clipboard".to_string(),
+                 "images" => "Show pictures from any website".to_string(),
+diff --git a/crates/app-policy/src/listing.rs b/crates/app-policy/src/listing.rs
+index 4486982..eee0233 100644
+--- a/crates/app-policy/src/listing.rs
++++ b/crates/app-policy/src/listing.rs
+@@ -164,6 +164,7 @@ pub fn privacy_summary(manifest: &AppManifest) -> Vec<String> {
+     }
+     for (cap, text) in [
+         ("location", "Uses your location."),
++        ("maps", "Lets you choose a place in Maps and returns it to this app."),
+         ("camera", "Uses the camera."),
+         ("clipboard", "Uses the clipboard."),
+         ("prompt", "May ask you questions."),
+diff --git a/crates/appstore/src/services.rs b/crates/appstore/src/services.rs
+index 19b35fb..fb8dcdd 100644
+--- a/crates/appstore/src/services.rs
++++ b/crates/appstore/src/services.rs
+@@ -123,6 +123,9 @@ impl Replier {
+     /// The runner's request identity, for owner-scoped cancellation.
+     pub fn request_id(&self) -> u64 { self.req_id }
+ 
++    /// Host-only isolate identity for returning to the exact caller window.
++    pub fn isolate_key(&self) -> usize { self.heap_key }
++
+     /// Whether the original isolate is still waiting. Device services use
+     /// this to stop acquisition when the runner cancels or closes the heap.
+     pub fn is_pending(&self) -> bool {

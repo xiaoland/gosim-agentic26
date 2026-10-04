@@ -40,5 +40,24 @@
       "patch_sha256": "909ae10db99e64cf888f39b4173c5e59f5969e05fbd3fa4bcce28015913e6482",
       "tree": "9dca73bc50ebad12b57d5c8b0f71d915b8de773f"
     }
+  },
+  "maps_overlays": {
+    "octosense": {
+      "url": "https://github.com/OctoSense-org/OctoSense.git",
+      "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
+      "base_tree": "45c3633964a0ade85394acd1ed949363752f8eba",
+      "patch": "toolchain/patches/octosense-maps-pick.patch",
+      "patch_sha256": "dea159274e9d053fc76f1a55fb7b4070a3f4d67593c1c4c1f05d5bbe9d37ea6e",
+      "tree": "711ecca75cc0034e98a9573b3a7107e112eb2acf",
+      "cargo_lock_sha256": "c693918b5d059b660f512240c7fa591f1b9fd311f18d1388ccc2391dea173314"
+    },
+    "app_hub": {
+      "url": "https://github.com/OctoSense-org/OctoSense-App-Hub.git",
+      "revision": "58c3c8aed8fc811a16d67c5f784a8a44214ff876",
+      "base_tree": "9dca73bc50ebad12b57d5c8b0f71d915b8de773f",
+      "patch": "toolchain/patches/app-hub-maps-pick.patch",
+      "patch_sha256": "e7abd656d4f7e7571a44c6ca82deb679597f3a777f04bd8abbb5b84150986714",
+      "tree": "05877184f329252cc58b28227bb68ec1bfde4e71"
+    }
   }
 }
