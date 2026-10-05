@@ -13,14 +13,32 @@ snapshot() 返回当前真实任务事实，包括 viewport、limits、origin、
 以下是实际执行过的基础表达式，仅说明语法：
 
 ```splash
+fn route_detail(current){
+    for route in current.routes {
+        if route.id == current.viewed_route_id {
+            let text = route.kind_label + " · " + route.duration_label + " · " + route.price_label
+            if !route.passed {text += "\n" + route.reason}
+            for segment in route.segments {
+                if segment.description != nil {text += "\n" + segment.description}
+                if segment.walking_distance_m != nil {text += "\n步行 " + segment.walking_distance_m + " 米"}
+                for line in segment.buslines {text += "\n" + line.name + "：" + line.departure_stop + " → " + line.arrival_stop}
+            }
+            return text
+        }
+    }
+    return "点路线查看本次查询取得的分段与费用"
+}
+on_facts_changed = fn(current){ui.body.find("detail").set_text(route_detail(current))}
 View{width:Fill height:Fit flow:Down spacing:8
-    title := Label{text:facts.status draw_text +: {text_style:NavRegular{font_size:14}}}
-    Button{text:"查看路线" on_click: || emit({action:"view_route" id:facts.viewed_route_id})}
+    detail := Label{text:route_detail(facts)}
+    if facts.routes.len() > 0 {
+        Button{text:"查看第一条路线" on_click: || emit({action:"view_route" id:facts.routes[0].id})}
+    }
 }
 ```
 
 on_facts_changed 是外层已定义的脚本变量。可在 View 表达式外设置 on_facts_changed = fn(facts){ui.body.find("title").set_text(facts.status)}。不会自动重建整个界面；Input 编辑内容应保留。不存在外层 on_render、self.snapshot、self.viewport 等变量。
 
-用户动作 emit({action:"view_route" id:真实路线ID或"viewed"}) 只本地查看；父应用只处理本次路线查看和地图加载；不把事件转为第二条用户消息或查询续聊。地图可自由放多个命名 Image，emit({action:"map" widget:"image_name" target:真实路线ID或"viewed"或"destination" status_widget:"caption_name"})。父应用分别请求和加载真实高德静态地图；status_widget 是可选命名 Label，显示来源和加载错误。未知或缺失几何不伪造直线。
+用户动作 emit({action:"view_route" id:真实路线ID或"viewed"}) 只本地切换当前查看路线，随后 snapshot().viewed_route_id 更新；它不会自动创建详情页面。提供查看按钮时，生成稿应通过 on_facts_changed 根据实际当前路线更新自己呈现的选择或路线信息，让用户看见操作结果；不得仅发出事件而保持所有内容不变。父应用只处理本次路线查看和地图加载；不把事件转为第二条用户消息或查询续聊。地图可自由放多个命名 Image，emit({action:"map" widget:"image_name" target:真实路线ID或"viewed"或"destination" status_widget:"caption_name"})。父应用分别请求和加载真实高德静态地图；status_widget 是可选命名 Label，显示来源和加载错误。未知或缺失几何不伪造直线。
 
 render_ui 返回本稿真实 diagnostics。错误说明实际变量、语法或原生类型问题，可以根据结果提交下一稿；应用不改写生成源码。

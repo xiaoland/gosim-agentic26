@@ -1541,7 +1541,7 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
     content := ScrollYView{width: Fill height: Fill flow: Down spacing: 8
         feedback := View{width: Fill height: Fit on_render: || {
             Label{draw_text.text_style: NavRegular width: Fill height: Fit flow: Flow.Right{wrap:true} visible: interface_error != "" || interface_inflight || (!generated_active && runtime_status != "")
-                text: if interface_error != "" { "运行时：" + interface_error } elif interface_inflight { "Agent 正在生成界面；可终止" } else { runtime_status } draw_text.color: ink}
+                text: if interface_error != "" { if agent_active { "界面正在修正；可终止本次查询" } else { "生成界面未能正常显示，请重新查询" } } elif interface_inflight { "Agent 正在生成界面；可终止" } else { runtime_status } draw_text.color: ink}
         }}
         generated := Splash{width: Fill height: Fill}
     }

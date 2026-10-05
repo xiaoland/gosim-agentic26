@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """隔离原生宿主验证标准工具会话与实际控件事件；模型回复为合成fixture。"""
-import hashlib, importlib.util, json, re, shutil, subprocess, tempfile, time
+import hashlib, importlib.util, json, re, shutil, subprocess, tempfile, time, sys
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -43,12 +43,39 @@ fn smoke_report(){
 }
 start_timeout(1.0,||{start_task() start_timeout(0.3,||smoke_report())})
 '''
+RECOVERY_FIXTURE=r'''
+let recovery_error=""
+let recovery_feedback=""
+fn agent_pump(token){
+ agent_active=false phase="waiting" render_content()
+ let first=agent_messages[0].content.parse_json() let second=agent_messages[1].content.parse_json()
+ fs.write("harness-smoke.json",{checks:[
+ {name:"原生类型错误原文进入tool结果" passed:!first.success && first.diagnostics.search("color")>=0}
+ {name:"修正中反馈不展示内部堆栈" passed:recovery_feedback=="界面正在修正；可终止本次查询"}
+ {name:"成功稿清掉错误并实际挂载" passed:second.success && interface_error=="" && ui.generated.diagnostics()=="" && ui.generated.find("recovered").text()=="界面已恢复"}
+ ]}.to_json())
+}
+fn agent_tool_result(result){
+ if !result.success {
+ recovery_error=result.diagnostics recovery_feedback=ui.feedback.child(0).text()
+ start_timeout(0.5,||product_agent_tool_result(result))
+ } else {product_agent_tool_result(result)}
+}
+start_timeout(1,||{
+ run_id+=1 agent_active=true phase="running" agent_messages=[]
+ agent_calls=[
+ {id:"bad-ui" type:"function" function:{name:"render_ui" arguments:"{\"source\":\"Label{draw_text.text_style: NavRegular{color:#xf00} text:\\\"错误稿\\\"}\"}"}}
+ {id:"good-ui" type:"function" function:{name:"render_ui" arguments:"{\"source\":\"recovered := Label{text:\\\"界面已恢复\\\"}\"}"}}
+ ] agent_call_index=0 agent_execute_next(run_id)
+})
+'''
 def main():
  sp=importlib.util.spec_from_file_location('agent',ROOT/'tools/agent.py');a=importlib.util.module_from_spec(sp);sp.loader.exec_module(a)
  (ROOT/'build/smoke').mkdir(exist_ok=True,parents=True);w=Path(tempfile.mkdtemp(prefix='navigation-harness-',dir=ROOT/'build/smoke'))
  a.STATE=w/'private-state';a.HOME_DIR=a.STATE/'home';a.CORE=a.STATE/'core';a.SESSION=a.STATE/'session.json'
  for p in [a.STATE,a.HOME_DIR,a.CORE]:p.mkdir(parents=True,exist_ok=True)
- original=(ROOT/'bundle/main.splash').read_text();source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
+ original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
+ if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
  env=a.host_env(True);process=None;port=None
  def q(route,**args):return urlopen(f'http://127.0.0.1:{port}/'+route+('?' + urlencode(args) if args else ''),timeout=15).read()
  def stop():
@@ -86,6 +113,9 @@ def main():
    time.sleep(.1)
   assert report,'宿主未完成工具会话；查看 '+str(w/'native.log')
   assert all(row['passed'] for row in report['checks']),report
+  if recovery:
+   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True)
+   (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print('PASS: 3界面错误恢复检查；'+str(w/'report.json'));return
   time.sleep(3)
   q('k',c='Space',cmd=1,wait=1)
   for ch in 'android':q('k',c='Key'+ch.upper(),wait=1)

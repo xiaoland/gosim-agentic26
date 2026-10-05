@@ -21,7 +21,7 @@
     "support": "https://example.com/support",
     "privacy_policy_url": "https://example.com/privacy"
   },
-  "release_notes": "修复内容换行与纵向滚动，补充原生布局尺寸资料。移除应用行程保存／恢复、任务续接和问题澄清；每次查询初始化独立 Agent 会话，正常模式不混入模拟日历／笔记。交互验收使用 macOS 宿主 Android 手机模式。发布者信息仍为占位。",
+  "release_notes": "修正路线查看的技能接口说明及本地详情更新示例，避免仅发送选择事件却不更新可见内容。渲染修正过程中显示简短反馈，原始执行诊断继续回给 Agent。保持独立查询，不保存或恢复行程、不进行问题澄清。Navigation 局部无衬线字体，默认验收 macOS 宿主 Android 手机模式。发布者信息仍为占位。",
   "age_rating": "all",
   "license": "Apache-2.0"
 }
