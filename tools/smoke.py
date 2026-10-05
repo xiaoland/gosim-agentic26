@@ -96,7 +96,7 @@ start_timeout(1,||{
 TERMINAL_FIXTURE=r'''
 let terminal_task=0 let terminal_token=-1 let terminal_turn=0 let terminal_checks=[]
 let terminal_code="```splash\nLabel{text:\"未执行代码\"}\n```"
-let terminal_source="View{width:Fill height:Fit flow:Down kept := Label{text:\"原生结果仍保留\"} retained := TextInput{text:\"原始输入\"} Button{text:\"改变本地状态\" on_click: || {ui.body.find(\"retained\").set_text(\"本地输入仍保留\") ui.body.find(\"kept\").set_text(\"本地页面仍保留\")}}}"
+let terminal_source="View{width:Fill height:Fit flow:Down kept := Label{text:\"原生结果仍保留\"} retained := TextInput{text:\"原始输入\"} Button{text:\"改变本地状态\" on_click: || {ui.body.find(\"retained\").set_text(\"本地输入仍保留\") ui.body.find(\"kept\").set_text(\"本地页面仍保留\")}} Button{text:\"触发局部错误\" on_click: || {try {ui.body.find(\"missing_local_widget\").set_text(\"不会执行\")} {emit({action:\"runtime_error\" message:\"局部操作失败测试\"})}}}}"
 let terminal_long="" for i in 80 {terminal_long+="本次模型提供的结果说明第"+i+"行：内容应可滚动查看。\n"}
 fn minimax_request(task,input,schema,token,record,done){
  if terminal_token!=token {terminal_token=token terminal_task+=1 terminal_turn=0}
@@ -109,6 +109,7 @@ fn minimax_request(task,input,schema,token,record,done){
 }
 fn terminal_observe(){if !agent_active {start_timeout(0.3,||terminal_check())} else {start_timeout(0.1,||terminal_observe())}}
 fn terminal_check(){
+ let checked="terminal-checked-"+terminal_task+".json" if fs.exists(checked){return} fs.write(checked,"{}")
  if terminal_task==1 {
   terminal_checks.push({name:"正常生成稿不重复终端文字" passed:generated_render_complete && !ui.final_answer.visible() && answer_text==terminal_long+terminal_code})
   terminal_checks.push({name:"正常稿本地页面与输入状态保留" passed:ui.generated.find("kept").text()=="本地页面仍保留" && ui.generated.find("retained").text()=="本地输入仍保留"})
@@ -125,8 +126,8 @@ fn terminal_check(){
  fs.write("terminal-ready.json",{task:terminal_task}.to_json())
  start_timeout(0.1,||terminal_wait())
 }
-fn terminal_wait(){let path="terminal-continue-"+terminal_task+".json" if fs.exists(path){start_task() start_timeout(0.2,||terminal_observe())} else {start_timeout(0.1,||terminal_wait())}}
-fn terminal_start(){if fs.exists("terminal-start.json"){start_task() start_timeout(0.2,||terminal_observe())} else {start_timeout(0.1,||terminal_start())}}
+fn terminal_wait(){let path="terminal-continue-"+terminal_task+".json" if fs.exists(path){let advanced="terminal-advanced-"+terminal_task+".json" if fs.exists(advanced){return} fs.write(advanced,"{}") if terminal_task==1 {fs.write("local-error-state.json",{complete:generated_render_complete area_visible:ui.generated_area.visible() text_visible:ui.final_answer.visible() error:interface_error mailbox:ui.generated.mailbox.text() seen:mailbox_seen}.to_json()) terminal_checks.push({name:"成功稿后局部回调错误不切文字兜底" passed:generated_render_complete && ui.generated_area.visible() && !ui.final_answer.visible() && interface_error!=""})} start_task() start_timeout(0.2,||terminal_observe())} else {start_timeout(0.1,||terminal_wait())}}
+fn terminal_start(){if fs.exists("terminal-start.json"){if fs.exists("terminal-claimed.json"){return} fs.write("terminal-claimed.json","{}") start_task() start_timeout(0.2,||terminal_observe())} else {start_timeout(0.1,||terminal_start())}}
 start_timeout(1,||terminal_start())
 '''
 
@@ -198,6 +199,10 @@ def main():
     (w/('single-result-'+str(task)+'.png')).write_bytes(q('g',raw=1))
     if task==3:assert any('生成执行失败，本次文字结果仍可查看'==v.get('t') for v in rows)
     (w/('single-result-'+str(task)+'.png')).write_bytes(q('g',raw=1))
+    if task==1:
+     row=next(v for v in rows if v.get('t')=='触发局部错误');r=row['r'];q('click',x=r[0]+r[2]/2,y=r[1]+r[3]/2,wait=1);time.sleep(.4)
+     rows=json.loads(q('snap'))['s'];assert any(v.get('i')=='kept' and v['r'][3]>0 for v in rows)
+     (w/'single-result-local-error.png').write_bytes(q('g',raw=1))
     if task==2:
      q('m',k='scroll',x=220,y=600,dy=8000,precise=1,wait=1);time.sleep(.5)
      assert any('```splash' in v.get('t','') for v in json.loads(q('snap'))['s'])

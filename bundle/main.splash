@@ -1440,7 +1440,7 @@ fn agent_execute_next(token){
   elif name=="compare_routes" {present_results("")}
   elif name=="render_ui" {
     interface_revision+=1 let revision=interface_revision mount_interface(p.source,token,revision)
-    start_timeout(0.25,||{if current_task(token) && active_tool==call {let diagnostic=ui.generated.diagnostics() interface_error=diagnostic agent_tool_result({success:diagnostic=="" diagnostics:diagnostic viewport:ui_viewport facts:interface_facts()})}})
+    start_timeout(0.25,||{if current_task(token) && active_tool==call {let diagnostic=ui.generated.diagnostics() interface_error=diagnostic if diagnostic=="" && generated_render_notified {generated_render_complete=true} render_content() agent_tool_result({success:diagnostic=="" diagnostics:diagnostic viewport:ui_viewport facts:interface_facts()})}})
   }
   else {agent_tool_result({success:false error:"未知工具："+name})}
  } {agent_tool_result({success:false error:"工具参数或数据执行错误" status:runtime_status})}
@@ -1452,6 +1452,7 @@ let generated_source = ""
 let generated_area_ready = false
 let generated_active = false
 let generated_render_complete = false
+let generated_render_notified = false
 let interface_scene_json = ""
 let cancelled_input = ""
 let interface_revision = 0
@@ -1465,13 +1466,13 @@ let mailbox_lines = 0
 fn request_current(token,record){ return token == run_id && agent_active }
 fn request_failed(record,text){ agent_active=false active_tool=nil phase="failed" show_status(text) }
 fn stop_interface(){
-    interface_revision += 1 interface_inflight = false generated_active = false generated_render_complete = false generated_source = ""
+    interface_revision += 1 interface_inflight = false generated_active = false generated_render_complete = false generated_render_notified = false generated_source = ""
     invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0
     try { ui.generated.set_text("") ui.generated.set_visible(false) } {}
     render_content()
 }
 fn clear_generated(){
-    generated_active = false generated_render_complete = false generated_source = "" ui_render_generation += 1 invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0 interface_body = "" interface_scene_json = ""
+    generated_active = false generated_render_complete = false generated_render_notified = false generated_source = "" ui_render_generation += 1 invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0 interface_body = "" interface_scene_json = ""
     try { ui.generated.set_text("") ui.generated.set_visible(false) } {}
 }
 fn invalidate_interface(){ stop_interface() clear_generated() interface_error = "" }
@@ -1514,7 +1515,7 @@ fn interface_facts(){
     return {phase: phase status: runtime_status error: interface_error now: time_now() received_at: received_at arrive_by: arrive_by
         origin_available: position_record != nil destination_available: destination_record != nil limits_available: user_limits != nil
         origin: position_record destination: destination_record limits: user_limits source_label: source_label() sources: sources sources_current: source_valid answer: answer_text
-        comparison: if candidates.len() > 0 { comparison_summary() } else { "" } routes: routes viewed_route_id: viewed_route_id maps_available: user_limits != nil viewport: ui_viewport rendering_environment: {scroll:"父区域承载运行反馈；子Splash有限视口内的ScrollYView承载自然高度View/Fit内容" label_default:"宽度Fill、高度Fit、Flow.Right wrap:true；可显式覆盖原生属性"}
+        comparison: if candidates.len() > 0 { comparison_summary() } else { "" } routes: routes viewed_route_id: viewed_route_id maps_available: user_limits != nil viewport: ui_viewport rendering_environment: {scroll:"viewport表示可见区域，不是内容高度上限；父区域承载运行反馈，子ScrollYView中的View/Fit内容可自然增长并滚动" label_default:"宽度Fill、高度Fit、Flow.Right wrap:true；可显式覆盖原生属性"}
         places: picker_pois preview_place: picker_preview_poi place_status: picker_status
         semantics: "点路线只查看；未知金额/等待不等于零。"}
 }
@@ -1546,8 +1547,7 @@ fn refresh_generated_facts(){
     return true
 }
 fn generated_rendered(){
-    generated_render_complete = ui.generated.diagnostics() == ""
-    render_content()
+    generated_render_notified = true
     ui_render_generation += 1
     for widget slot in map_slots { update_map_widget(slot) }
     return true
@@ -1555,7 +1555,7 @@ fn generated_rendered(){
 fn generated_error(message){
  if !generated_active {return true}
  let diagnostic=ui.generated.diagnostics() if diagnostic!="" {message=diagnostic}
- generated_render_complete=false interface_error=message render_content()
+ interface_error=message render_content()
  return true
 }
 fn ui_dispatch_action(action){
@@ -1618,7 +1618,7 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
     content := ScrollYView{width: Fill height: Fill flow: Down spacing: 8
         feedback := View{width: Fill height: Fit on_render: || {
             Label{draw_text.text_style: NavRegular width: Fill height: Fit flow: Flow.Right{wrap:true} visible: interface_error != "" || interface_inflight || ((!generated_active || phase == "failed") && runtime_status != "")
-                text: if phase == "failed" && runtime_status != "" { runtime_status } elif interface_error != "" { if agent_active { "界面正在修正；可终止本次查询" } else { "生成界面未能正常显示，请重新查询" } } elif interface_inflight { "Agent 正在生成界面；可终止" } else { runtime_status } draw_text.color: ink}
+                text: if phase == "failed" && runtime_status != "" { runtime_status } elif interface_error != "" { if generated_render_complete { "界面操作未能完成；已有结果保留" } elif agent_active { "界面正在修正；可终止本次查询" } else { "生成界面未能正常显示，请重新查询" } } elif interface_inflight { "Agent 正在生成界面；可终止" } else { runtime_status } draw_text.color: ink}
         }}
         generated_area := View{width:Fill height:Fit on_render: || {
             generated := Splash{width: Fill height: if ui_viewport != nil {ui_viewport.height} else {Fill} visible:generated_active body:generated_source}

@@ -12,7 +12,7 @@ snapshot() 返回当前真实任务事实，包括 viewport、limits、origin、
 
 有类型的原生成员需要实际类型构造或已有成员扩展，普通对象不能替代它。背景可写 show_bg:true draw_bg +: {color:#xf7f7f7} 或 draw_bg.color:#xf7f7f7。文字可写 draw_text +: {text_style:NavRegular{font_size:14} color:#x162e35}。padding/margin 可用数字或 Inset{top:4 right:4 bottom:4 left:4}；align 用 Align{x:0.5 y:0.5}。这对应锁定 Makepad theme_desktop_dark/button 的原生写法。
 
-以下示例使用普通 View 的可见性切换形成独立详情页面。它是低层交互示例，页面、标题、内容组织由生成稿决定；不提供 RouteSheet 或自动详情组件。两个页面有各自的滚动容器，返回只改变可见性，不重新 render 列表。viewport 是生成区域最近已绘制的可用范围，有限高度让内部 Fill 容器能够计算滚动。
+以下示例使用普通 View 的可见性切换形成独立详情页面。它是低层交互示例，页面、标题、内容组织由生成稿决定；不提供 RouteSheet 或自动详情组件。两个页面有各自的滚动容器，返回只改变可见性，不重新 render 列表。viewport 是生成区域最近已绘制的可见范围，不是内容高度上限；可见视口内的 Fit 内容可自然增长并滚动，有限视口让内部 Fill 容器能够计算滚动。
 
 ```splash
 let opened_route = ""
