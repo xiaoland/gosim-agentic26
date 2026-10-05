@@ -131,12 +131,42 @@ fn terminal_start(){if fs.exists("terminal-start.json"){if fs.exists("terminal-c
 start_timeout(1,||terminal_start())
 '''
 
+TRACE_FIXTURE=r'''
+let trace_fixture_started=false
+let trace_failure_started=false
+fn trace_fixture(){
+ if trace_fixture_started {return} trace_fixture_started=true
+ start_task()
+ let probe={text:"trace-fixture-secret trace-map-secret" value:"before"}
+ trace_emit("snapshot_probe",probe,nil) probe.value="after"
+}
+fn smoke_request(task,input,schema,token,record,done){
+ request_stage(record,"entry")
+ let body={model:"MiniMax-M3" messages:input tools:schema tool_choice:"auto"}
+ let serialized=body.to_json()
+ trace_emit("model_request",{step:record.step body:serialized},nil)
+ let message={role:"assistant" content:"本次合成模型已完成"}
+ if record.step==1 {message.tool_calls=[smoke_call("location-trace","read_location",{}) smoke_call("skill-trace","read_skill",{name:"native_ui"}) smoke_call("render-trace","render_ui",{source:"trace_result := Label{text:\"开发记录验证，实际原生界面\"}"})]}
+ let response={model:"MiniMax-M3" choices:[{message:message finish_reason:"stop"}]}
+ trace_emit("model_response",{step:record.step status:200 body:response.to_json()},nil)
+ start_timeout(0.01,||{if current_task(token){done(response)}})
+}
+fn smoke_call(id,name,args){return {id:id type:"function" function:{name:name arguments:args.to_json()}}}
+fn trace_fixture_poll(){
+ if read_text("trace-go.json")!=nil {trace_fixture()}
+ if trace_state!=nil && !trace_failure_started && read_text("trace-fail-"+trace_state.instance+".json")!=nil {trace_failure_started=true trace_emit("write_failure_probe",{},nil) start_task()}
+ start_timeout(0.1,||trace_fixture_poll())
+}
+start_timeout(0.2,||trace_fixture_poll())
+'''
+
 def main():
  sp=importlib.util.spec_from_file_location('agent',ROOT/'tools/agent.py');a=importlib.util.module_from_spec(sp);sp.loader.exec_module(a)
  (ROOT/'build/smoke').mkdir(exist_ok=True,parents=True);w=Path(tempfile.mkdtemp(prefix='navigation-harness-',dir=ROOT/'build/smoke'))
  a.STATE=w/'private-state';a.HOME_DIR=a.STATE/'home';a.CORE=a.STATE/'core';a.SESSION=a.STATE/'session.json'
  for p in [a.STATE,a.HOME_DIR,a.CORE]:p.mkdir(parents=True,exist_ok=True)
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
+ if '--trace' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+TRACE_FIXTURE
  if '--map-details' in sys.argv:source=original.replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_FIXTURE
  if '--terminal-content' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1)+'\n'+TERMINAL_FIXTURE
  if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
@@ -169,7 +199,72 @@ def main():
   manifest=json.loads((mount/'manifest.json').read_text());manifest['id']='os.agentic26-navigation';(mount/'manifest.json').write_text(json.dumps(manifest));(mount/'main.splash').write_text(source)
   subprocess.run([str(ROOT.parent/'.octosense-agentic26/OctoSense-App-Hub/target/release/hub'),'stamp',str(mount)],stdout=subprocess.DEVNULL,check=True)
   a.init_demo();jail=a.jail_path();a.materialize_skills(ROOT/'bundle',jail);(jail/'private-config.json').write_text('{"location_mode":"demo"}');(jail/'trip.json').write_text('historical fixture ignored');(jail/'agent-run.json').write_text('historical audit ignored')
+  if '--trace' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
+  if '--trace' in sys.argv:
+   d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}')
   launch('native');report=None
+  if '--trace' in sys.argv:
+   time.sleep(2)
+   q('k',c='Space',cmd=1,wait=1)
+   for ch in 'android':q('k',c='Key'+ch.upper(),wait=1)
+   q('k',c='enter',wait=1);time.sleep(1)
+   q('m',k='down',x=200,y=300,wait=1)
+   for y in range(320,570,25):q('m',k='move',x=200,y=y,wait=1)
+   q('m',k='up',x=200,y=570,wait=1);q('t',t='Navigation',wait=1);q('k',c='enter',wait=1);time.sleep(1)
+   (jail/'trace-go.json').write_text('{}')
+   sessions=jail/'dev-trace/0123456789abcdef0123456789abcdef'
+   for _ in range(150):
+    records=[json.loads(x.read_text()) for x in sessions.glob('vm-*/*-*.json')]
+    if any(x['event']=='query_ended' for x in records):break
+    time.sleep(.1)
+   assert records and any(x['event']=='query_ended' for x in records),str(w/'native.log')
+   instances=sorted(x.name for x in sessions.glob('vm-*') if x.is_dir())
+   assert len(instances)>=2,instances
+   (w/'trace-tree.txt').write_bytes(q('d'));(w/'trace-snap-all.json').write_bytes(q('snap',all=1))
+   rows=json.loads(q('snap',q='trace_identity'))['s'];markers=[json.loads(x['t']) for x in rows if x.get('i')=='trace_identity' and x.get('t')]
+   assert len(markers)==1,markers
+   current=markers[0]['instance']
+   for _ in range(100):
+    events=sorted((json.loads(x.read_text()) for x in (sessions/current).glob('*-*.json') if x.is_file()),key=lambda x:x['seq'])
+    if any(x['event']=='query_ended' for x in events):break
+    time.sleep(.1)
+   time.sleep(.3)
+   events=sorted((json.loads(x.read_text()) for x in (sessions/current).glob('*-*.json') if x.is_file()),key=lambda x:x['seq'])
+   # Effective-visible marker identifies the currently drawn Android root.
+   assert len({x['seq'] for x in events})==len(events)
+   bodies=[json.loads(json.loads(x['data'])['body']) for x in events if x['event']=='model_request']
+   calls=[x for x in events if x['event']=='tool_call'];results=[x for x in events if x['event']=='tool_result']
+   assert bodies and bodies[0]['messages'][1]['content']
+   assert {x['call_id'] for x in calls}=={'location-trace','skill-trace','render-trace'}=={x['call_id'] for x in results}
+   assert any(x['event']=='render_result' for x in events)
+   probe=next(json.loads(x['data']) for x in events if x['event']=='snapshot_probe');assert probe['value']=='before' and probe['text']=='[REDACTED] [REDACTED]'
+   a.SESSION.write_text(json.dumps({'pid':process.pid,'process_stamp':a.process_stamp(process.pid),'port':port,'trace_session':'0123456789abcdef0123456789abcdef','log':str(w/'native.log')}))
+   selected=a.read_trace();assert selected[1]==current
+   for file in sessions.rglob('*.json'):
+    assert 'trace-fixture-secret' not in file.read_text() and 'trace-map-secret' not in file.read_text()
+   last=events[-1]['seq'];run=events[-1]['run']
+   (sessions/current/f'{run}-{last+1}.json').mkdir()
+   (jail/('trace-fail-'+current+'.json')).write_text('{}')
+   for _ in range(100):
+    status=json.loads((sessions/current/'status.json').read_text())
+    rows=json.loads(q('snap',q='trace_identity'))['s']
+    marked=json.loads(next(x['t'] for x in rows if x.get('i')=='trace_identity'))
+    if status['state']=='incomplete' and marked['run']>run:
+     later=[json.loads(x.read_text()) for x in (sessions/current).glob('*-*.json') if x.is_file()]
+     if any(x['event']=='query_ended' and x['run']>run for x in later):break
+    time.sleep(.1)
+   assert status['state']=='incomplete' and marked['state']=='incomplete'
+   assert any(x['event']=='query_ended' and x['run']>run for x in later)
+   (w/'trace-android.png').write_bytes(q('g',raw=1))
+   stop();before=sorted(str(x.relative_to(sessions)) for x in sessions.rglob('*'))
+   (jail/'private-config.json').write_text('{"location_mode":"demo"}')
+   launch('trace-off');time.sleep(3)
+   assert sorted(str(x.relative_to(sessions)) for x in sessions.rglob('*'))==before
+   assert not any(x.get('i')=='trace_identity' for x in json.loads(q('snap',q='trace_identity'))['s'])
+   assert any(x.get('t')=='开发记录验证，实际原生界面' for x in json.loads(q('snap'))['s'])
+   assert 'script time budget exceeded' not in (w/'native.log').read_text()+(w/'trace-off.log').read_text()
+   report={'checks':7,'instances':instances,'selected_current_instance':current,'events':len(events),'mode':'Android','synthetic_model':True,'real_native_controls':True,'source_sha256':hashlib.sha256(original.encode()).hexdigest(),'path':str(sessions),'limits':'No real HTTP/provider request; synthetic response uses actual harness/render hooks.'}
+   (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print('PASS: trace '+str(w/'report.json'));return
   if '--terminal-content' in sys.argv:
    time.sleep(3)
    q('k',c='Space',cmd=1,wait=1)

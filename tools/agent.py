@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import platform
 import re
 import shlex
 import shutil
@@ -15,6 +16,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 from urllib.parse import urlsplit
 from urllib.request import urlopen
 
@@ -403,7 +405,7 @@ def materialize_skills(bundle, jail):
         write_private(jail / 'skills' / source.name, source.read_bytes())
 
 
-def configure(values, jail, location_mode="live"):
+def configure(values, jail, location_mode="live", trace=False):
     materialize_skills(STAGE, jail)
     now = datetime.now(timezone.utc).isoformat()
     profile = {'id': '_main', 'name': 'Navigation MiniMax-M3', 'enabled': True, 'created_at': now, 'updated_at': now,
@@ -411,11 +413,23 @@ def configure(values, jail, location_mode="live"):
                           'route': {'base_url': values['MINIMAX_BASE_URL'], 'api_key_env': 'MINIMAX_API_KEY', 'api_type': 'openai'}},
                           'fallbacks': []}, 'env_vars': {'MINIMAX_API_KEY': values['MINIMAX_API_KEY']}}}
     write_private(CORE / 'profiles/_main.json', json_bytes(profile))
+    trace_session = uuid.uuid4().hex if trace else None
+    if trace:
+        private_dir(jail / 'dev-trace' / trace_session)
+        write_private(jail / 'dev-trace' / trace_session / 'instance-counter.json', json_bytes({'next': 1}))
     write_private(jail / 'private-config.json', json_bytes({
         'amap_api_key': values['AMAP_API_KEY'], 'minimax_api_key': values['MINIMAX_API_KEY'],
         'minimax_base_url': values['MINIMAX_BASE_URL'], 'minimax_model': LOCK['model'],
-        'location_mode': location_mode
+        'location_mode': location_mode,
+        'development_trace': trace, 'development_trace_session': trace_session,
+        'development_trace_metadata': {
+            'source_sha256': source_digest(bundle_files(values)),
+            'main_sha256': hashlib.sha256((ROOT / 'bundle/main.splash').read_bytes()).hexdigest(),
+            'host_platform': sys.platform, 'host_architecture': platform.machine(),
+            'runtime_mode': 'unknown', 'model': LOCK['model']
+        } if trace else None
     }))
+    return trace_session
 
 
 def init_demo():
@@ -514,7 +528,7 @@ def packaged_host():
     return executable
 
 
-def start(hidden, demo=False):
+def start(hidden, demo=False, trace=True):
     values = env_values()
     jail = jail_path()
     if demo:
@@ -524,7 +538,7 @@ def start(hidden, demo=False):
     metadata = build(values)
     stop()
     executable = packaged_host()
-    configure(values, jail, "demo" if demo else "live")
+    trace_session = configure(values, jail, "demo" if demo else "live", trace=trace)
     private_dir(STATE / 'logs')
     log = STATE / 'logs' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '.log')
     with log.open('wb') as stream:
@@ -540,7 +554,8 @@ def start(hidden, demo=False):
             if match:
                 require(int(match[2]) == proc.pid, '远程接口 PID 与子进程不符。')
                 session = {'pid': proc.pid, 'port': int(match[1]), 'process_stamp': process_stamp(proc.pid),
-                           'hidden': hidden, 'log': str(log), 'jail': str(jail), **metadata}
+                           'hidden': hidden, 'log': str(log), 'jail': str(jail),
+                           'trace_session': trace_session, **metadata}
                 write_private(SESSION, json_bytes(session))
                 current_session()
                 session['mounted_bundle'] = str(mounted_bundle(metadata))
@@ -598,11 +613,146 @@ def check():
     no_secrets((ROOT / 'bundle/manifest.json').read_bytes(), values, '盖摘要后的清单')
 
 
+def current_trace_identity(host_session):
+    snapshot = json.loads(remote(host_session, 'snap?q=trace_identity'))
+    markers = [row for row in snapshot['s'] if row.get('i') == 'trace_identity']
+    require(len(markers) == 1, '当前可见应用根没有唯一 trace 标识；打开开发应用，或显式指定 --trace-session 和 --trace-instance。')
+    nodes = {}
+    for line in remote(host_session, 'd').decode().splitlines():
+        fields = line.split()
+        if len(fields) == 8 and fields[0].isdigit():
+            nodes[int(fields[0])] = (int(fields[1]), fields[2])
+    shell_markers = []
+    for index, (parent, name) in nodes.items():
+        if name != 'trace_identity' or nodes.get(parent, (None, None))[1] != 'trace_overlay':
+            continue
+        ancestors = []
+        while parent in nodes:
+            parent, name = nodes[parent]
+            ancestors.append(name)
+        if 'generated' not in ancestors:
+            shell_markers.append(index)
+    require(shell_markers, 'trace 标识不在固定外壳 trace_overlay 下；不采用生成内容的同名节点。')
+    identity = json.loads(markers[0]['t'])
+    require(identity.get('session') and identity.get('instance'), '当前开发 trace 初始化失败，未分配可用实例；请检查 counter 与写入状态。')
+    return identity
+
+
+def read_trace(session_id=None, instance=None):
+    jail = jail_path()
+    config = json.loads((jail / 'private-config.json').read_bytes())
+    host_session = None
+    if instance is None:
+        host_session = current_session()
+        identity = current_trace_identity(host_session)
+        require(session_id is None or session_id == identity['session'], '当前应用不属于指定 trace session；历史记录需指定 --trace-instance。')
+        session_id, instance = identity['session'], identity['instance']
+        require(session_id == host_session.get('trace_session'), '当前应用 trace 与启动实例不符。')
+    else:
+        session_id = session_id or config.get('development_trace_session')
+        identity = {'session': session_id, 'instance': instance, 'selection': 'explicit'}
+    require(isinstance(session_id, str) and re.fullmatch(r'[0-9a-f]{32}', session_id), 'trace session 标识无效。')
+    require(isinstance(instance, str) and re.fullmatch(r'vm-[0-9]+', instance), 'trace instance 标识无效。')
+    directory = jail / 'dev-trace' / session_id / instance
+    require(directory.is_dir() and not directory.is_symlink(), '指定的开发 trace 实例目录不存在。')
+    values = env_values(required=False)
+    configured = {'MINIMAX_API_KEY': config.get('minimax_api_key', ''), 'AMAP_API_KEY': config.get('amap_api_key', '')}
+    status_path = directory / 'status.json'
+    require(status_path.is_file() and not status_path.is_symlink(), 'trace 状态尚未写入；不采用旧事件作为当前证据。')
+    status_data = status_path.read_bytes()
+    no_secrets(status_data, values, 'trace 状态')
+    no_secrets(status_data, configured, 'trace 状态')
+    status = json.loads(status_data)
+    require((status.get('session'), status.get('instance')) == (session_id, instance), 'trace 状态与指定实例不符。')
+    if identity.get('state') == 'incomplete':
+        status.update(state='incomplete', error='current VM marker reports trace initialization or write failure')
+    events = []
+    pending_sequences = []
+    for path in directory.glob('*.json'):
+        if path.name == 'status.json':
+            continue
+        sequence = int(path.stem.rsplit('-', 1)[-1])
+        if sequence > status['last_seq']:
+            pending_sequences.append(sequence)
+            continue
+        require(not path.is_symlink(), 'trace 事件不能是符号链接。')
+        if not path.is_file():
+            status.update(state='incomplete', error='event path is not a readable file')
+            continue
+        data = path.read_bytes()
+        no_secrets(data, values, 'trace 事件')
+        no_secrets(data, configured, 'trace 事件')
+        event = json.loads(data)
+        require((event.get('session'), event.get('instance')) == (session_id, instance), 'trace 事件与指定实例不符。')
+        events.append(event)
+    events.sort(key=lambda event: event['seq'])
+    sequences = [event['seq'] for event in events]
+    if sequences != list(range(1, status['last_seq'] + 1)):
+        status.update(state='incomplete', error='committed event sequence is missing or duplicated')
+    if pending_sequences:
+        status.update(state='incomplete', pending_sequences=sorted(pending_sequences),
+                      error='event files are not yet committed by the status snapshot')
+    status['selected_identity'] = identity
+    status['configured_metadata'] = config.get('development_trace_metadata') if session_id == config.get('development_trace_session') else None
+    status['runtime_mode'] = 'unknown'
+    status['host_log'] = {'included': False, 'reason': 'explicit historical instance has no selected launcher log'}
+    if host_session:
+        observed = current_trace_identity(host_session)
+        if observed != identity:
+            status.update(state='incomplete', error='current identity changed during trace selection', observed_identity=observed)
+        log = Path(host_session['log']).read_bytes()
+        status['launcher_metadata'] = {name: host_session.get(name) for name in
+                                      ('pid', 'process_stamp', 'source_sha256', 'host_binary_sha256', 'mounted_bundle')}
+        status['host_log'] = {'included': False, 'source': host_session['log'], 'reason': 'available for trace-export'}
+        styles = re.findall(rb'wm: desktop style ([a-z]+) applied to [0-9]+ clients and [0-9]+ modules', log)
+        if styles:
+            status['runtime_mode'] = styles[-1].decode()
+            status['runtime_mode_evidence'] = 'current launcher log: latest applied desktop style, observed at export'
+    payload = ''.join(json.dumps(event, ensure_ascii=False) + '\n' for event in events).encode()
+    no_secrets(payload, values, 'trace 导出')
+    no_secrets(payload, configured, 'trace 导出')
+    no_secrets(json_bytes(status), values, 'trace 导出状态')
+    no_secrets(json_bytes(status), configured, 'trace 导出状态')
+    return session_id, instance, directory, status, events, payload
+
+
+def trace_output(action, session_id=None, instance=None, destination=None):
+    session_id, instance, directory, status, events, payload = read_trace(session_id, instance)
+    if status.get('state') == 'incomplete':
+        print('agent: trace 记录不完整；具体状态保留在导出状态中。', file=sys.stderr)
+    if action == 'trace-read':
+        sys.stdout.buffer.write(payload)
+    elif action == 'trace-export':
+        destination = (destination or BUILD / 'traces' / session_id / (instance + '.jsonl')).resolve()
+        require(destination.is_relative_to((ROOT / 'build').resolve()), 'trace 只导出到忽略的 build/ 目录。')
+        host_log = None
+        if 'launcher_metadata' in status:
+            host_log = Path(status['host_log']['source']).read_bytes()
+            no_secrets(host_log, env_values(required=False), 'trace 宿主日志')
+            config = json.loads((jail_path() / 'private-config.json').read_bytes())
+            no_secrets(host_log, {'MINIMAX_API_KEY': config.get('minimax_api_key', ''),
+                                  'AMAP_API_KEY': config.get('amap_api_key', '')}, 'trace 宿主日志')
+            status['host_log'].update(included=True, export_file=destination.with_suffix('.host.log').name)
+        write_private(destination, payload)
+        if host_log is not None:
+            write_private(destination.with_suffix('.host.log'), host_log)
+        write_private(destination.with_suffix('.status.json'), json_bytes(status))
+        destination.parent.chmod(0o700)
+        print(destination)
+    else:
+        print(json.dumps({'session': session_id, 'instance': instance, 'directory': str(directory), 'status': status,
+                          'event_count': len(events), 'runs': sorted({event['run'] for event in events})},
+                         ensure_ascii=False, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('bootstrap', 'doctor', 'check', 'build', 'init-demo', 'dev', 'hidden', 'stop', 'status', 'tree', 'logs', 'shot'))
+    parser.add_argument('action', choices=('bootstrap', 'doctor', 'check', 'build', 'init-demo', 'dev', 'hidden', 'stop', 'status', 'tree', 'logs', 'shot', 'trace', 'trace-read', 'trace-export'))
     parser.add_argument('--demo', action='store_true', help='明确使用模拟定位；默认请求系统实时定位。')
-    parser.add_argument('--output', type=Path, default=BUILD / 'screenshot.png')
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--no-trace', action='store_true', help='启动开发实例时关闭私有 trace。')
+    parser.add_argument('--trace-session', help='读取指定历史 session；默认从当前应用根标识选择。')
+    parser.add_argument('--trace-instance', help='显式选择 vm-序号实例；历史导出需与 --trace-session 配合。')
     args = parser.parse_args()
     if args.action == 'bootstrap':
         bootstrap()
@@ -615,9 +765,11 @@ def main():
     elif args.action == 'init-demo':
         init_demo()
     elif args.action in ('dev', 'hidden'):
-        start(args.action == 'hidden', demo=args.demo)
+        start(args.action == 'hidden', demo=args.demo, trace=not args.no_trace)
     elif args.action == 'stop':
         stop()
+    elif args.action in ('trace', 'trace-read', 'trace-export'):
+        trace_output(args.action, args.trace_session, args.trace_instance, args.output)
     else:
         session = current_session()
         if args.action == 'status':
@@ -625,9 +777,10 @@ def main():
         elif args.action == 'shot':
             data = remote(session, 'g?raw=1', timeout=30)
             require(data.startswith(b'\x89PNG\r\n\x1a\n'), '官方远程截图未返回 PNG。')
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_bytes(data)
-            print(args.output.resolve())
+            destination = args.output or BUILD / 'screenshot.png'
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
+            print(destination.resolve())
         else:
             data = remote(session, 'd' if args.action == 'tree' else 'log?n=1000')
             no_secrets(data, env_values(), '远程调试输出')

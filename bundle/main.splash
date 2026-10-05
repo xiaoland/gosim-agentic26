@@ -311,7 +311,7 @@ fn static_map_params(candidate, camera){
 let map_slots = {}
 let map_generation = 0
 let ui_render_generation = 0
-fn invalidate_map(){ map_generation += 1 for id slot in map_slots { slot.request += 1 slot.bytes = nil slot.state = "stale" slot.status = "地图数据已过期" } }
+fn invalidate_map(){ map_generation += 1 for id slot in map_slots { slot.request += 1 slot.bytes = nil slot.state = "stale" slot.status = "地图数据已过期" trace_map("map_stale",slot) } }
 fn map_candidate(target){
     if target == "destination" && destination_record != nil { return {id: "destination:" + destination_record.id segments: [] requested_origin: nil requested_destination: coord_text(destination_record)} }
     if target == "preview" && picker_preview_poi != nil { return {id: "preview:" + picker_preview_poi.id segments: [] requested_origin: nil requested_destination: coord_text(picker_preview_poi)} }
@@ -327,6 +327,7 @@ fn register_map(widget, target, status_widget, interactive){
         map_slots[widget] = slot
     }
     slot.status_widget = status_widget
+    trace_map("map_registered",slot)
     load_interface_map()
     update_map_widget(slot)
 }
@@ -334,12 +335,13 @@ fn load_route_map(candidate){ load_interface_map() }
 fn load_interface_map(){
     for id slot in map_slots {
         let candidate = map_candidate(slot.target)
-        if candidate == nil { slot.request += 1 slot.bytes = nil slot.target_id = "" slot.state = "stale" slot.status = "地图引用已过期" }
+        if candidate == nil { slot.request += 1 slot.bytes = nil slot.target_id = "" slot.state = "stale" slot.status = "地图引用已过期" trace_map("map_stale",slot) }
         elif slot.target_id != candidate.id || slot.generation != map_generation || slot.state == "new" || slot.state == "stale" {
             slot.request += 1 slot.generation = map_generation slot.target_id = candidate.id slot.bytes = nil
             slot.caption = if slot.target == "viewed" { "跟随查看：" } else { "绑定目标：" }
             slot.caption += if slot.target == "destination" { destination_record.name } elif slot.target == "preview" { picker_preview_poi.name } else { kind_text(candidate.kind) + " · " + duration_text(candidate.duration_seconds) + " · " + money_text(candidate.price_cents) }
             slot.state = "loading" slot.status = "地图加载中"
+            trace_map("map_loading",slot)
             let current = slot let route = candidate
             start_timeout(0.01, || { if current.interactive {fit_map_slot(current, route)} else {load_map_slot(current, route)} })
         }
@@ -371,11 +373,12 @@ fn map_camera_changed(event){
     let scale=1.0 if width>1024 {scale=1024/width} if height*scale>1024 {scale=1024/height}
     let camera={center_lon:event.center_lon center_lat:event.center_lat zoom:event.zoom width:width height:height source_width:floor(width*scale) source_height:floor(height*scale) request:event.request}
     slot.camera=camera slot.request+=1 slot.bytes=nil slot.state="loading" slot.status="地图视口更新中"
+    trace_map("map_camera",slot)
     update_map_widget(slot)
     let current=slot let route=candidate let request=slot.request
     start_timeout(0.01,||{if current.request==request {load_map_slot(current,route)}})
 }
-fn map_slot_fail(slot, text){ slot.state = "error" slot.status = text slot.bytes = nil update_map_widget(slot) }
+fn map_slot_fail(slot, text){ slot.state = "error" slot.status = text slot.bytes = nil trace_map("map_error",slot) update_map_widget(slot) }
 fn load_map_slot(slot, candidate){
     let token = run_id let request = slot.request let target_id = candidate.id
     if !map_slot_current(slot, token, request, target_id) { return }
@@ -387,6 +390,7 @@ fn load_map_slot(slot, candidate){
     let private = nil try { let config = read_text("private-config.json") if config != nil { private = config.parse_json() } } { map_slot_fail(slot, "地图配置无效") return }
     let key = route_get(private, "amap_api_key")
     if !key.is_string() || key.trim() == "" { map_slot_fail(slot, "尚未配置地图服务") return }
+    trace_emit("map_request",{widget:slot.id target_id:target_id request:request params:geometry.params},nil)
     let waiting = {settled: false}
     try {
         net.http_request(net.HttpRequest{url: "https://restapi.amap.com/v3/staticmap?key=" + key.url_encode() + geometry.params method: net.HttpMethod.GET}) do net.HttpEvents{
@@ -395,6 +399,7 @@ fn load_map_slot(slot, candidate){
                 if !map_slot_current(slot, token, request, target_id) { return }
                 if res.status_code != 200 { map_slot_fail(slot, "此图服务HTTP " + res.status_code + "；其它图和行程保留") return }
                 let bytes = res.body
+                trace_emit("map_response",{widget:slot.id request:request status:res.status_code bytes:bytes.len()},nil)
                 start_timeout(0.01, || accept_map_slot(slot, bytes, token, request, target_id, detail))
             }
             on_error: |err| { if waiting.settled { return } waiting.settled = true  if map_slot_current(slot, token, request, target_id) { map_slot_fail(slot, "此图网络失败；其它图和行程保留") } }
@@ -408,7 +413,7 @@ fn accept_map_slot(slot, bytes, token, request, target_id, detail){
     if error != nil && route_get(error, "status") != nil {
         map_slot_fail(slot, "地图服务未返回图片（" + route_get(error, "infocode") + "）：" + route_get(error, "info")) return false
     }
-    slot.bytes = bytes slot.state = "ready" slot.status = "高德地图 © AutoNavi；" + detail update_map_widget(slot)
+    slot.bytes = bytes slot.state = "ready" slot.status = "高德地图 © AutoNavi；" + detail trace_map("map_ready",slot) update_map_widget(slot)
     return true
 }
 
@@ -1151,12 +1156,86 @@ fn model_protocol(data){
         has_content: content.is_string() content_bytes: content_bytes expected_tool: route_get(function, "name").is_string()
         arguments_string: route_get(function, "arguments").is_string()}
 }
+// 开发记录不进入业务上下文；每个实际入口先固定数据，再在独立入口写文件。
+let trace_state = nil
+let trace_initialized = false
+let trace_last_diagnostic = ""
+let trace_initialization_error = ""
+let trace_enabled = false
+let trace_session = ""
+fn trace_scrub(text, keys){
+    for key in keys {
+        if key.is_string() && key != "" {
+            let parts = text.split(key) let replaced = ""
+            for index part in parts { if index > 0 { replaced += "[REDACTED]" } replaced += part }
+            text = replaced
+        }
+    }
+    return text
+}
+fn trace_status(state){
+    return {v:1 session:state.session instance:state.instance run:state.run last_seq:state.written_seq state:if state.incomplete {"incomplete"} else {"recording"} error:if state.incomplete {"记录写入未完成；事件可能缺失"} else {""}}
+}
+fn trace_identity_json(){
+    return {session:trace_session instance:if trace_state!=nil {trace_state.instance} else {nil} run:run_id state:if trace_initialization_error!="" {"incomplete"} elif trace_state!=nil && trace_state.incomplete {"incomplete"} else {"recording"} error:trace_initialization_error}.to_json()
+}
+fn trace_marker(){
+    if !trace_enabled {return}
+    try {
+        let current=ui.trace_identity.text().parse_json()
+        if current.session!=trace_session || current.instance!=if trace_state!=nil {trace_state.instance} else {nil} {return}
+        ui.trace_identity.set_text(trace_identity_json())
+    } {}
+}
+fn trace_emit(event, data, call_id){trace_emit_run(event,data,call_id,run_id)}
+fn trace_emit_run(event, data, call_id, run){
+    if trace_state == nil {return}
+    let state = trace_state
+    state.seq += 1
+    let seq = state.seq
+    let envelope = {v:1 session:state.session instance:state.instance run:run seq:seq event:event at:time_now() call_id:call_id data:data.to_json()}.to_json()
+    start_timeout(0.01,||{
+        try {
+            fs.write(state.directory + "/" + run + "-" + seq + ".json",trace_scrub(envelope,state.keys))
+            state.written_seq = seq state.run = run
+        } {state.incomplete = true}
+        try {fs.write(state.directory + "/status.json",trace_status(state).to_json())} {state.incomplete=true}
+        trace_marker()
+    })
+}
+fn trace_initialize(){
+    if trace_initialized {return}
+    trace_initialized=true
+    let config = nil
+    try {let text=read_text("private-config.json") if text!=nil {config=text.parse_json()}} {return}
+    if route_get(config,"development_trace") != true {return}
+    trace_enabled=true
+    let session=route_get(config,"development_trace_session")
+    if !session.is_string() || session=="" {trace_initialization_error="开发记录会话标识缺失" trace_marker() return}
+    trace_session=session
+    // 同一宿主UI线程同步分配；旧/新VM各有独立目录，不竞争current文件。
+    let counter_path="dev-trace/"+session+"/instance-counter.json"
+    let ordinal=nil
+    try {let old=read_text(counter_path) if old!=nil {ordinal=old.parse_json().next}} {trace_initialization_error="实例标识读取失败；开发记录不完整" trace_marker() return}
+    if !ordinal.is_number() || ordinal<1 || ordinal%1!=0 {trace_initialization_error="实例标识计数缺失或无效；开发记录不完整" trace_marker() return}
+    try {fs.write(counter_path,{next:ordinal+1}.to_json())} {trace_initialization_error="实例标识写入失败；开发记录不完整" trace_marker() return}
+    let keys=[]
+    for name in ["minimax_api_key" "amap_api_key"] {let key=route_get(config,name) if key.is_string() && key!="" {keys.push(key) keys.push(key.url_encode())}}
+    trace_state={session:session instance:"vm-"+ordinal directory:"dev-trace/"+session+"/vm-"+ordinal seq:0 written_seq:0 run:run_id incomplete:false keys:keys}
+    try {fs.write(trace_state.directory+"/status.json",trace_status(trace_state).to_json())} {trace_state.incomplete=true}
+    trace_emit("instance_started",{metadata:route_get(config,"development_trace_metadata")},nil)
+}
+fn trace_map(event,slot){
+    trace_emit(event,{widget:slot.id target:slot.target target_id:slot.target_id state:slot.state status:slot.status request:slot.request generation:slot.generation camera:slot.camera},nil)
+}
 fn request_finished(record, state){
     record.state = state record.completed_at = time_now()
     record.wall_seconds = record.completed_at - record.started_at
+    trace_emit_run("transport_finished",{step:record.step state:state wall_seconds:record.wall_seconds http_status:route_get(record,"http_status")},nil,if route_get(record,"run")!=nil {record.run} else {run_id})
 }
 fn request_stage(record, stage){
     record.transport_stage = stage record.stage_at = time_now()
+    trace_emit_run("transport_stage",{step:record.step stage:stage},nil,if route_get(record,"run")!=nil {record.run} else {run_id})
 }
 fn minimax_request(task, input, schema, token, record, done){
     request_stage(record, "entry")
@@ -1173,6 +1252,7 @@ fn minimax_request(task, input, schema, token, record, done){
         messages: input tools: schema tool_choice: "auto"}
     request_stage(record, "body_object")
     let serialized_body = body.to_json()
+    trace_emit_run("model_request",{step:record.step body:serialized_body},nil,token)
     request_stage(record, "body_json")
     let body_bytes = serialized_body.to_bytes()
     request_stage(record, "body_bytes")
@@ -1183,16 +1263,18 @@ fn minimax_request(task, input, schema, token, record, done){
     start_timeout(0.01, || {
         if !request_current(token, record) || waiting.settled { return }
         record.dispatch_started_at = time_now()
+        trace_emit_run("model_dispatch",{step:record.step started_at:record.dispatch_started_at},nil,token)
         try {
         net.http_request(net.HttpRequest{url: "https://api.minimax.cn/v1/chat/completions" method: net.HttpMethod.POST
             headers: {"Content-Type": ["application/json"] "Authorization": ["Bearer " + key]} body: body_bytes}) do net.HttpEvents{
             on_response: |res| {
                 if waiting.settled { return }
                 waiting.settled = true record.http_status = res.status_code request_finished(record, "returned") request_stage(record, "response_entry")
+                let response_text = res.body.to_string()
+                trace_emit_run("model_response",{step:record.step status:res.status_code body:response_text current:request_current(token,record)},nil,token)
                 if !request_current(token, record) { return }
                 try {
                     if res.status_code != 200 { record.state = "http_error" request_failed(record, "模型服务未能完成请求，请稍后重试") return }
-                    let response_text = res.body.to_string()
                     // 宿主每次入口64ms：响应解析与动作执行各用独立timer入口。
                     start_timeout(0.01, || {
                         if !request_current(token, record) { return }
@@ -1245,6 +1327,9 @@ fn start_task(){
     transit_count = 0 transit_completed = 0 driving_done = false driving_completed = false progress_text = "" answer_text = "" phase = "running"
     if user_limits != nil {arrive_by=received_at+user_limits.minutes*60}
     agent_messages=[] agent_active=true
+    trace_initialize()
+    trace_emit("query_started",{input:text facts:interface_facts().to_json()},nil)
+    trace_marker()
     source_records.push({id:"current-input" kind:"user" source:"explicit-current-input" mock:false raw:text read_at:received_at})
     render_content()
     refresh_generated_facts()
@@ -1253,6 +1338,7 @@ fn start_task(){
 
 
 fn cancel_task(){
+    trace_emit("query_stopped",{},nil)
     cancelled_input = ui.sentence.text().trim()
     stop_interface()
     cancel_pending_location()
@@ -1382,7 +1468,7 @@ fn agent_begin(){
 fn agent_pump(token){
  if !current_task(token){return}
  step_count+=1 show_status("Agent正在处理")
- let record={kind:"agent" step:step_count started_at:time_now() state:"pending"}
+ let record={kind:"agent" run:token step:step_count started_at:time_now() state:"pending"}
  model_requests.push(record)
  start_timeout(0.01,||{
  if !current_task(token){return}
@@ -1390,12 +1476,14 @@ fn agent_pump(token){
    if !current_task(token){return}
    let choice=route_get(data,"choices")[0] let message=route_get(choice,"message")
    if !message.is_object(){request_failed(record,"模型没有返回消息") return}
+   trace_emit("assistant_message",{step:record.step message:message.to_json()},nil)
    agent_messages.push(message)
    let calls=route_get(message,"tool_calls")
    if !calls.is_array() || calls.len()==0 {
       let content=route_get(message,"content")
       answer_text=if content.is_string() {content} else {""}
       runtime_status=if answer_text.trim()=="" && !generated_active {"Agent没有返回可展示内容，请重新查询"} else {""}
+      trace_emit("query_ended",{content:answer_text generated:generated_active rendered:generated_render_complete},nil)
       agent_active=false if phase=="running" {phase="waiting"} render_content() return
    }
    agent_calls=calls agent_call_index=0 start_timeout(0.01,||agent_execute_next(token))
@@ -1405,7 +1493,9 @@ fn agent_pump(token){
 fn agent_tool_result(result){
  if active_tool==nil {return}
  let call=active_tool active_tool=nil
- agent_messages.push({role:"tool" tool_call_id:call.id content:result.to_json()})
+ let content=result.to_json()
+ trace_emit("tool_result",{name:call.function.name result:content},call.id)
+ agent_messages.push({role:"tool" tool_call_id:call.id content:content})
  decisions.push({tool:call.function.name call_id:call.id result:result returned_at:time_now()})
  let token=run_id agent_call_index+=1
  refresh_generated_facts()
@@ -1420,6 +1510,7 @@ fn agent_execute_next(token){
  if agent_call_index>=agent_calls.len(){start_timeout(0.01,||agent_pump(token)) return}
  let call=agent_calls[agent_call_index] active_tool=call
  let name=call.function.name let p=nil
+ trace_emit("tool_call",{name:name arguments:call.function.arguments},call.id)
  try {p=call.function.arguments.parse_json()} {agent_tool_result({success:false error:"工具参数JSON无法解析"}) return}
  try {
   if name=="read_skill" {let text=read_text("skills/"+p.name+".md") if text==nil {agent_tool_result({success:false error:"技能不存在；可用native_ui/navigation_data"})} else {agent_tool_result({success:true name:p.name content:text})}}
@@ -1440,7 +1531,8 @@ fn agent_execute_next(token){
   elif name=="compare_routes" {present_results("")}
   elif name=="render_ui" {
     interface_revision+=1 let revision=interface_revision mount_interface(p.source,token,revision)
-    start_timeout(0.25,||{if current_task(token) && active_tool==call {let diagnostic=ui.generated.diagnostics() interface_error=diagnostic if diagnostic=="" && generated_render_notified {generated_render_complete=true} render_content() agent_tool_result({success:diagnostic=="" diagnostics:diagnostic viewport:ui_viewport facts:interface_facts()})}})
+    start_timeout(0.25,||{if current_task(token) && active_tool==call {let diagnostic=ui.generated.diagnostics() interface_error=diagnostic
+    trace_emit("render_result",{diagnostics:diagnostic notified:generated_render_notified viewport:ui_viewport},call.id) if diagnostic=="" && generated_render_notified {generated_render_complete=true} render_content() agent_tool_result({success:diagnostic=="" diagnostics:diagnostic viewport:ui_viewport facts:interface_facts()})}})
   }
   else {agent_tool_result({success:false error:"未知工具："+name})}
  } {agent_tool_result({success:false error:"工具参数或数据执行错误" status:runtime_status})}
@@ -1464,7 +1556,7 @@ let ui_viewport = nil
 let mailbox_seen = ""
 let mailbox_lines = 0
 fn request_current(token,record){ return token == run_id && agent_active }
-fn request_failed(record,text){ agent_active=false active_tool=nil phase="failed" show_status(text) }
+fn request_failed(record,text){ trace_emit("transport_error",{step:record.step state:record.state error:text},nil) agent_active=false active_tool=nil phase="failed" show_status(text) }
 fn stop_interface(){
     interface_revision += 1 interface_inflight = false generated_active = false generated_render_complete = false generated_render_notified = false generated_source = ""
     invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0
@@ -1525,6 +1617,8 @@ fn generated_context(){
 fn mount_interface(body, token, revision){
     if token != run_id || revision != interface_revision { return }
     clear_generated()
+    trace_last_diagnostic = ""
+    trace_emit("render_source",{source:body revision:revision},if active_tool!=nil {active_tool.id} else {nil})
     interface_body = body interface_scene_json = body interface_run = token interface_inflight = false interface_error = ""
     let context = generated_context()
     let source = context + "\nView{width: Fill height: Fill flow: Down\nmailbox := Label{visible:false text:\"\"}\nfact_state := Label{visible:false text:" + interface_facts().to_json().to_json() + "}\nscroll := ScrollYView{width: Fill height: Fill flow: Down\nbody := View{width: Fill height: Fit flow: Down on_render: || {\nlet facts = snapshot()\n" + body + "\n}}\n}\n}"
@@ -1555,10 +1649,12 @@ fn generated_rendered(){
 fn generated_error(message){
  if !generated_active {return true}
  let diagnostic=ui.generated.diagnostics() if diagnostic!="" {message=diagnostic}
+ if message!=trace_last_diagnostic {trace_last_diagnostic=message trace_emit("render_diagnostic",{diagnostics:message rendered:generated_render_complete},nil)}
  interface_error=message render_content()
  return true
 }
 fn ui_dispatch_action(action){
+ trace_emit("local_event",{event:action.to_json()},nil)
  let name=route_get(action,"action") let id=route_get(action,"id")
  if name=="rendered" {generated_rendered()}
  elif name=="map" {register_map(action.widget,action.target,route_get(action,"status_widget"),route_get(action,"interactive"))}
@@ -1603,12 +1699,15 @@ fn update_map_widget(slot){
         if slot.status_widget.is_string() && slot.status_widget != "" { ui.generated.find(slot.status_widget).set_text(slot.caption + "\n" + slot.status) }
         if slot.bytes != nil && (slot.loaded_generation != ui_render_generation || slot.loaded_request != slot.request) {
             if slot.interactive {
-                ui.generated.find(slot.id).load_map_image(slot.bytes,slot.camera.request,slot.camera.source_width,slot.camera.source_height)
+                let installed=ui.generated.find(slot.id).load_map_image(slot.bytes,slot.camera.request,slot.camera.source_width,slot.camera.source_height)
+                trace_emit("map_image_submitted",{widget:slot.id request:slot.request native_request:slot.camera.request accepted:installed},nil)
             } else {ui.generated.find(slot.id).load_image_from_data_async(slot.bytes)}
             slot.loaded_generation = ui_render_generation slot.loaded_request = slot.request
         }
     } { interface_error = "此图控件加载失败；其它图和行程保留" ui.feedback.render() }
 }
+trace_initialize()
+View{width:Fill height:Fill flow:Overlay
 SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.color: #xf7f7f7
     sentence := TextInput{width: Fill height: 48 on_return: || shell_action() text: "40 分钟内到机场，预算 50，尽量便宜。" empty_text: "描述本次行程、时限与预算"
         draw_text +: {text_style: NavRegular color: ink color_hover: ink color_focus: ink color_empty: muted}}
@@ -1628,4 +1727,8 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
         }}
     }
 }
-start_timeout(0.1, || { try { ui_viewport = ui.content.rect() } {} render_content() poll_generated() })
+trace_overlay := View{width:1 height:1 flow:Overlay
+trace_identity := Label{visible:trace_enabled width:1 height:1 padding:0 text:trace_identity_json() draw_text +: {color:#x0000 text_style:NavRegular{font_size:0.5}}}
+}
+}
+start_timeout(0.1, || { trace_initialize() if trace_enabled {try {ui.trace_identity.set_text(trace_identity_json())} {}} trace_marker() try { ui_viewport = ui.content.rect() } {} render_content() poll_generated() })

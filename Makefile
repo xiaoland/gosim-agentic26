@@ -56,3 +56,11 @@ agent-demo:
 .PHONY: agent-build
 agent-build:
 	$(AGENT) build
+
+.PHONY: agent-trace agent-trace-read agent-trace-export
+agent-trace:
+	$(AGENT) trace
+agent-trace-read:
+	$(AGENT) trace-read
+agent-trace-export:
+	$(AGENT) trace-export
