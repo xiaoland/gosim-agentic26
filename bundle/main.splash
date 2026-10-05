@@ -537,8 +537,9 @@ fn sources_current(){
 fn render_content(){
     ui.feedback.render() ui.control.render() ui.answer_area.render()
     if !generated_area_ready {ui.generated_area.render() generated_area_ready = true}
+    ui.generated_area.set_visible(generated_active && (answer_text == "" || generated_render_complete))
     try {
-        if generated_active {ui.generated.set_visible(true)}
+        if generated_active {ui.generated.set_visible(answer_text == "" || generated_render_complete)}
     } {}
     start_timeout(0.01, || {refresh_generated_facts() return true})
     return true
@@ -1450,6 +1451,7 @@ let interface_body = ""
 let generated_source = ""
 let generated_area_ready = false
 let generated_active = false
+let generated_render_complete = false
 let interface_scene_json = ""
 let cancelled_input = ""
 let interface_revision = 0
@@ -1463,13 +1465,13 @@ let mailbox_lines = 0
 fn request_current(token,record){ return token == run_id && agent_active }
 fn request_failed(record,text){ agent_active=false active_tool=nil phase="failed" show_status(text) }
 fn stop_interface(){
-    interface_revision += 1 interface_inflight = false generated_active = false generated_source = ""
+    interface_revision += 1 interface_inflight = false generated_active = false generated_render_complete = false generated_source = ""
     invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0
     try { ui.generated.set_text("") ui.generated.set_visible(false) } {}
     render_content()
 }
 fn clear_generated(){
-    generated_active = false generated_source = "" ui_render_generation += 1 invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0 interface_body = "" interface_scene_json = ""
+    generated_active = false generated_render_complete = false generated_source = "" ui_render_generation += 1 invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0 interface_body = "" interface_scene_json = ""
     try { ui.generated.set_text("") ui.generated.set_visible(false) } {}
 }
 fn invalidate_interface(){ stop_interface() clear_generated() interface_error = "" }
@@ -1544,6 +1546,8 @@ fn refresh_generated_facts(){
     return true
 }
 fn generated_rendered(){
+    generated_render_complete = ui.generated.diagnostics() == ""
+    render_content()
     ui_render_generation += 1
     for widget slot in map_slots { update_map_widget(slot) }
     return true
@@ -1551,7 +1555,7 @@ fn generated_rendered(){
 fn generated_error(message){
  if !generated_active {return true}
  let diagnostic=ui.generated.diagnostics() if diagnostic!="" {message=diagnostic}
- interface_error=message ui.feedback.render()
+ generated_render_complete=false interface_error=message render_content()
  return true
 }
 fn ui_dispatch_action(action){
@@ -1620,7 +1624,7 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
             generated := Splash{width: Fill height: if ui_viewport != nil {ui_viewport.height} else {Fill} visible:generated_active body:generated_source}
         }}
         answer_area := View{width:Fill height:Fit on_render:||{
-            final_answer := Label{width:Fill height:Fit visible:answer_text != "" flow:Flow.Right{wrap:true} draw_text.text_style:NavRegular draw_text.color:ink text:answer_text}
+            final_answer := Label{width:Fill height:Fit visible:answer_text != "" && !generated_render_complete flow:Flow.Right{wrap:true} draw_text.text_style:NavRegular draw_text.color:ink text:answer_text}
         }}
     }
 }

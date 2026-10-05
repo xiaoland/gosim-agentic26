@@ -1,6 +1,6 @@
 # 首次定位与查询结果交付
 
-状态：2026-10-05，0.9.1局部修复和封装完成。原句正常harness已实际交付候选地图与详情，完整道路分段／公交详情仍未通过。首次真实授权未重测，预算故障未精确重现；单次成功不证明普遍可靠。
+状态：2026-10-05，0.9.2单一结果区域修正已通过Android定向检查与最终封装；0.9.1局部修复和封装已完成。原句正常harness已实际交付候选地图与详情，完整道路分段／公交详情仍未通过。首次真实授权未重测，预算故障未精确重现；单次成功不证明普遍可靠。
 
 ## 目标、边界与授权
 
@@ -14,7 +14,7 @@ native_error_api负责定位、覆盖及最终封装，后续接管预算入口�
 
 现场readonly-safe.json显示用户当前bundle／挂载／skill一致，5215B生成稿和8候选只有Label，没有地图、Button、emit或事实回调。日志有HTML解析、width scope、border_radius错误后修稿；前几轮完整VM历史没有只读入口，未注入用户实例，不能声称四轮逐次重现。
 
-终端assistant.content原来只写facts.answer，再用“查询完成”代替可见回复。现在所有非空终端内容通过通用文字区域呈现，同时保留已生成UI和本地状态；代码块只按文字显示，不抽取执行。空回复且无稿明确缺少展示内容。安全模型请求失败归runtime_status，已有稿和原生诊断保留，不再统一误报生成界面失败。
+终端assistant.content原来只写facts.answer，再用“查询完成”代替可见回复。0.9.1将所有非空终端内容通过通用文字区域呈现，同时保留已生成UI和本地状态，产生双份结果；代码块只按文字显示，不抽取执行。空回复且无稿明确缺少展示内容。安全模型请求失败归runtime_status，已有稿和原生诊断保留，不再统一误报生成界面失败。
 
 Android针对检查发现首次生成区域零高度，以及父Factory重render会清掉子Splash VM，即使同名／等值body也不能保证保留。首次mount先apply有限高度，再安装完整source；零面积子几何回退父内容视口。活跃稿不重建，只更新事实；终端文字区域独立更新。render_ui契约说明整稿替换，success仅无已报执行诊断，不证明内容目标完成。
 
@@ -41,3 +41,7 @@ Android终端检查5项通过，build/smoke/navigation-harness-cxnwuz4_/report.j
 完整规划仍未验收：生成稿没有逐段道路，公交仅摘要无详情按钮；行驶时间数值成立不等于候车／起点／末段已核实。末稿邀请放宽条件，但产品没有对话续接。下一步围绕这些实际遗漏分析取得的事实和技能使用，不靠盲抽样或手修稿通过。首次真实授权与原预算故障保留对应证据边界。
 
 README与architecture已回流已证行为。所有原始证据在忽略的build目录，safe入口为build/research/query-output-recovery/result-safe.json；运行记录不是产品持久化。当前无需要用户审批的源码事项，不声明整体验收通过。
+
+## 当前窄修：单一结果展示
+
+用户确认“已有正常生成的界面时只展示它；没有可用界面时，才用最终文字兜底。最终回复仍保留在本次工具历史中，不再并列呈现第二份结果”，回复“是的”授权实现。UI稳定owner负责main与最小Android检查；根负责版本／长期说明，native仅最终封装。使用实际原生执行／render状态，不能仅凭开始mount时的generated_active隐藏兜底；不增加内容检查器、额外模型loop或服务请求。验证正常稿不重复、无稿／执行失败文字可见、本地状态保留；无M3抽样和广泛回归。0.9.2包元数据与main4bbd2922…已冻结。采用rendered事件与当前diagnostics空状态选择生成稿，而不是仅generated_active；失败且最终文字到达时隐藏父generated_area，不销毁实例。根已读single-result-safe.json并查看实际正常稿与失败兜底截图：Android6项通过，正常稿不重复、无稿长文滚达／代码只文字、失败稿文字可见、空结果明确，history／facts.answer与本地页面输入保留。本轮只合成模型／真实原生控件，未请求M3或交通服务；有意TypeMismatch留原始诊断，不假称零诊断。自有实例关闭，用户实例未碰。native完成唯一最终封装，不追加行为验收。根已读single-result-package/result-safe.json：check／build／doctor通过，main4bbd2922…、sourceaed06eaa…，包7251151B／10文件；embedded／mounted逐字节一致，stage仅manifest预期完整性盖章差异，两技能SHA保持，自有实例关闭。README与architecture已更新当前单一展示契约；该窄修完成，前述完整规划／首次授权／预算边界仍保留。
