@@ -76,7 +76,7 @@ localhost 端口。`.local-state/agent/session.json` 记录 PID、端口、进�
 
 用户已批准在固定官方源码上补齐 macOS CoreLocation 的一次性 `location.get` 服务。补丁保存在 `toolchain/patches/`，基版本、补丁 SHA、应用后的 Git tree 与 Cargo.lock 摘要均由 `agent-runtime.lock.json` 校验；未知工具链修改不自动 reset，也不以放宽 dirty 检查来接受。应用源码仍只在 `bundle/`，Rust 补丁不进入应用包；需要这组宿主补丁的实时定位功能不能宣称在未修改的 stock 宿主已可用。
 
-默认 `agent-dev`／`agent-hidden` 使用真实位置；启动器清除假 GPS 注入环境。`agent-demo` 明确使用演示位置，不是实时定位失败后的自动兜底。真实位置来自有权限的前台应用一次请求，宿主取消、关闭或切换应用后停止采集；当前前台判断指宿主内部选中应用，不等于已验证系统窗口失焦策略。系统授权由用户选择，不能由启动器修改 macOS 定位权限。
+默认 `agent-dev`／`agent-hidden` 使用真实位置；启动器清除假 GPS 注入环境。`agent-demo` 明确使用演示位置，不是实时定位失败后的自动兜底。真实位置来自有权限的前台应用一次请求，宿主取消、关闭或切换应用后停止采集；当前前台判断指宿主内部选中应用，不等于已验证系统窗口失焦策略。系统授权由用户选择，不能由启动器修改 macOS 定位权限。宿主先等待匹配的系统权限结果，获权后再开始15秒采样；授权等待不消耗采样或registry请求时钟，且与已有sheet暂停原因独立。拒绝、取消和迟到授权不会启动已结束的请求。此计时修复已通过隔离回调检查，未重置系统权限来重测首次真实弹窗。
 
 正式启动器将已锁定构建复制到隔离目录的 `OctoSense Navigation.app/Contents/MacOS/octosense`，补齐 executable、package type 与定位用途 plist，直接执行包内二进制。该启动方式已观察到系统定位授权和真实样本；`open` 的 LaunchServices 启动仍未验证成功，本地包装不含签名或发布承诺。
 

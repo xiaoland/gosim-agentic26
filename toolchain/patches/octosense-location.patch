@@ -92,15 +92,15 @@ index 6c0ecc1..107d50b 100644
          if self.take_quit_ready() {
 diff --git a/crates/shell/src/location.rs b/crates/shell/src/location.rs
 new file mode 100644
-index 0000000..1582244
+index 0000000..a08386c
 --- /dev/null
 +++ b/crates/shell/src/location.rs
-@@ -0,0 +1,378 @@
+@@ -0,0 +1,434 @@
 +//! One-shot, foreground-only CoreLocation access for contained scripts.
 +//! Coordinates are delivered only through the original runner replier;
 +//! this service neither reads nor writes the process-wide GPS cache.
 +use makepad_widgets::makepad_platform::event::{LocationErrorEvent, LocationUpdateEvent};
-+use makepad_widgets::makepad_platform::SignalToUI;
++use makepad_widgets::makepad_platform::{SignalToUI, permission::{Permission,PermissionStatus}};
 +use makepad_widgets::{Cx, Event, Timer};
 +use octosense_appstore::services::{HostService, Replier, ServiceCall, ServiceHost};
 +use serde_json::{json, Value};
@@ -177,7 +177,8 @@ index 0000000..1582244
 +    app: String,
 +    reply: Replier,
 +    limits: Limits,
-+    deadline: Instant,
++    deadline: Option<Instant>,
++    permission_request_id: Option<i32>,
 +    last_failure: &'static str,
 +    cancelled: bool,
 +    started: bool,
@@ -252,11 +253,13 @@ index 0000000..1582244
 +                reply.send(Ok(failure("busy")));
 +                return;
 +            }
++            reply.pause_for_system_permission();
 +            *pending = Some(Request {
 +                app: call.app_id,
 +                reply,
 +                limits,
-+                deadline: Instant::now() + Duration::from_millis(limits.timeout_ms),
++                deadline: None,
++                permission_request_id: None,
 +                last_failure: "timeout",
 +                cancelled: false,
 +                started: false,
@@ -282,6 +285,10 @@ index 0000000..1582244
 +/// Run after the shell delivered the event to its modules: a new request
 +/// can start here, and a heap closed during this event stops here too.
 +pub fn pump(cx: &mut Cx, event: &Event, foreground: Option<&str>) {
++    pump_at(cx,event,foreground,Instant::now());
++}
++
++fn pump_at(cx:&mut Cx,event:&Event,foreground:Option<&str>,now:Instant) {
 +    let mut pending = REQUEST.lock().unwrap();
 +    let Some(request) = pending.as_mut() else {
 +        return;
@@ -293,7 +300,7 @@ index 0000000..1582244
 +            result = Some(failure("cancelled"));
 +        } else if foreground != Some(request.app.as_str()) || matches!(event, Event::Shutdown) {
 +            result = Some(failure("background_not_allowed"));
-+        } else if Instant::now() >= request.deadline {
++        } else if request.deadline.is_some_and(|deadline| now >= deadline) {
 +            result = Some(failure(request.last_failure));
 +        } else if request.started {
 +            match event {
@@ -319,18 +326,36 @@ index 0000000..1582244
 +                }
 +                _ => {}
 +            }
++        } else if let Some(permission_id)=request.permission_request_id {
++            if let Event::PermissionResult(permission)=event {
++                if permission.permission==Permission::Location && permission.request_id==permission_id {
++                    match permission.status {
++                        PermissionStatus::Granted => {
++                            request.started=true;
++                            request.deadline=Some(now+Duration::from_millis(request.limits.timeout_ms));
++                            request.reply.resume_after_system_permission();
++                            cx.start_location_updates();
++                        }
++                        PermissionStatus::DeniedCanRetry | PermissionStatus::DeniedPermanent => {
++                            result=Some(failure("permission_denied"));
++                        }
++                        PermissionStatus::NotDetermined => {}
++                    }
++                }
++            }
 +        } else {
-+            request.started = true;
-+            request.timer = cx.start_interval(0.1);
-+            cx.start_location_updates();
++            // CoreLocation's permission delegate settles this exact request first.
++            // The sampling allowance starts only after Granted, never during the dialog.
++            request.permission_request_id=Some(cx.request_permission(Permission::Location));
++            request.timer=cx.start_interval(0.1);
 +        }
 +    }
 +    if cancelled || result.is_some() {
 +        let request = pending.take().unwrap();
 +        if request.started {
 +            cx.stop_location_updates();
-+            cx.stop_timer(request.timer);
 +        }
++        cx.stop_timer(request.timer);
 +        if let Some(result) = result {
 +            request.reply.send(Ok(result));
 +        }
@@ -407,7 +432,7 @@ index 0000000..1582244
 +        dispatch(call(true), 0x4e4156, 2, &mut TestHost);
 +        let mut cx = Cx::new(Box::new(|_, _| {}));
 +        pump(&mut cx, &Event::Signal, Some("os.navigation-test"));
-+        assert!(REQUEST.lock().unwrap().as_ref().unwrap().started);
++        assert!(!REQUEST.lock().unwrap().as_ref().unwrap().started);
 +        cancel_heap(0x4e4156);
 +        pump(&mut cx, &Event::Signal, Some("os.navigation-test"));
 +        assert!(REQUEST.lock().unwrap().is_none());
@@ -440,14 +465,45 @@ index 0000000..1582244
 +            .any(|r| r.1 == 3 && r.2.as_ref().unwrap().contains("cancelled")));
 +        cancel_heap(0x4e4157);
 +        dispatch(call(true), 0x4e4156, 7, &mut TestHost);
-+        REQUEST.lock().unwrap().as_mut().unwrap().deadline = Instant::now();
-+        pump(&mut cx, &Event::Signal, Some("os.navigation-test"));
++        let start=Instant::now();
++        pump_at(&mut cx,&Event::Signal,Some("os.navigation-test"),start);
++        let permission_id=REQUEST.lock().unwrap().as_ref().unwrap().permission_request_id.unwrap();
++        let permission=|request_id,status| Event::PermissionResult(makepad_widgets::makepad_platform::permission::PermissionResult {
++            permission:Permission::Location,request_id,status,
++        });
++        let authorized_at=start+Duration::from_secs(30);
++        pump_at(&mut cx,&Event::Pause,Some("os.navigation-test"),authorized_at);
++        pump_at(&mut cx,&Event::WindowLostFocus(makepad_widgets::WindowId(0,0)),Some("os.navigation-test"),authorized_at);
++        assert!(REQUEST.lock().unwrap().as_ref().unwrap().deadline.is_none());
++        pump_at(&mut cx,&permission(permission_id+1,PermissionStatus::Granted),Some("os.navigation-test"),authorized_at);
++        assert!(!REQUEST.lock().unwrap().as_ref().unwrap().started);
++        pump_at(&mut cx,&permission(permission_id,PermissionStatus::Granted),Some("os.navigation-test"),authorized_at);
++        assert!(REQUEST.lock().unwrap().as_ref().unwrap().started);
++        assert_eq!(REQUEST.lock().unwrap().as_ref().unwrap().deadline,Some(authorized_at+Duration::from_secs(15)));
++        pump_at(&mut cx,&Event::Signal,Some("os.navigation-test"),authorized_at+Duration::from_secs(14));
++        assert!(REQUEST.lock().unwrap().is_some());
++        pump_at(&mut cx,&Event::Signal,Some("os.navigation-test"),authorized_at+Duration::from_secs(15));
 +        assert!(REQUEST.lock().unwrap().is_none());
-+        assert!(take_replies_for(&[0x4e4156])[0]
-+            .2
-+            .as_ref()
-+            .unwrap()
-+            .contains("timeout"));
++        assert!(take_replies_for(&[0x4e4156])[0].2.as_ref().unwrap().contains("timeout"));
++        dispatch(call(true),0x4e4156,8,&mut TestHost);
++        pump(&mut cx,&Event::Signal,Some("os.navigation-test"));
++        let denied_id=REQUEST.lock().unwrap().as_ref().unwrap().permission_request_id.unwrap();
++        pump(&mut cx,&permission(denied_id,PermissionStatus::DeniedPermanent),Some("os.navigation-test"));
++        assert!(REQUEST.lock().unwrap().is_none());
++        assert!(take_replies_for(&[0x4e4156])[0].2.as_ref().unwrap().contains("permission_denied"));
++        dispatch(call(true),0x4e4156,9,&mut TestHost);
++        pump(&mut cx,&Event::Signal,Some("os.navigation-test"));
++        let cancelled_id=REQUEST.lock().unwrap().as_ref().unwrap().permission_request_id.unwrap();
++        cancel_heap(0x4e4156);
++        pump(&mut cx,&Event::Signal,Some("os.navigation-test"));
++        pump(&mut cx,&permission(cancelled_id,PermissionStatus::Granted),Some("os.navigation-test"));
++        assert!(REQUEST.lock().unwrap().is_none());
++        assert!(take_replies_for(&[0x4e4156]).is_empty());
++        dispatch(call(true),0x4e4156,10,&mut TestHost);
++        pump(&mut cx,&Event::Signal,Some("os.navigation-test"));
++        pump(&mut cx,&Event::Signal,Some("another-app"));
++        assert!(REQUEST.lock().unwrap().is_none());
++        assert!(take_replies_for(&[0x4e4156])[0].2.as_ref().unwrap().contains("background_not_allowed"));
 +    }
 +    #[test]
 +    fn only_bounded_parameters_and_system_fixes_are_accepted() {

@@ -534,7 +534,15 @@ fn sources_current(){
     }
     return position_current(position_record)
 }
-fn render_content(){ ui.feedback.render() ui.control.render() start_timeout(0.01, || refresh_generated_facts()) }
+fn render_content(){
+    ui.feedback.render() ui.control.render() ui.answer_area.render()
+    if !generated_area_ready {ui.generated_area.render() generated_area_ready = true}
+    try {
+        if generated_active {ui.generated.set_visible(true)}
+    } {}
+    start_timeout(0.01, || {refresh_generated_facts() return true})
+    return true
+}
 fn fail_task(text){
  show_status(text)
  if active_tool != nil { agent_tool_result({success:false error:text facts:interface_facts()}) }
@@ -1356,7 +1364,7 @@ fn agent_tools(){let tools = [
  tool("query_transit","查询实际起终点公交；策略0推荐/1经济/2少换乘/3少步行/4舒适/5无地铁/7地铁优先/8快。",{strategy:{type:"number"}},["strategy"])
  tool("query_driving","查询实际起终点驾车与估价，保留未知候车/费用。",{},[])
  tool("compare_routes","确定性重新计算所有当前候选的时间、费用与原截止是否成立，返回已查范围；不自动选方案/结束。",{},[])
- tool("render_ui","执行原生Splash源码并返回实际诊断。source在View.on_render中执行；原生API与语法可read_skill(native_ui)。",{source:{type:"string"}},["source"])
+ tool("render_ui","替换本次整稿为原生Splash源码并返回实际执行诊断。success只表示无已报告执行错误，不代表内容目标完成。source在View.on_render中执行；实际API与语法可read_skill(native_ui)。",{source:{type:"string"}},["source"])
  ]
  if location_mode()=="demo" {
 tools.push(tool("read_calendar","读取本应用明确标注的模拟日历；返回记录和来源。",{},[]))
@@ -1375,6 +1383,8 @@ fn agent_pump(token){
  step_count+=1 show_status("Agent正在处理")
  let record={kind:"agent" step:step_count started_at:time_now() state:"pending"}
  model_requests.push(record)
+ start_timeout(0.01,||{
+ if !current_task(token){return}
  minimax_request("",agent_messages,agent_tools(),token,record,fn(data){
    if !current_task(token){return}
    let choice=route_get(data,"choices")[0] let message=route_get(choice,"message")
@@ -1382,10 +1392,13 @@ fn agent_pump(token){
    agent_messages.push(message)
    let calls=route_get(message,"tool_calls")
    if !calls.is_array() || calls.len()==0 {
-      let content=route_get(message,"content") if content.is_string(){answer_text=content show_status("本次查询完成")}
+      let content=route_get(message,"content")
+      answer_text=if content.is_string() {content} else {""}
+      runtime_status=if answer_text.trim()=="" && !generated_active {"Agent没有返回可展示内容，请重新查询"} else {""}
       agent_active=false if phase=="running" {phase="waiting"} render_content() return
    }
    agent_calls=calls agent_call_index=0 start_timeout(0.01,||agent_execute_next(token))
+ })
  })
 }
 fn agent_tool_result(result){
@@ -1434,6 +1447,8 @@ fn agent_execute_next(token){
 
 let runtime_status = ""
 let interface_body = ""
+let generated_source = ""
+let generated_area_ready = false
 let generated_active = false
 let interface_scene_json = ""
 let cancelled_input = ""
@@ -1446,16 +1461,16 @@ let ui_viewport = nil
 let mailbox_seen = ""
 let mailbox_lines = 0
 fn request_current(token,record){ return token == run_id && agent_active }
-fn request_failed(record,text){ agent_active=false active_tool=nil phase="failed" interface_error=text show_status(text) }
+fn request_failed(record,text){ agent_active=false active_tool=nil phase="failed" show_status(text) }
 fn stop_interface(){
-    interface_revision += 1 interface_inflight = false generated_active = false
+    interface_revision += 1 interface_inflight = false generated_active = false generated_source = ""
     invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0
-    try { ui.generated.set_text("") } {}
+    try { ui.generated.set_text("") ui.generated.set_visible(false) } {}
     render_content()
 }
 fn clear_generated(){
-    generated_active = false ui_render_generation += 1 invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0 interface_body = "" interface_scene_json = ""
-    try { ui.generated.set_text("") } {}
+    generated_active = false generated_source = "" ui_render_generation += 1 invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0 interface_body = "" interface_scene_json = ""
+    try { ui.generated.set_text("") ui.generated.set_visible(false) } {}
 }
 fn invalidate_interface(){ stop_interface() clear_generated() interface_error = "" }
 fn shell_busy(){ return agent_active || phase == "picking" }
@@ -1487,7 +1502,7 @@ fn interface_route_facts(candidate, check){
         request_bound: candidate.request_bound origin_complete: candidate.origin_complete endpoint_complete: candidate.endpoint_complete endpoint_gap_m: candidate.endpoint_gap_m segments: segments}
 }
 fn interface_facts(){
-    try {let area = ui.generated.rect() ui_viewport = if area != nil {area} else {ui.content.rect()}} {}
+    try {let area = ui.generated.rect() ui_viewport = if area != nil && area.width > 0 && area.height > 0 {area} else {ui.content.rect()}} {}
     let routes = [] let source_valid = sources_current() let sources = []
     for candidate in candidates {
         let check = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
@@ -1511,16 +1526,22 @@ fn mount_interface(body, token, revision){
     let context = generated_context()
     let source = context + "\nView{width: Fill height: Fill flow: Down\nmailbox := Label{visible:false text:\"\"}\nfact_state := Label{visible:false text:" + interface_facts().to_json().to_json() + "}\nscroll := ScrollYView{width: Fill height: Fill flow: Down\nbody := View{width: Fill height: Fit flow: Down on_render: || {\nlet facts = snapshot()\n" + body + "\n}}\n}\n}"
     generated_active = true
-    ui.generated.diagnostics()
-    try { ui.generated.set_text(source) } { interface_error = "生成的Splash执行失败；可重新查询生成" }
+    ui.generated_area.render()
+    start_timeout(0.05,||{
+        if token != run_id || revision != interface_revision {return}
+        generated_source = source
+        ui.generated.diagnostics()
+        try { ui.generated.set_text(source) } { interface_error = "生成的Splash执行失败；可重新查询生成" }
+    })
     render_content()
 }
 
 
 fn refresh_generated_facts(){
-    if !generated_active { return }
+    if !generated_active { return true }
     try { ui.generated.fact_state.set_text(interface_facts().to_json()) }
     { interface_error = "生成界面更新失败；可重新查询生成" ui.feedback.render() }
+    return true
 }
 fn generated_rendered(){
     ui_render_generation += 1
@@ -1592,10 +1613,15 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
     }}
     content := ScrollYView{width: Fill height: Fill flow: Down spacing: 8
         feedback := View{width: Fill height: Fit on_render: || {
-            Label{draw_text.text_style: NavRegular width: Fill height: Fit flow: Flow.Right{wrap:true} visible: interface_error != "" || interface_inflight || (!generated_active && runtime_status != "")
-                text: if interface_error != "" { if agent_active { "界面正在修正；可终止本次查询" } else { "生成界面未能正常显示，请重新查询" } } elif interface_inflight { "Agent 正在生成界面；可终止" } else { runtime_status } draw_text.color: ink}
+            Label{draw_text.text_style: NavRegular width: Fill height: Fit flow: Flow.Right{wrap:true} visible: interface_error != "" || interface_inflight || ((!generated_active || phase == "failed") && runtime_status != "")
+                text: if phase == "failed" && runtime_status != "" { runtime_status } elif interface_error != "" { if agent_active { "界面正在修正；可终止本次查询" } else { "生成界面未能正常显示，请重新查询" } } elif interface_inflight { "Agent 正在生成界面；可终止" } else { runtime_status } draw_text.color: ink}
         }}
-        generated := Splash{width: Fill height: Fill}
+        generated_area := View{width:Fill height:Fit on_render: || {
+            generated := Splash{width: Fill height: if ui_viewport != nil {ui_viewport.height} else {Fill} visible:generated_active body:generated_source}
+        }}
+        answer_area := View{width:Fill height:Fit on_render:||{
+            final_answer := Label{width:Fill height:Fit visible:answer_text != "" flow:Flow.Right{wrap:true} draw_text.text_style:NavRegular draw_text.color:ink text:answer_text}
+        }}
     }
 }
 start_timeout(0.1, || { try { ui_viewport = ui.content.rect() } {} render_content() poll_generated() })

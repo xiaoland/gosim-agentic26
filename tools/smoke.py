@@ -93,6 +93,46 @@ start_timeout(1,||{
  ]}.to_json()))
 })
 '''
+TERMINAL_FIXTURE=r'''
+let terminal_task=0 let terminal_token=-1 let terminal_turn=0 let terminal_checks=[]
+let terminal_code="```splash\nLabel{text:\"未执行代码\"}\n```"
+let terminal_source="View{width:Fill height:Fit flow:Down kept := Label{text:\"原生结果仍保留\"} retained := TextInput{text:\"原始输入\"} Button{text:\"改变本地状态\" on_click: || {ui.body.find(\"retained\").set_text(\"本地输入仍保留\") ui.body.find(\"kept\").set_text(\"本地页面仍保留\")}}}"
+let terminal_long="" for i in 80 {terminal_long+="本次模型提供的结果说明第"+i+"行：内容应可滚动查看。\n"}
+fn minimax_request(task,input,schema,token,record,done){
+ if terminal_token!=token {terminal_token=token terminal_task+=1 terminal_turn=0}
+ terminal_turn+=1
+ let message={role:"assistant" content:nil}
+ if terminal_task==1 && terminal_turn==1 {message.tool_calls=[{id:"render-original" type:"function" function:{name:"render_ui" arguments:({source:terminal_source}).to_json()}}]}
+ else {message.content=if terminal_task==1 {terminal_long+terminal_code} elif terminal_task==2 {"只有自然语言的实际模型答复"} else {""}}
+ start_timeout(if terminal_task==1 && terminal_turn==2 {1.0} else {0.01},||done({choices:[{message:message}]}))
+}
+fn terminal_observe(){
+ if !agent_active {start_timeout(0.3,||terminal_check())} else {start_timeout(0.1,||terminal_observe())}
+}
+fn terminal_check(){
+ if !agent_active {
+  if terminal_task==1 {
+   fs.write("terminal-current-private.json",{body:interface_body diagnostic:ui.generated.diagnostics() history:agent_messages}.to_json())
+   terminal_checks.push({name:"长终端内容保留原生稿与实例" passed:generated_active && interface_body==terminal_source && ui.generated.find("kept").text()=="本地页面仍保留" && ui.generated.find("retained").text()=="本地输入仍保留"})
+   terminal_checks.push({name:"代码块只按原文显示没有执行" passed:ui.final_answer.text()==terminal_long+terminal_code})
+   fs.write("terminal-first-ready.json",{ready:true}.to_json())
+  } elif terminal_task==2 {
+   fs.write("terminal-second-private.json",{active:generated_active visible:ui.final_answer.visible() text:ui.final_answer.text() answer:answer_text}.to_json())
+   terminal_checks.push({name:"无生成稿的真实终端文本可见" passed:!generated_active && ui.final_answer.visible() && ui.final_answer.text()=="只有自然语言的实际模型答复"})
+  } else {
+   terminal_checks.push({name:"空终端无稿明确没有展示内容" passed:!generated_active && runtime_status=="Agent没有返回可展示内容，请重新查询" && !ui.final_answer.visible()})
+   request_failed({},"模型网络请求失败，请稍后重试")
+   terminal_checks.push({name:"安全请求失败单独显示而非渲染失败" passed:phase=="failed" && runtime_status=="模型网络请求失败，请稍后重试" && interface_error==""})
+   fs.write("harness-smoke.json",{checks:terminal_checks}.to_json()) return
+  }
+  // 首轮的实际滚动检查由driver完成后，才启动第二轮。
+  if terminal_task==1 {start_timeout(0.1,||terminal_wait())} else {start_task() start_timeout(0.2,||terminal_observe())}
+ } else {start_timeout(0.1,||terminal_observe())}
+}
+fn terminal_wait(){if fs.exists("terminal-continue.json") {start_task() start_timeout(0.2,||terminal_observe())} else {start_timeout(0.1,||terminal_wait())}}
+fn terminal_start(){if fs.exists("terminal-start.json"){start_task() start_timeout(0.2,||terminal_observe())} else {start_timeout(0.1,||terminal_start())}}
+start_timeout(1,||terminal_start())
+'''
 def main():
  sp=importlib.util.spec_from_file_location('agent',ROOT/'tools/agent.py');a=importlib.util.module_from_spec(sp);sp.loader.exec_module(a)
  (ROOT/'build/smoke').mkdir(exist_ok=True,parents=True);w=Path(tempfile.mkdtemp(prefix='navigation-harness-',dir=ROOT/'build/smoke'))
@@ -100,6 +140,7 @@ def main():
  for p in [a.STATE,a.HOME_DIR,a.CORE]:p.mkdir(parents=True,exist_ok=True)
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
  if '--map-details' in sys.argv:source=original.replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_FIXTURE
+ if '--terminal-content' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1)+'\n'+TERMINAL_FIXTURE
  if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
  env=a.host_env(True);process=None;port=None
  def q(route,**args):return urlopen(f'http://127.0.0.1:{port}/'+route+('?' + urlencode(args) if args else ''),timeout=15).read()
@@ -131,6 +172,28 @@ def main():
   subprocess.run([str(ROOT.parent/'.octosense-agentic26/OctoSense-App-Hub/target/release/hub'),'stamp',str(mount)],stdout=subprocess.DEVNULL,check=True)
   a.init_demo();jail=a.jail_path();a.materialize_skills(ROOT/'bundle',jail);(jail/'private-config.json').write_text('{"location_mode":"demo"}');(jail/'trip.json').write_text('historical fixture ignored');(jail/'agent-run.json').write_text('historical audit ignored')
   launch('native');report=None
+  if '--terminal-content' in sys.argv:
+   time.sleep(3)
+   q('k',c='Space',cmd=1,wait=1)
+   for ch in 'android':q('k',c='Key'+ch.upper(),wait=1)
+   q('k',c='enter',wait=1);time.sleep(1)
+   q('m',k='down',x=200,y=300,wait=1)
+   for y in range(320,570,25):q('m',k='move',x=200,y=y,wait=1)
+   q('m',k='up',x=200,y=570,wait=1);q('t',t='Navigation',wait=1);q('k',c='enter',wait=1);time.sleep(2)
+   (jail/'terminal-start.json').write_text('{}')
+   for _ in range(100):
+    rows=json.loads(q('snap'))['s'];local=[v for v in rows if v.get('t')=='改变本地状态']
+    if local:
+     r=local[0]['r'];q('click',x=r[0]+r[2]/2,y=r[1]+r[3]/2,wait=1)
+    if (jail/'terminal-first-ready.json').exists():break
+    time.sleep(.1)
+   assert (jail/'terminal-first-ready.json').exists()
+   q('m',k='scroll',x=220,y=600,dy=-12000,precise=1,wait=1);time.sleep(.5);rows=json.loads(q('snap'))['s'];(w/'terminal-current-snap-private.json').write_text(json.dumps(rows,ensure_ascii=False));(w/'terminal-debug.png').write_bytes(q('g',raw=1));kept=next(row for row in rows if row.get('i')=='kept');assert kept['r'][3]>0
+   (w/'terminal-top.png').write_bytes(q('g',raw=1))
+   q('m',k='scroll',x=220,y=600,dy=8000,precise=1,wait=1);time.sleep(.3)
+   rows=json.loads(q('snap'))['s'];assert any('```splash' in row.get('t','') for row in rows)
+   time.sleep(.5);(w/'terminal-bottom.png').write_bytes(q('g',raw=1));(jail/'terminal-continue.json').write_text('{}')
+
   for _ in range(150):
    try:report=json.loads((jail/'harness-smoke.json').read_text())
    except (FileNotFoundError,json.JSONDecodeError):pass
@@ -138,8 +201,8 @@ def main():
    time.sleep(.1)
   assert report,'宿主未完成工具会话；查看 '+str(w/'native.log')
   assert all(row['passed'] for row in report['checks']),report
-  if recovery or '--map-details' in sys.argv:
-   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True)
+  if recovery or '--map-details' in sys.argv or '--terminal-content' in sys.argv:
+   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True,mode='Android' if '--terminal-content' in sys.argv else 'desktop')
    (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print('PASS: '+str(len(report['checks']))+'项定向原生检查；'+str(w/'report.json'));return
   time.sleep(3)
   q('k',c='Space',cmd=1,wait=1)

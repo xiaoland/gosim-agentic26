@@ -1,10 +1,22 @@
 diff --git a/crates/appstore/src/services.rs b/crates/appstore/src/services.rs
-index 3c0db2e..19b35fb 100644
+index 3c0db2e..1d9e64b 100644
 --- a/crates/appstore/src/services.rs
 +++ b/crates/appstore/src/services.rs
-@@ -120,6 +120,15 @@ fn queue_reply(heap_key: usize, req_id: u64, result: Result<String, String>) {
+@@ -104,8 +104,10 @@ static REPLIES: Mutex<Vec<QueuedReply>> = Mutex::new(Vec::new());
+ struct Pending {
+     app_id: String,
+     timeout: Duration,
+-    /// None while a sheet the service raised for it is up.
++    /// None while either the service sheet or a system permission decision waits.
+     deadline: Option<Instant>,
++    waiting_for_sheet: bool,
++    waiting_for_system_permission: bool,
  }
- 
+
+ static PENDING: Mutex<Option<HashMap<(usize, u64), Pending>>> = Mutex::new(None);
+@@ -120,6 +122,35 @@ fn queue_reply(heap_key: usize, req_id: u64, result: Result<String, String>) {
+ }
+
  impl Replier {
 +    /// The runner's request identity, for owner-scoped cancellation.
 +    pub fn request_id(&self) -> u64 { self.req_id }
@@ -15,10 +27,67 @@ index 3c0db2e..19b35fb 100644
 +        with_pending(|pending| pending.contains_key(&(self.heap_key, self.req_id)))
 +    }
 +
++    /// A system permission decision waits for the person, not the service clock.
++    /// This affects only this request and remains independent of service sheets.
++    pub fn pause_for_system_permission(&self) {
++        with_pending(|pending| {
++            if let Some(entry)=pending.get_mut(&(self.heap_key,self.req_id)) {
++                entry.waiting_for_system_permission=true;
++                entry.deadline=None;
++            }
++        });
++    }
++    /// Start a fresh service allowance after the system permission decision.
++    pub fn resume_after_system_permission(&self) {
++        with_pending(|pending| {
++            if let Some(entry)=pending.get_mut(&(self.heap_key,self.req_id)) {
++                entry.waiting_for_system_permission=false;
++                if !entry.waiting_for_sheet {entry.deadline=Some(Instant::now()+entry.timeout);}
++            }
++        });
++    }
++
      /// Answer the request. An answer after the request timed out, or after
      /// its isolate closed, or a second answer, goes nowhere.
      pub fn send(self, result: Result<Value, String>) {
-@@ -595,6 +604,7 @@ mod tests {
+@@ -146,7 +177,7 @@ fn track(heap_key: usize, req_id: u64, app_id: &str, timeout: Duration) -> Resul
+             return Err("too many host requests are waiting; try again when some have answered".into());
+         }
+         let deadline = Some(Instant::now() + timeout);
+-        pending.insert((heap_key, req_id), Pending { app_id: app_id.to_string(), timeout, deadline });
++        pending.insert((heap_key, req_id), Pending { app_id: app_id.to_string(), timeout, deadline, waiting_for_sheet:false, waiting_for_system_permission:false });
+         Ok(())
+     })
+ }
+@@ -181,11 +212,13 @@ fn hold_for_sheet(heap_key: usize, req_id: u64, app_id: &str) {
+     let now = Instant::now();
+     with_pending(|pending| {
+         for (key, entry) in pending.iter_mut() {
+-            if entry.app_id == app_id && entry.deadline.is_none() && *key != (heap_key, req_id) {
+-                entry.deadline = Some(now + entry.timeout);
++            if entry.app_id == app_id && entry.waiting_for_sheet && *key != (heap_key, req_id) {
++                entry.waiting_for_sheet=false;
++                if !entry.waiting_for_system_permission {entry.deadline = Some(now + entry.timeout);}
+             }
+         }
+         if let Some(entry) = pending.get_mut(&(heap_key, req_id)) {
++            entry.waiting_for_sheet=true;
+             entry.deadline = None;
+         }
+     });
+@@ -195,8 +228,9 @@ fn hold_for_sheet(heap_key: usize, req_id: u64, app_id: &str) {
+ fn resume_after_sheet(app_id: &str, now: Instant) {
+     with_pending(|pending| {
+         for entry in pending.values_mut() {
+-            if entry.app_id == app_id && entry.deadline.is_none() {
+-                entry.deadline = Some(now + entry.timeout);
++            if entry.app_id == app_id && entry.waiting_for_sheet {
++                entry.waiting_for_sheet=false;
++                if !entry.waiting_for_system_permission {entry.deadline = Some(now + entry.timeout);}
+             }
+         }
+     });
+@@ -595,6 +629,7 @@ mod tests {
          dispatch(call("closing.read"), 7104, 2, &mut Host::default());
          held.lock().unwrap().pop().unwrap().send(Ok(Value::Null)); // answered, not yet taken
          cancel_heap(7104);
@@ -26,3 +95,28 @@ index 3c0db2e..19b35fb 100644
          assert!(take_replies_for(&[7104]).is_empty(), "a queued answer goes with the isolate");
          held.lock().unwrap().pop().unwrap().send(Ok(Value::Null));
          expire_pending(later(DEFAULT_TIMEOUT + Duration::from_secs(1)), |h| h == 7104);
+@@ -666,4 +701,24 @@ mod tests {
+         purge_replies(later(REPLY_TTL + Duration::from_secs(1)), |h| h == 7109);
+         assert!(take_replies_for(&[7109]).is_empty(), "an isolate that went away without closing leaves nothing behind");
+     }
++    #[test]
++    fn system_permission_and_sheet_waits_resume_independently() {
++        let heap=0x5045524d;let app="os.permission-clock-test";
++        track(heap,1,app,Duration::from_secs(16)).unwrap();
++        let reply=Replier{heap_key:heap,req_id:1};
++        reply.pause_for_system_permission();
++        resume_after_sheet(app,Instant::now());
++        expire_pending(later(Duration::from_secs(30)),|h|h==heap);
++        assert!(reply.is_pending());
++        hold_for_sheet(heap,1,app);
++        reply.resume_after_system_permission();
++        expire_pending(later(Duration::from_secs(30)),|h|h==heap);
++        assert!(reply.is_pending());
++        resume_after_sheet(app,Instant::now());
++        assert!(with_pending(|p|p[&(heap,1)].deadline.is_some()));
++        expire_pending(later(Duration::from_secs(30)),|h|h==heap);
++        assert!(!reply.is_pending());
++        assert_eq!(take_replies_for(&[heap]).len(),1);
++    }
++
+ }

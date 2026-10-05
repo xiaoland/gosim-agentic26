@@ -7,3 +7,5 @@ set_constraints 关联实际 event_id/note_id 及逐字原文 citations；minute
 query_transit/query_driving 取得实际起终点交通。compare_routes 计算当前全部候选时间、费用与原截止是否成立；只说明已查范围，不证明已查遍所有路线。费用、候车、接驳未知不等于零。路线ID、真实分段、费用与来源均在 facts.routes 中。用户原始分钟数自 received_at 起算，工具和交互耗时都算在内。
 
 当前不保存 Trip 或查询结果，不提供问答澄清。工具缺少数据或失败会返回实际错误；可继续取得可得事实，或生成本次结果/具体缺失的界面。查看只改变本次查看对象，不代表已开始导航。每次顶部查询重新建立输入、起算时间和内轮工具历史；没有固定执行顺序。
+
+compare_routes 的 facts.routes 每项 passed 是工具按当前时间与资料计算的结论；passed=false 不能称为已符合。reason（及有提供时的 reasons）说明未成立的具体条件，包括目的地末段未核实。已知耗时或价格在数值范围内，不等于未知末段、费用或候车已得到核实；呈现这些真实缺失与估计来源。

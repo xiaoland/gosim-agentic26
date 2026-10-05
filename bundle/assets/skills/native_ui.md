@@ -1,8 +1,10 @@
 # Navigation 原生 Splash API
 
-render_ui 的 source 在已经存在的 View.on_render 闭包中执行。可以包含脚本语句和原生控件表达式；这里是 Makepad Splash，不是 JavaScript。空值是 nil；函数写 fn(x){...} 或 || {...}；字符串与数字可用 + 连接。
+render_ui 的 source 替换本次整稿，在已经存在的 View.on_render 闭包中执行；不是向旧稿追加节点。可以包含脚本语句和原生控件表达式；这里是 Makepad Splash，不是 JavaScript。空值是 nil；函数写 fn(x){...} 或 || {...}；字符串与数字可用 + 连接。
 
 每次顶部查询开始一个新任务；不存在澄清问答、跨查询继续或结果保存。
+
+数组使用 `for item in items {...}` 遍历、`items[index]` 访问和 `items.len()` 取长度；没有 Array.find 方法。按字段查找记录时使用 for 遍历并比较字段，找到后保存记录或 return；`ui.body.find("name")` 是原生控件句柄的查找方法，与数组不同。
 
 snapshot() 返回当前真实任务事实，包括 viewport、limits、origin、destination、sources、routes、viewed_route_id、原 arrive_by。emit(object) 把用户动作写到父应用。NavRegular 是 Navigation 无衬线字体，Label、Button、ButtonFlat、TextInput 已默认使用它。Label 的应用局部默认值是 width:Fill height:Fit flow:Flow.Right{wrap:true}，文字按可用宽度自然换行；可覆盖原生属性。
 
@@ -85,6 +87,6 @@ on_facts_changed 是外层已定义的脚本变量，在原生 View 表达式外
 
 emit({action:"map" widget:"image_name" target:真实路线ID或"viewed"或"destination" status_widget:"caption_name" interactive:true})。父应用绑定真实路线、初始化全路线视口，再分别请求和加载真实高德视口图片；status_widget 是可选命名 Label，显示来源和加载错误。target 用当前实际路线ID可固定本次详情目标；用 "viewed" 会随父查看状态更新，"destination" 仅显示实际目的地。命名地图应已构造且具有限高度，先显示详情页再发事件，父才能向实际实例加载字节。切换目标显示加载状态，新路线重新匹配全路线视口；同一目标再次打开保留原生相机和当前run图片。来源与加载反馈由 status_widget 接收。旧Image静态图接口仍可用，省略interactive:true即可；它只有图片，不具备地图拖动缩放。未知或缺失几何不伪造直线。
 
-render_ui 返回本稿真实 diagnostics。错误说明实际变量、语法或原生类型问题，可以根据结果提交下一稿；应用不改写生成源码。
+render_ui 返回本稿真实 diagnostics；success 只表示执行时没有已报告错误，不表示出行内容或交互目标已经完成。错误说明实际变量、语法或原生类型问题，可以根据结果提交下一稿；应用不改写生成源码。
 
 通用句柄 set_visible(bool)／visible() 可用于页面或自定义浮层。锁定版本 Modal.open/close 与 StackNavigation.push/pop 只有 Rust 接口，当前没有相应 Splash 句柄方法，不能直接写 ui.modal.open()。普通页面切换不销毁隐藏页；不要为打开详情而重建整个列表。

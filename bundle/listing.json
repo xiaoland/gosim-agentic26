@@ -21,7 +21,7 @@
     "support": "https://example.com/support",
     "privacy_policy_url": "https://example.com/privacy"
   },
-  "release_notes": "接入 AutoNaviMapView 交互地图原语，拖动与缩放通过高德官方静态图接口刷新真实视口及路线。地图交互在本地完成，内容仍由 Agent 自主生成。保持独立查询、无持久化与无澄清，Navigation 局部无衬线字体；验收为 macOS 宿主 Android 模式。发布者信息仍为占位。",
+  "release_notes": "修正首次定位授权等待与采样计时，以及 Agent 终端回复的可见交付；保留生成界面和本地地图／详情交互。渲染工具说明整稿替换与执行诊断含义，不增加预制路线组件或强制工作流。独立查询、无持久化、无澄清；默认验收 macOS 宿主 Android 模式。发布者信息仍为占位。",
   "age_rating": "all",
   "license": "Apache-2.0"
 }

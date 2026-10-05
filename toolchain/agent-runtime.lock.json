@@ -29,52 +29,52 @@
       "url": "https://github.com/OctoSense-org/OctoSense.git",
       "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
       "patch": "toolchain/patches/octosense-location.patch",
-      "patch_sha256": "95dd2bbba3e9642370fed39a2d153ef64b304c28d29ef4857bfa6dff7c84c8a1",
-      "tree": "45c3633964a0ade85394acd1ed949363752f8eba",
+      "patch_sha256": "566f4c4d0e6891ed96c4b60e7cbd046476116c63a056b6565a0d69a93e4f874b",
+      "tree": "c4fe569311c478018e2b305a574879eeb4985206",
       "cargo_lock_sha256": "ecb3e7990d402207dac51f41a6305d45f0bda44f6cde2f2a7816379c18fceb68"
     },
     "app_hub": {
       "url": "https://github.com/OctoSense-org/OctoSense-App-Hub.git",
       "revision": "58c3c8aed8fc811a16d67c5f784a8a44214ff876",
       "patch": "toolchain/patches/app-hub-location-replier.patch",
-      "patch_sha256": "909ae10db99e64cf888f39b4173c5e59f5969e05fbd3fa4bcce28015913e6482",
-      "tree": "9dca73bc50ebad12b57d5c8b0f71d915b8de773f"
+      "patch_sha256": "2476ded2e4d393609ffe75aa528fb6d3795b3a2ce3c1351e97ef8146b88b66b9",
+      "tree": "5e3fefd2738ed96447e6de8a062e6f10e53a56fe"
     }
   },
   "maps_overlays": {
     "octosense": {
       "url": "https://github.com/OctoSense-org/OctoSense.git",
       "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
-      "base_tree": "45c3633964a0ade85394acd1ed949363752f8eba",
+      "base_tree": "c4fe569311c478018e2b305a574879eeb4985206",
       "patch": "toolchain/patches/octosense-maps-pick.patch",
       "patch_sha256": "dea159274e9d053fc76f1a55fb7b4070a3f4d67593c1c4c1f05d5bbe9d37ea6e",
-      "tree": "711ecca75cc0034e98a9573b3a7107e112eb2acf",
+      "tree": "5c0eb81682e04efe131db6f83e1879c974bf4eba",
       "cargo_lock_sha256": "c693918b5d059b660f512240c7fa591f1b9fd311f18d1388ccc2391dea173314"
     },
     "app_hub": {
       "url": "https://github.com/OctoSense-org/OctoSense-App-Hub.git",
       "revision": "58c3c8aed8fc811a16d67c5f784a8a44214ff876",
-      "base_tree": "9dca73bc50ebad12b57d5c8b0f71d915b8de773f",
+      "base_tree": "5e3fefd2738ed96447e6de8a062e6f10e53a56fe",
       "patch": "toolchain/patches/app-hub-maps-pick.patch",
       "patch_sha256": "e7abd656d4f7e7571a44c6ca82deb679597f3a777f04bd8abbb5b84150986714",
-      "tree": "05877184f329252cc58b28227bb68ec1bfde4e71"
+      "tree": "414917bee98cd4d03df3adc725f95e52578afb2e"
     }
   },
   "font_document_overlay": {
     "url": "https://github.com/OctoSense-org/OctoSense-App-Hub.git",
     "revision": "58c3c8aed8fc811a16d67c5f784a8a44214ff876",
-    "base_tree": "05877184f329252cc58b28227bb68ec1bfde4e71",
+    "base_tree": "414917bee98cd4d03df3adc725f95e52578afb2e",
     "patch": "toolchain/patches/app-hub-font-document-gate.patch",
     "patch_sha256": "8c664bb45b7141b01ba8b7b7bf25c08cc6b2649eb86d63c5223975f0b51dc740",
-    "tree": "ff3b0289267b4ef5b20cc35a077075e74238989e"
+    "tree": "9dfb70b35f12ea5d4eb95f9be0682500265b93e6"
   },
   "ui_widget_overlay": {
     "url": "https://github.com/OctoSense-org/OctoSense.git",
     "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
-    "base_tree": "711ecca75cc0034e98a9573b3a7107e112eb2acf",
+    "base_tree": "5c0eb81682e04efe131db6f83e1879c974bf4eba",
     "patch": "toolchain/patches/octosense-ui-widget.patch",
     "patch_sha256": "7b9850367958f44640cc5b4979fa64fdd71a664895177e00b27e8135756ee78b",
-    "tree": "f3974b955cafbf3ed779e5296e9052946a10d4c7",
+    "tree": "712a18566af20f7d61bdf327380618376a273132",
     "makepad_base_tree": "e9520ccb3740f3af8629d981d06d7e53aad48c06",
     "makepad_patch": "toolchain/patches/makepad-ui-find-rect.patch",
     "makepad_patch_sha256": "6f194c71ff1e6f0de5bc1982cefedcc0cd2acb3ad90b7453e95c599ee5311a3a"
