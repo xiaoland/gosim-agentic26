@@ -517,9 +517,10 @@ def packaged_host():
 def start(hidden, demo=False):
     values = env_values()
     jail = jail_path()
-    sources = ('calendar.ics', 'notes/ticket.md', 'location.json') if demo else ('calendar.ics', 'notes/ticket.md')
-    require(all((jail / 'demo' / rel).is_file() for rel in sources),
-            '模拟来源尚未初始化；先运行 make agent-init-demo。')
+    if demo:
+        sources = ('calendar.ics', 'notes/ticket.md', 'location.json')
+        require(all((jail / 'demo' / rel).is_file() for rel in sources),
+                '模拟来源尚未初始化；先运行 make agent-init-demo。')
     metadata = build(values)
     stop()
     executable = packaged_host()

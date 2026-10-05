@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "subtitle": "自主组合工具与界面的出行 Agent",
-  "description": "Navigation 开发原型：MiniMax M3 在同一工具调用会话中自主读取背景、查询定位与交通、比较候选并生成 Splash／Makepad 界面。原生语言与业务接口资料以 skills 按需读取，应用不预设任务步骤。固定入口为输入框和查询／终止按钮，界面通过本地消息调用业务操作，多幅高德静态地图分别加载。确定性工具计算费用、耗时、路线端点和未满足条件；用户原始期限与预算保留。默认使用授权的 macOS CoreLocation，模拟来源明确标注；费用与耗时为估计。Maps 与动态执行诊断需要锁定的宿主覆盖，尚未接通真实日历或提醒。",
+  "description": "Navigation 单次查询原型：MiniMax M3 自主读取本次可用信息、查询定位与交通、比较候选并生成 Splash／Makepad 界面。固定入口为输入框和查询／终止按钮，每次查询独立开始，不保存或恢复行程，不进行问题澄清或跨次对话。原生布局资料按需读取，内容区支持纵向滚动和文字换行。默认通过授权的 macOS CoreLocation 取得位置，正常模式不提供演示日历、笔记；显式演示模式另行标注。地图、费用与耗时来自高德查询，估计与缺失数据保留真实含义。实时定位与动态执行诊断使用锁定宿主覆盖。",
   "category": "travel",
   "keywords": [
     "navigation",
@@ -21,7 +21,7 @@
     "support": "https://example.com/support",
     "privacy_policy_url": "https://example.com/privacy"
   },
-  "release_notes": "迁移为单一工具调用 harness＋按需 skills，由 M3 自主编排背景读取、交通查询与界面生成。渲染工具返回实际 Splash 执行诊断供 Agent 处理；开发期不添加界面结构、安全或人为输出限制。Navigation 默认使用应用局部无衬线字体，交互验收采用 macOS 宿主 Android 手机模式。发布者信息仍为占位。",
+  "release_notes": "修复内容换行与纵向滚动，补充原生布局尺寸资料。移除应用行程保存／恢复、任务续接和问题澄清；每次查询初始化独立 Agent 会话，正常模式不混入模拟日历／笔记。交互验收使用 macOS 宿主 Android 手机模式。发布者信息仍为占位。",
   "age_rating": "all",
   "license": "Apache-2.0"
 }

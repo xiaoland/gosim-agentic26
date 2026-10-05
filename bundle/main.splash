@@ -177,7 +177,7 @@ fn route_choose(candidates){
 }
 
 fn route_recheck(selected, nowTs, deadlineTs, budgetCents){
-    if selected == nil { return {passed: false reason: "没有可确认候选" estimated_arrival_ts: nil} }
+    if selected == nil { return {passed: false reason: "没有有效候选" estimated_arrival_ts: nil} }
     let reason = route_reason(selected, nowTs, deadlineTs, budgetCents)
     let arrival = nil
     if selected.duration_seconds != nil { arrival = route_later(nowTs, selected.departure_ts) + selected.duration_seconds }
@@ -199,7 +199,6 @@ let automatic_seconds = 0
 let step_count = 0
 let protocol_retry_count = 0
 let request_text = ""
-let replies = []
 let observations = []
 let model_requests = []
 let decisions = []
@@ -225,7 +224,6 @@ let driving_completed = false
 let task_timer = nil
 let progress_text = ""
 let answer_text = ""
-let saved_trip = nil
 
 let viewed_route_id = ""
 let expanded_routes = false
@@ -370,14 +368,7 @@ fn accept_map_slot(slot, bytes, token, request, target_id, detail){
 fn view_route(id){
     for candidate in candidates { if candidate.id == id { viewed_route_id = id load_interface_map() render_content() return } }
 }
-fn confirm_viewed(){
-    if phase != "proposal" { show_status("当前结果尚不能确认") return }
-    let candidate = viewed_route()
-    if candidate == nil { show_status("请先选择一个方案") return }
-    let check = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
-    if !check.passed { show_status("所选方案不能确认：" + check.reason) return }
-    chosen = candidate confirm_trip()
-}
+
 fn open_destination_picker(){
     if user_limits == nil { show_status("请先提供行程分钟数与预算") return }
     picker_preview_poi = nil
@@ -440,95 +431,14 @@ fn apply_user_poi(){
     observe("user_destination", {destination: poi source: "explicit-user-poi" terminal_verified: false})
     return true
 }
-fn choose_user_place(id){
-    for poi in picker_pois {
-        if poi.id == id {
-            if poi.city_metadata == nil || time_now() - poi.queried_at > 300 { picker_status = "地点城市或时效不足，请重新搜索" render_content() return }
-            pending_user_poi = poi picker_open = false picker_request += 1
-            ui.sentence.set_text("目的地改为" + poi.name)
-            if phase == "running" { cancel_task() }
-            if phase == "cancelled" { phase = "failed" }
-            clarify_current_task(true) return
-        }
-    }
-    picker_status = "选择不属于本次地点搜索，行程未改动" render_content()
-}
-let pending_maps_pick = nil
-let maps_previous_phase = "idle"
-fn cancel_maps_pick(){
-    if pending_maps_pick != nil { let ticket = pending_maps_pick pending_maps_pick = nil try { host.request("maps.cancel", {request_id: ticket.request_id}, fn(r){}) } { } }
-}
-// Maps取消未改变业务对象；新渲染事件使用当前标识，旧已排队事件仍被拒绝。
-fn restore_maps_interface(){ if phase == maps_previous_phase && phase != "running" { mount_interface(interface_body, run_id, interface_revision) } }
-fn maps_place_picker(){
-    if user_limits == nil { show_status("请先提供分钟数与预算，再选择目的地") return }
-    cancel_maps_pick() cancel_pending_location()
-    maps_previous_phase = phase
-    if phase == "running" { automatic_seconds += time_now() - loop_started_at }
-    if task_timer != nil { stop_timer(task_timer) task_timer = nil }
-    run_id += 1 picker_request += 1 picker_open = false phase = "picking"
-    stop_interface()
-    let token = run_id let hint = "机场"
-    if destination_record != nil { hint = destination_record.name }
-    show_status("请在 Maps 搜索并选择目的地；原截止仍计时")
-    let ticket = {request_id: nil token: token}
-    pending_maps_pick = ticket
-    try {
-        ticket.request_id = host.request("maps.pick", {search_hint: hint}, fn(r){
-            if pending_maps_pick != ticket || token != run_id { return }
-            pending_maps_pick = nil
-            let data = route_get(r, "data")
-            if route_get(r, "is_ok") != true || route_get(data, "success") != true || route_get(data, "request_id") != ticket.request_id {
-                phase = maps_previous_phase
-                if phase == "running" { phase = "cancelled" }
-                let code = route_get(data, "code")
-                let text = "Maps 未能完成选点；原目标与结果保留，可使用本应用地点搜索"
-                if code == "cancelled" || code == "closed" { text = "Maps 选点已取消；原目标与结果保留" }
-                elif code == "timeout" { text = "Maps 选点超时；原目标与结果保留" }
-                restore_maps_interface() show_status(text) render_content() return
-            }
-            if !route_get(data, "name").is_string() || data.name.trim() == "" || !route_get(data, "lat").is_number() || !route_get(data, "lon").is_number() || data.coordinate_system != "WGS84" || data.source != "octosense.maps.search" || !data.selected_at.is_number() || data.selected_at > time_now() + 30 || time_now() - data.selected_at > 300 || !(abs(data.lat) <= 90 && abs(data.lon) <= 180) {
-                phase = "failed" show_status("Maps 返回的地点来源或坐标无效，未采用") render_content() return
-            }
-            // 返回的是用户选择记录，没有伪造高德POI ID或机场航站楼。
-            phase = "running" run_id += 1 let return_token = run_id
-            let original = {name: data.name label: data.label lat: data.lat lon: data.lon coordinate_system: data.coordinate_system source: data.source selected_at: data.selected_at}
-            amap_request("/v3/assistant/coordinate/convert", "&coordsys=gps&locations=" + coordinate_six(data.lon) + "," + coordinate_six(data.lat), return_token, fn(converted){
-                let point = route_point(route_get(converted, "locations"))
-                if point == nil { fail_task("Maps 地点坐标转换失败，未采用") return }
-                amap_request("/v3/geocode/regeo", "&location=" + coordinate_six(point.lon) + "," + coordinate_six(point.lat) + "&extensions=base&radius=0", return_token, fn(city_data){
-                    let address = route_get(route_get(city_data, "regeocode"), "addressComponent")
-                    let city = amap_city(route_get(address, "city"), route_get(address, "citycode"), route_get(address, "adcode"), route_get(address, "province"))
-                    if route_get(address, "country") != "中国" || city == nil { fail_task("Maps 所选地点缺少有效大陆城市计价依据，未采用") return }
-                    pending_user_poi = {id: "user-maps-" + data.selected_at external_poi_id: nil name: data.name address: data.label longitude: point.lon latitude: point.lat coordinate_system: "GCJ-02" coordinate_basis: "amap-convert-from-user-selection" source: "octosense.maps.search" original_selection: original queried_at: data.selected_at returned_at: time_now() city_metadata: city}
-                    ui.sentence.set_text("目的地改为" + data.name) phase = "failed" clarify_current_task(true)
-                })
-            })
-        })
-        if !ticket.request_id.is_number() && pending_maps_pick == ticket { pending_maps_pick = nil phase = maps_previous_phase if phase == "running" { phase = "cancelled" } restore_maps_interface() show_status("宿主尚不支持 Maps 选点；可使用本应用地点搜索") }
-    } { pending_maps_pick = nil phase = maps_previous_phase if phase == "running" { phase = "cancelled" } restore_maps_interface() show_status("宿主拒绝 Maps 选点；可使用本应用地点搜索") }
-    render_content()
-}
 
-fn resume_task(){ agent_user_text("继续当前任务；保留原截止和预算") }
-fn change_one_limit(text){
-    if user_limits == nil { return false }
-    let compact = text.replace(regex("[ \t]", "g"), "")
-    if compact.search("预算") < 0 && compact.search("分钟") < 0 { return false }
-    if explicit_limits(text) != nil { return false }
-    let updated = nil
-    if compact.search("预算") >= 0 {
-        let normalized = compact.replace("改为", "").replace("改成", "").replace("调整为", "").replace("调整到", "").replace("是", "")
-        updated = explicit_limits("" + user_limits.minutes + "分钟" + normalized)
-    } elif compact.search("分钟") >= 0 { updated = explicit_limits(compact + "预算" + (user_limits.budget_cents / 100)) }
-    if updated == nil || updated.currency == "unsupported" { show_status("条件修改无效，请明确数字分钟数或人民币预算") return true }
-    user_limits.minutes = updated.minutes user_limits.budget_cents = updated.budget_cents
-    if updated.currency == "CNY" { user_limits.currency = "CNY" }
-    arrive_by = received_at + user_limits.minutes * 60
-    if phase == "running" { cancel_task() }
-    if phase == "cancelled" { phase = "failed" }
-    clarify_current_task(true) return true
-}
+
+// Maps取消未改变业务对象；新渲染事件使用当前标识，旧已排队事件仍被拒绝。
+
+
+
+
+
 fn destination_label(){
     if destination_record == nil { return "选择或纠正目的地" }
     let basis = "根据来源核实"
@@ -536,9 +446,9 @@ fn destination_label(){
     elif route_get(constraints, "inferred") == true { basis = "根据位置推断；航站楼未知" }
     return destination_record.name + " · " + basis
 }
-fn open_conditions(){ condition_open = true render_content() }
-fn submit_condition(){ submit_condition_text(ui.limit_query.text()) }
-fn submit_condition_text(value){ if value.is_string(){agent_user_text(value)} }
+
+
+
 fn candidate_text(candidate){
     let selected = "查看"
     if candidate.id == viewed_route_id { selected = "当前查看" }
@@ -562,10 +472,7 @@ fn note_value(raw, key){
     return ""
 }
 fn show_status(text){ runtime_status = text render_content() }
-fn save_audit(){
-    let record = {schema: 1 state: phase received_at: received_at arrive_by: arrive_by steps: step_count protocol_retry_count: protocol_retry_count automatic_seconds: automatic_seconds model: "MiniMax-M3" model_transport: "direct-net-thinking-disabled" model_requests: model_requests decisions: decisions observations: observations interface_requests: interface_requests interface_error: interface_error interface_revision: interface_revision interface_json: interface_scene_json agent_messages: agent_messages.to_json()}
-    try { fs.write("agent-run.json", record.to_json()) } { show_status("任务记录保存失败，详情仍保留在当前窗口") }
-}
+
 fn remember_source(path, raw){
     source_snapshots.push({path: path raw: raw kind: "file"})
 }
@@ -587,14 +494,13 @@ fn fail_task(text){
 }
 fn observe(tool, data){
     observations.push({tool: tool observed_at: time_now() data: data})
-    save_audit()
 }
 fn mark_tool_used(name){
     for item in used_tools { if item == name { return true } }
     used_tools.push(name)
     return true
 }
-fn ask_user(question){ phase = "asking" answer_text = question show_status(question) if active_tool != nil { agent_tool_result({success:true question:question facts:interface_facts()}) } }
+
 fn current_task(token){ return token == run_id && agent_active }
 fn read_text(path){
     if !fs.exists(path) { return nil }
@@ -860,7 +766,7 @@ fn declared_currency(text){
     }
     return currency
 }
-// 首轮明确支持数字分钟与“预算”金额，解析不出的硬约束交给用户澄清。
+// 首轮明确支持数字分钟与“预算”金额，解析不出的硬约束作为本次缺失返回。
 fn explicit_limits(text){
     let compact = text.replace(regex("[ \t]", "g"), "")
     let time_parts = compact.split("分钟")
@@ -901,13 +807,13 @@ fn set_constraints(p){
     if calendar_events.len() == 0 || note_records.len() == 0 || position_record == nil { return reject_constraints("日历、机票笔记或位置来源缺失") }
     if !position_current(position_record) { return reject_constraints("位置来源已过期或无效，请重新规划") }
     if user_limits == nil {
-        ask_user("请明确数字分钟数与预算，例如：40分钟内到机场，预算50元。") return true
+        return reject_constraints("本次缺少明确的数字分钟数与预算，例如：40分钟内到机场，预算50元。")
     }
-    if user_limits.currency != "CNY" && user_limits.currency != "unspecified" { ask_user("高德本次提供人民币估价，不能直接与其它币种预算比较。请明确人民币预算和分钟数。") return true }
+    if user_limits.currency != "CNY" && user_limits.currency != "unspecified" { return reject_constraints("高德本次提供人民币估价，不能直接与其它币种预算比较。本次缺少明确的人民币预算和分钟数。") }
     if p.minutes != user_limits.minutes || p.budget_cents != user_limits.budget_cents { return reject_constraints("模型的分钟数或预算与用户明确指令不符，未改动用户原值") }
     if !(p.minutes >= 1 && p.minutes <= (9007199254740991 - received_at) / 60 && p.minutes % 1 == 0) { return reject_constraints("分钟数无法安全计算到达期限") }
     if !(p.budget_cents >= 0 && p.budget_cents <= 9007199254740991 && p.budget_cents % 1 == 0) { return reject_constraints("预算必须为可精确表示的非负整数分") }
-    if position_record.currency != "CNY" { ask_user("位置尚未核实人民币计价依据，无法确定预算币种。") return true }
+    if position_record.currency != "CNY" { return reject_constraints("位置尚未核实人民币计价依据，无法确定预算币种。") }
     if p.currency != "CNY" { return reject_constraints("模型预算币种不是人民币，无法与本次报价比较") }
     if !p.destination_query.is_string() || p.destination_query.trim() == "" { return reject_constraints("模型缺少目的地查询文字") }
     if !validate_citations(p.citations) { return reject_constraints("模型来源引用无效：必须使用来源记录ID及同一行原文") }
@@ -939,7 +845,7 @@ fn set_constraints(p){
     let resolved_scene = ""
     for citation in p.citations {
         for source in source_records {
-            if source.id == citation.source_id && source.kind == "user" && source.source == "user-clarification" && !source.mock && source.raw.search(citation.quote) >= 0 && source.raw.search(selected_note.airport) >= 0 && source.raw.search(selected_note.terminal) >= 0 {
+            if source.id == citation.source_id && source.kind == "user" && source.source == "explicit-current-input" && !source.mock && source.raw.search(citation.quote) >= 0 && source.raw.search(selected_note.airport) >= 0 && source.raw.search(selected_note.terminal) >= 0 {
                 let source_scene = ""
                 if source.raw.search("国内出发") >= 0 && source.raw.search("国际出发") < 0 { source_scene = "国内出发" }
                 if source.raw.search("国际出发") >= 0 && source.raw.search("国内出发") < 0 { source_scene = "国际出发" }
@@ -952,18 +858,17 @@ fn set_constraints(p){
     for note in associated {
         if note.airport == "" || note.terminal == "" { return reject_constraints("关联机票笔记缺少机场或航站楼，尚不能确定目的地") }
         if !user_resolution && (note.airport != selected_note.airport || note.terminal != selected_note.terminal || (note.raw.search("国内出发") >= 0) != (selected_note.raw.search("国内出发") >= 0) || (note.raw.search("国际出发") >= 0) != (selected_note.raw.search("国际出发") >= 0)) {
-            ask_user("日历对应的有效机票笔记存在机场、航站楼或出发区域冲突，请确认本次出发地点。")
-            return true
+            return reject_constraints("日历对应的有效机票笔记存在机场、航站楼或出发区域冲突，尚未确定本次出发地点。")
         }
     }
     let departure_scene = ""
     if selected_note.raw.search("国内出发") >= 0 { departure_scene = "国内出发" }
-    if selected_note.raw.search("国际出发") >= 0 { if departure_scene != "" { if resolved_scene == "" { ask_user("机票笔记的国内与国际出发场景冲突，请确认出发区域。") return true } departure_scene = resolved_scene } else { departure_scene = "国际出发" } }
+    if selected_note.raw.search("国际出发") >= 0 { if departure_scene != "" { if resolved_scene == "" { return reject_constraints("机票笔记的国内与国际出发场景冲突，尚未确定出发区域。") } departure_scene = resolved_scene } else { departure_scene = "国际出发" } }
     // 出发区域已由引用笔记核实，模型遗漏时由执行器构造完整查询。
     if departure_scene != "国内出发" && p.destination_query.search("国内出发") >= 0 || departure_scene != "国际出发" && p.destination_query.search("国际出发") >= 0 { return reject_constraints("模型出发区域与有效机票来源矛盾") }
     let destination_query = selected_note.airport + " " + selected_note.terminal
     if departure_scene != "" { destination_query += " " + departure_scene }
-    let currency_basis = position_record.city + "已核实为大陆城市；高德人民币计价；未明确币种的预算推断为CNY，待确认"
+    let currency_basis = position_record.city + "已核实为大陆城市；高德人民币计价；未明确币种的预算按地域推断为CNY"
     if user_limits.currency == "CNY" { currency_basis = "用户明确人民币预算；" + position_record.city + "已核实为大陆城市；按高德人民币计价比较" }
     constraints = {airport: selected_note.airport terminal: selected_note.terminal note_id: p.note_id minutes: p.minutes budget_cents: p.budget_cents currency: "CNY" destination_query: destination_query event_id: p.event_id citations: p.citations objective: "min_cost" departure_scene: departure_scene currency_basis: currency_basis inferred: false}
     arrive_by = received_at + p.minutes * 60
@@ -1020,31 +925,7 @@ fn parse_pois(data, at, airports_only){
     }
     return result
 }
-fn discover_airports(p, token){
-    for key value in p { if "" + key != "destination_query" { fail_task("机场发现只接受查询关键词，分钟数与预算沿用原指令") return } }
-    if location_mode() != "live" { fail_task("机场推断需要真实定位模式；演示模式使用已引用的模拟行程") return }
-    if constraints != nil { fail_task("本次目的地约束已形成，修正后才能重新发现机场") return }
-    if user_limits == nil { ask_user("请明确数字分钟数与预算。") return }
-    if !position_current(position_record) || position_record.mock != false { fail_task("机场推断缺少有效的真实位置；尚未查询机场或路线") return }
-    if position_record.currency != "CNY" || !position_record.citycode.is_string() || position_record.citycode == "" { fail_task("机场推断缺少已核实的城市与人民币计价依据；尚未查询路线") return }
-    if user_limits.currency != "CNY" && user_limits.currency != "unspecified" { ask_user("本次报价为人民币，无法直接比较其它币种预算。请明确人民币预算。") return }
-    if !(user_limits.minutes >= 1 && user_limits.minutes <= (9007199254740991 - received_at) / 60 && user_limits.minutes % 1 == 0 && user_limits.budget_cents >= 0 && user_limits.budget_cents <= 9007199254740991 && user_limits.budget_cents % 1 == 0) { fail_task("用户时限或预算无法安全计算，未改动原值；尚未查询路线") return }
-    let query = "机场"
-    if field_present(p, "destination_query") {
-        if !p.destination_query.is_string() || p.destination_query.trim() == "" { fail_task("机场查询关键词无效") return }
-        query = p.destination_query.trim()
-    }
-    mark_tool_used("discover_airports")
-    constraints = {airport: "" terminal: "" minutes: user_limits.minutes budget_cents: user_limits.budget_cents currency: "CNY" destination_query: query objective: "min_cost" departure_scene: "" inferred: true currency_basis: "已核实起点城市，按高德人民币计价" inference: nil}
-    arrive_by = received_at + user_limits.minutes * 60
-    let at = time_now()
-    amap_request("/v3/place/text", "&city=" + position_record.citycode.url_encode() + "&citylimit=false&extensions=all&children=1&types=150104&keywords=" + query.url_encode(), token, fn(data){
-        poi_records = parse_pois(data, at, true)
-        observe("discover_airports", {query: query origin_city: position_record.city airport_candidates: poi_records})
-        if poi_records.len() == 0 { fail_task("机场服务没有返回可核实的机场候选，目的地来源不足；尚未查询路线") return }
-        finish_tool_from_state(token)
-    })
-}
+
 fn find_destination(token){
     if constraints == nil { fail_task("目的地约束尚未形成") return }
     if route_get(constraints, "inferred") == true { fail_task("推断机场应选择本次机场查询候选") return }
@@ -1181,6 +1062,7 @@ fn present_results(reason){
  if active_tool != nil { agent_tool_result({success:true comparison:comparison_summary() queried_transit_count:transit_count queried_driving:driving_done facts:interface_facts()}) }
 }
 fn read_source_tool(name, token, done){
+    if (name == "read_calendar" || name == "read_notes") && location_mode() != "demo" { fail_task("当前真实模式未接通日历和笔记来源") return }
     mark_tool_used(name)
     if name == "read_calendar" { if !calendar_tool() { fail_task("日历来源无法读取") return } }
     elif name == "read_notes" { if !notes_tool() { fail_task("笔记来源无法读取") return } }
@@ -1193,25 +1075,8 @@ fn read_source_tool(name, token, done){
     } else { fail_task("未知来源工具") return }
     done()
 }
-fn read_sources_at(tools, index, token){
-    if !current_task(token) { return }
-    if index >= tools.len() { start_timeout(0.01, || finish_tool_from_state(token)) return }
-    read_source_tool(tools[index], token, fn(){
-        if current_task(token) { start_timeout(0.01, || read_sources_at(tools, index + 1, token)) }
-    })
-}
-fn action_progress(name){
-    if name == "read_location" { return "正在获取当前位置" }
-    if name == "read_calendar" { return "正在读取日历资料（模拟）" }
-    if name == "read_notes" { return "正在读取笔记资料（模拟）" }
-    if name == "read_sources" { return "正在读取任务所需资料" }
-    if name == "discover_airports" || name == "find_destination" { return "正在查询目的地候选" }
-    if name == "select_destination" || name == "set_constraints" { return "正在核对目的地与行程要求" }
-    if name == "query_transit" { return "正在查询公共交通" }
-    if name == "query_driving" { return "正在查询驾车对照" }
-    if name == "present" || name == "fail" { return "正在汇总已有结果" }
-    return "需要补充信息"
-}
+
+
 
 
 
@@ -1235,7 +1100,6 @@ fn request_finished(record, state){
 }
 fn request_stage(record, stage){
     record.transport_stage = stage record.stage_at = time_now()
-    if stage == "before_net" || stage == "response_entry" || stage == "model_action" { start_timeout(0.01, || save_audit()) }
 }
 fn minimax_request(task, input, schema, token, record, done){
     request_stage(record, "entry")
@@ -1258,7 +1122,7 @@ fn minimax_request(task, input, schema, token, record, done){
     let waiting = {settled: false}
     record.dispatch_started_at = nil record.dispatch_returned_at = nil record.dispatch_returned = false record.http_status = nil
     request_stage(record, "before_net")
-    // 准备与审计已完成；派发入口重新取得宿主的单入口预算。
+    // 请求准备已完成；派发入口重新取得宿主的单入口预算。
     start_timeout(0.01, || {
         if !request_current(token, record) || waiting.settled { return }
         record.dispatch_started_at = time_now()
@@ -1311,7 +1175,6 @@ fn minimax_request(task, input, schema, token, record, done){
 
 fn start_task(){
     invalidate_interface()
-    cancel_maps_pick()
     let text = ui.sentence.text().trim()
     if text == "" { show_status("请用一句话说明行程、时限与预算") return }
     cancel_pending_location()
@@ -1320,75 +1183,28 @@ fn start_task(){
     let token = run_id
     received_at = time_now() arrive_by = 0 loop_started_at = received_at automatic_seconds = 0 step_count = 0 protocol_retry_count = 0
     pending_user_poi = nil condition_open = false invalidate_map() picker_request += 1 picker_open = false viewed_route_id = "" expanded_routes = false
-    request_text = text user_limits = explicit_limits(text) replies = [] observations = [] model_requests = [] decisions = [] source_snapshots = [] source_records = [] calendar_events = [] note_records = []
+    request_text = text user_limits = explicit_limits(text) observations = [] model_requests = [] decisions = [] source_snapshots = [] source_records = [] calendar_events = [] note_records = []
     position_record = nil constraints = nil destination_record = nil poi_records = [] candidates = [] chosen = nil used_tools = []
     transit_count = 0 transit_completed = 0 driving_done = false driving_completed = false progress_text = "" answer_text = "" phase = "running"
     if user_limits != nil {arrive_by=received_at+user_limits.minutes*60}
-    agent_messages=[] agent_active=true confirmation_requested=false
-    save_audit()
+    agent_messages=[] agent_active=true
+    source_records.push({id:"current-input" kind:"user" source:"explicit-current-input" mock:false raw:text read_at:received_at})
     render_content()
     refresh_generated_facts()
     start_timeout(0.01, || agent_begin())
 }
-fn clarify(){ clarify_current_task(false) }
-fn clarify_current_task(preserve_destination){ agent_user_text(ui.sentence.text().trim()) }
+
+
 fn cancel_task(){
     cancelled_input = ui.sentence.text().trim()
     stop_interface()
-    cancel_maps_pick()
     cancel_pending_location()
     agent_active=false active_tool=nil run_id += 1 phase = "cancelled" picker_request += 1 invalidate_map()
     if task_timer != nil { stop_timer(task_timer) task_timer = nil }
-    show_status("任务已停止；原截止与预算保留") save_audit() render_content()
+    show_status("本次查询已停止；下次查询开始新任务") render_content()
 }
-fn confirm_trip(){
-    if phase != "proposal" || chosen == nil { return }
-    if !sources_current() {
-        phase = "needs_replan" chosen = nil candidates = []
-        show_status("背景文件已变更或位置过期，请重新规划后再确认")
-        save_audit() render_content() return
-    }
-    let recheck = route_recheck(chosen, route_later(time_now(), chosen.planned_departure_at), arrive_by, constraints.budget_cents)
-    if !recheck.passed { phase = "needs_replan" chosen = nil show_status("确认前检查未通过：" + recheck.reason) save_audit() render_content() return }
-    let trip = {schema: 2 id: "trip-" + received_at state: "confirmed" request: request_text clarifications: replies received_at: received_at arrive_by: arrive_by confirmed_at: time_now() constraints: constraints user_limits: user_limits source_records: source_records source_snapshots: source_snapshots destination: destination_record selected_route: chosen tool_observations: observations model: "MiniMax-M3"}
-    try {
-        let data = trip.to_json()
-        if fs.write("trip.json", data) != nil { show_status("行程保存失败，方案仍保留") return }
-        if fs.read("trip.json") != data { show_status("行程保存后核验未通过，请重试") return }
-        let back = fs.read("trip.json").parse_json()
-        if back.schema != 2 || back.state != "confirmed" || back.selected_route.id != chosen.id { show_status("行程确认状态无法验证") return }
-        saved_trip = back phase = "confirmed" show_status("行程已确认；尚未开始导航") save_audit() render_content() refresh_generated_facts()
-    } { show_status("行程保存或核验失败，方案仍保留") }
-}
-fn restore_trip(){
-    if !fs.exists("trip.json") { return }
-    try {
-        let trip = fs.read("trip.json").parse_json()
-        if trip.schema != 2 || trip.state != "confirmed" || !trip.selected_route.is_object() { show_status("本地行程格式无效，请重新规划") return }
-        let stored = route_get(trip, "constraints")
-        if !stored.is_object() || !stored.minutes.is_number() || !stored.budget_cents.is_number() || stored.currency != "CNY" || !trip.received_at.is_number() || !trip.arrive_by.is_number() || !trip.request.is_string() || !trip.source_records.is_array() || !trip.source_snapshots.is_array() { show_status("本地行程格式无效，请重新规划") return }
-        if !(trip.received_at >= 0 && stored.minutes >= 1 && stored.minutes % 1 == 0 && stored.minutes <= (9007199254740991 - trip.received_at) / 60 && stored.budget_cents >= 0 && stored.budget_cents <= 9007199254740991 && stored.budget_cents % 1 == 0 && trip.arrive_by == trip.received_at + stored.minutes * 60) { show_status("本地行程时间或预算无效，请重新规划") return }
-        saved_trip = trip chosen = trip.selected_route constraints = stored source_records = trip.source_records source_snapshots = trip.source_snapshots destination_record = trip.destination
-        pending_user_poi = nil
-        if route_get(stored, "user_selected") == true && destination_record.is_object() { pending_user_poi = destination_record }
-        for source in source_records { if source.kind == "location" { position_record = source.raw.parse_json() } }
-        user_limits = explicit_limits(trip.request)
-        for reply in trip.clarifications {
-            let updated = explicit_limits(reply)
-            if updated != nil { user_limits = updated }
-            let declaration = declared_currency(reply)
-            if user_limits != nil && declaration != "unspecified" { user_limits.currency = declaration }
-        }
-        let saved_limits = route_get(trip, "user_limits")
-        if saved_limits.is_object() && saved_limits.minutes == stored.minutes && saved_limits.budget_cents == stored.budget_cents && (saved_limits.currency == "CNY" || saved_limits.currency == "unspecified") { user_limits = saved_limits }
-        if user_limits == nil || user_limits.minutes != stored.minutes || user_limits.budget_cents != stored.budget_cents || (user_limits.currency != "CNY" && user_limits.currency != "unspecified") { received_at = trip.received_at arrive_by = trip.arrive_by user_limits = nil phase = "asking" answer_text = "原行程期限与预算已保存，但用户约束声明无法恢复，请补充原数字分钟数与预算。" show_status("旧行程需要补充约束声明，原截止未重置") render_content() return }
-        replies = trip.clarifications observations = trip.tool_observations
-        received_at = trip.received_at arrive_by = trip.arrive_by request_text = trip.request candidates = [chosen] viewed_route_id = chosen.id phase = "confirmed"
-        ui.sentence.set_text(trip.request)
-        if !route_recheck(chosen, time_now(), arrive_by, constraints.budget_cents).passed || !sources_current() { show_status("已恢复历史行程；数据已过期或需重新检查") } else { show_status("已恢复确认的行程；尚未开始导航") }
-        render_content() refresh_generated_facts()
-    } { show_status("本地行程无法读取，请重新规划") }
-}
+
+
 fn money_text(cents){ if cents == nil { return "费用未知" } return "¥" + (cents / 100) }
 fn duration_text(seconds){ if seconds == nil { return "耗时未知" } let remainder = seconds % 60 let minutes = (seconds - remainder) / 60
     if remainder > 0 { minutes += 1 }
@@ -1472,43 +1288,9 @@ fn source_label(){
     if mock_location { text += "出发位置为模拟位置，并非当前设备定位。" }
     return text
 }
-fn query_task(){ let text=ui.sentence.text().trim() if text == "" {show_status("请描述行程") return} if user_limits == nil || phase == "idle" {start_task()} else {agent_user_text(text)} }
+fn query_task(){ start_task() }
 
-fn result_text(){
-    let text = ""
-    let recommendation = ""
-    if phase != "idle" && source_label() != "" { text = source_label() + "\n" }
-    if phase == "asking" { text += answer_text + "\n请在输入框补充后点查询。" }
-    if constraints != nil && route_get(constraints, "inferred") == true && destination_record != nil {
-        text += "暂按 " + constraints.airport + " 规划，这是基于位置与机场查询的推断；未读取真实机票，航站楼未确定。\n"
-        if constraints.inference != nil { text += "依据：" + constraints.inference.origin_city + "的有效位置与本次高德机场查询；" + constraints.inference.reason + "。机场POI位置不等于已核实客运航站楼。输入修正信息再点查询可更换目标，原截止与预算保持不变。\n" }
-    }
-    if constraints != nil { text += "\n前往 " + constraints.destination_query + "；" + constraints.minutes + " 分钟内；预算 " + money_text(constraints.budget_cents) + "；到达期限 " + beijing_clock(arrive_by) + "（从首次指令起算）。\n" }
-    if candidates.len() > 0 {
-        if phase == "failed" { text += "比较未完成，仅已有结果：\n" }
-        if phase == "failed" || phase == "proposal" { text += comparison_summary() + "\n" }
-        let checked_at = time_now()
-        if phase == "confirmed" && saved_trip != nil { checked_at = saved_trip.confirmed_at }
-        for index candidate in candidates {
-            let check = route_recheck(candidate, checked_at, arrive_by, constraints.budget_cents)
-            if chosen != nil && candidate.id == chosen.id && check.passed { recommendation = "推荐方案 " + (index + 1) }
-            text += "\n方案 " + (index + 1) + "：" + kind_text(candidate.kind) + "；" + money_text(candidate.price_cents) + "；" + duration_text(candidate.duration_seconds) + "。\n" + check.reason + "。\n"
-            if candidate.duration_seconds != nil { text += "预计到达 " + beijing_clock(check.estimated_arrival_ts) + "；原始截止 " + beijing_clock(arrive_by) + "。\n" }
-            let description = route_description(candidate)
-            if description != "" { text += description + "\n" }
-        }
-        text += "时间与费用为供应商估计，不保证实际到达或成交价。输入修正信息可继续当前任务；完整分钟数与预算指令会开始新行程。\n"
-    } elif phase == "failed" {
-        if transit_count == 0 && !driving_done { text += "尚未取得路线候选，不能判断是否有满足要求的路线。" }
-        else { text += "已有交通查询，但尚无候选结果；不能判断不存在可行路线。" }
-    }
-    if chosen != nil && phase == "proposal" {
-        if recommendation != "" { text += "\n" + recommendation + "，为已查且通过检查的最低估价方案。输入“确认”并点查询后保存行程；尚未开始导航。" }
-        else { text += "\n原推荐已不满足确认条件，请输入行程重新查询。" }
-    }
-    if phase == "confirmed" { text += "\n行程已保存，重启可恢复；尚未开始导航。" }
-    return text.trim()
-}
+
 // M3生成原生Splash；业务与网络仍由父应用执行。
 
 // 一个会话保存标准assistant/tool消息；各异步执行入口只完成当前工具。
@@ -1517,42 +1299,29 @@ let agent_active = false
 let agent_calls = []
 let agent_call_index = 0
 let active_tool = nil
-let confirmation_requested = false
 fn tool(name,description,properties,required){return {type:"function" function:{name:name description:description parameters:{type:"object" properties:properties required:required}}}}
-fn agent_tools(){return [
+fn agent_tools(){let tools = [
  tool("read_skill","按需读取实际语言/API材料。可用native_ui、navigation_data。",{name:{type:"string"}},["name"])
- tool("read_calendar","读取本应用明确标注的模拟日历；返回记录和来源。",{},[])
- tool("read_notes","读取本应用模拟机票笔记；返回记录和来源。",{},[])
- tool("read_location","读取当前配置的真实设备或显式模拟位置并核实城市。",{},[])
- tool("set_constraints","按实际日历/笔记原文形成行程约束；用户原分钟数和预算不变。",{event_id:{type:"string"} note_id:{type:"string"} minutes:{type:"number"} budget_cents:{type:"number"} currency:{type:"string"} destination_query:{type:"string"} citations:{type:"array" items:{type:"object" properties:{source_id:{type:"string"} quote:{type:"string"}}}}},["event_id" "note_id" "minutes" "budget_cents" "currency" "destination_query" "citations"])
+ tool("read_location",if location_mode()=="demo" {"读取显式模拟出发位置并核实城市。"} else {"读取当前设备定位并核实城市。"},{},[])
  tool("search_places","用真实高德搜索公开地点，返回完整POI和城市；不采用目标。",{query:{type:"string"}},["query"])
  tool("adopt_destination","采用已有poi_id为本任务目标。basis说明来自用户选择或明确推断；不伪造航站楼。",{poi_id:{type:"string"} basis:{type:"string"}},["poi_id" "basis"])
  tool("query_transit","查询实际起终点公交；策略0推荐/1经济/2少换乘/3少步行/4舒适/5无地铁/7地铁优先/8快。",{strategy:{type:"number"}},["strategy"])
  tool("query_driving","查询实际起终点驾车与估价，保留未知候车/费用。",{},[])
  tool("compare_routes","确定性重新计算所有当前候选的时间、费用与原截止是否成立，返回已查范围；不自动选方案/结束。",{},[])
  tool("render_ui","执行原生Splash源码并返回实际诊断。source在View.on_render中执行；原生API与语法可read_skill(native_ui)。",{source:{type:"string"}},["source"])
- tool("confirm_trip","只有用户明确确认后保存实际route_id并读回核验；仍按原截止/预算/来源检查。",{route_id:{type:"string"}},["route_id"])
- tool("ask_user","向用户显示真实澄清问题；后续是否渲染/查询由你决定。",{question:{type:"string"}},["question"])
-]}
+ ]
+ if location_mode()=="demo" {
+tools.push(tool("read_calendar","读取本应用明确标注的模拟日历；返回记录和来源。",{},[]))
+tools.push(tool("read_notes","读取本应用模拟机票笔记；返回记录和来源。",{},[]))
+tools.push(tool("set_constraints","按实际日历/笔记原文形成行程约束；用户原分钟数和预算不变。",{event_id:{type:"string"} note_id:{type:"string"} minutes:{type:"number"} budget_cents:{type:"number"} currency:{type:"string"} destination_query:{type:"string"} citations:{type:"array" items:{type:"object" properties:{source_id:{type:"string"} quote:{type:"string"}}}}},["event_id" "note_id" "minutes" "budget_cents" "currency" "destination_query" "citations"]))
+ }
+ return tools
+}
 fn agent_begin(){
- agent_messages=[{role:"system" content:"你是Navigation出行Agent。自己选择工具与按需技能资料完成用户目标，真实来源与模拟来源须说清；时间费用由工具计算。可用技能native_ui和navigation_data。"} {role:"user" content:({request:request_text facts:interface_facts()}).to_json()}]
+ agent_messages=[{role:"system" content:"你是Navigation出行Agent。每次输入是独立查询；自己选择工具和按需技能，取得可得事实，用render_ui呈现本次结果或具体缺失。当前不进行问答澄清、不保存查询结果；时间费用由工具计算，明示实际来源。面向用户用自然语言呈现本次出行结果或具体缺失，不把工具名、内部ID、Unix时间戳当作用户需要处理的信息；本次已完成的结果不要保留正在处理标题。可用技能native_ui和navigation_data。"} {role:"user" content:({request:request_text facts:interface_facts()}).to_json()}]
  agent_active=true agent_pump(run_id)
 }
-fn agent_user_text(text){
- if !text.is_string() || text.trim()=="" {return}
- if agent_active {show_status("正在处理；可终止后继续输入") return}
- replies.push(text)
- let updated=explicit_limits(text)
- if updated==nil && user_limits!=nil {
-   let compact=text.replace(regex("[ \\t]","g"),"")
-   if compact.search("预算")>=0 {updated=explicit_limits(""+user_limits.minutes+"分钟"+compact.replace("改为","").replace("改成",""))}
-   elif compact.search("分钟")>=0 {updated=explicit_limits(compact+"预算"+(user_limits.budget_cents/100))}
- }
- if updated!=nil {user_limits=updated arrive_by=received_at+updated.minutes*60 if constraints!=nil {constraints.minutes=updated.minutes constraints.budget_cents=updated.budget_cents}}
- source_records.push({id:"user-"+replies.len() kind:"user" source:"explicit-user" mock:false raw:text read_at:time_now()})
- agent_messages.push({role:"user" content:({text:text facts:interface_facts()}).to_json()})
- agent_active=true interface_error="" agent_pump(run_id)
-}
+
 fn agent_pump(token){
  if !current_task(token){return}
  step_count+=1 show_status("Agent正在处理")
@@ -1565,8 +1334,8 @@ fn agent_pump(token){
    agent_messages.push(message)
    let calls=route_get(message,"tool_calls")
    if !calls.is_array() || calls.len()==0 {
-      let content=route_get(message,"content") if content.is_string(){answer_text=content show_status(content)}
-      agent_active=false if phase=="running" {phase="waiting"} render_content() start_timeout(0.01,||save_audit()) return
+      let content=route_get(message,"content") if content.is_string(){answer_text=content show_status("本次查询完成")}
+      agent_active=false if phase=="running" {phase="waiting"} render_content() return
    }
    agent_calls=calls agent_call_index=0 start_timeout(0.01,||agent_execute_next(token))
  })
@@ -1582,7 +1351,7 @@ fn agent_tool_result(result){
 }
 fn finish_tool_from_state(token){
  if !current_task(token) || active_tool==nil {return}
- agent_tool_result({success:true facts:interface_facts() records:source_records observations:observations})
+ agent_tool_result({success:true facts:interface_facts() records:if active_tool.function.name=="read_calendar" || active_tool.function.name=="read_notes" {source_records} else {[]}})
 }
 fn agent_execute_next(token){
  if !current_task(token){return}
@@ -1607,14 +1376,9 @@ fn agent_execute_next(token){
   elif name=="query_transit" {query_transit(p,token)}
   elif name=="query_driving" {query_driving(token)}
   elif name=="compare_routes" {present_results("")}
-  elif name=="ask_user" {ask_user(p.question)}
   elif name=="render_ui" {
     interface_revision+=1 let revision=interface_revision mount_interface(p.source,token,revision)
     start_timeout(0.25,||{if current_task(token) && active_tool==call {let diagnostic=ui.generated.diagnostics() interface_error=diagnostic agent_tool_result({success:diagnostic=="" diagnostics:diagnostic viewport:ui_viewport facts:interface_facts()})}})
-  }
-  elif name=="confirm_trip" {
-    if !confirmation_requested {agent_tool_result({success:false error:"尚无用户明确确认，不能保存行程"})}
-    else {let route=ui_route(p.route_id) if route==nil {agent_tool_result({success:false error:"路线不存在"})} else {phase="proposal" viewed_route_id=route.id confirm_viewed() confirmation_requested=false agent_tool_result({success:phase=="confirmed" status:runtime_status trip:saved_trip})}}
   }
   else {agent_tool_result({success:false error:"未知工具："+name})}
  } {agent_tool_result({success:false error:"工具参数或数据执行错误" status:runtime_status})}
@@ -1634,7 +1398,7 @@ let ui_viewport = nil
 let mailbox_seen = ""
 let mailbox_lines = 0
 fn request_current(token,record){ return token == run_id && agent_active }
-fn request_failed(record,text){ agent_active=false active_tool=nil phase="failed" interface_error=text show_status(text) start_timeout(0.01,||save_audit()) }
+fn request_failed(record,text){ agent_active=false active_tool=nil phase="failed" interface_error=text show_status(text) }
 fn stop_interface(){
     interface_revision += 1 interface_inflight = false generated_active = false
     invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0
@@ -1648,16 +1412,9 @@ fn clear_generated(){
 fn invalidate_interface(){ stop_interface() clear_generated() interface_error = "" }
 fn shell_busy(){ return agent_active || phase == "picking" }
 fn shell_action(){ if shell_busy(){cancel_task()} else {query_task()} }
-fn ui_available_actions(){
-    let result = []
-    if candidates.len() > 0 { result.push("view_route") }
-    if phase == "proposal" && candidates.len() > 0 { result.push("confirm_route") }
-    if phase == "cancelled" { result.push("continue") }
-    if user_limits != nil { for action in ["maps_pick" "search_places" "preview_place" "adopt_place" "change_conditions"] { result.push(action) } }
-    return result
-}
+
 fn ui_route(ref){ if ref == "viewed" { return viewed_route() } for candidate in candidates { if candidate.id == ref { return candidate } } return nil }
-fn ui_confirmation_available(){ let route = viewed_route() return phase == "proposal" && route != nil && sources_current() && route_recheck(route, time_now(), arrive_by, route_get(constraints, "budget_cents")).passed }
+
 
 fn interface_route_facts(candidate, check){
     let segments = []
@@ -1682,33 +1439,33 @@ fn interface_route_facts(candidate, check){
         request_bound: candidate.request_bound origin_complete: candidate.origin_complete endpoint_complete: candidate.endpoint_complete endpoint_gap_m: candidate.endpoint_gap_m segments: segments}
 }
 fn interface_facts(){
-    let routes = [] let confirmable = [] let source_valid = sources_current() let sources = []
+    try {ui_viewport = ui.content.rect()} {}
+    let routes = [] let source_valid = sources_current() let sources = []
     for candidate in candidates {
         let check = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
-        if phase == "proposal" && source_valid && check.passed { confirmable.push(candidate.id) }
         routes.push(interface_route_facts(candidate, check))
     }
     for record in source_records { sources.push({id: route_get(record, "id") kind: route_get(record, "kind") source: route_get(record, "source") mock: route_get(record, "mock") source_time: route_get(record, "source_time") read_at: route_get(record, "read_at")}) }
     return {phase: phase status: runtime_status error: interface_error now: time_now() received_at: received_at arrive_by: arrive_by
         origin_available: position_record != nil destination_available: destination_record != nil limits_available: user_limits != nil
         origin: position_record destination: destination_record limits: user_limits source_label: source_label() sources: sources sources_current: source_valid answer: answer_text
-        comparison: if candidates.len() > 0 { comparison_summary() } else { "" } routes: routes viewed_route_id: viewed_route_id confirm_available: ui_confirmation_available() confirmable_route_ids: confirmable maps_available: user_limits != nil viewport: ui_viewport
+        comparison: if candidates.len() > 0 { comparison_summary() } else { "" } routes: routes viewed_route_id: viewed_route_id maps_available: user_limits != nil viewport: ui_viewport rendering_environment: {scroll:"父区域承载运行反馈；子Splash有限视口内的ScrollYView承载自然高度View/Fit内容" label_default:"宽度Fill、高度Fit、Flow.Right wrap:true；可显式覆盖原生属性"}
         places: picker_pois preview_place: picker_preview_poi place_status: picker_status
-        semantics: "点路线只查看；确认按原截止、预算与来源重新校验；未知金额/等待不等于零；确认不代表导航；模拟来源明确标注。"}
+        semantics: "点路线只查看；未知金额/等待不等于零。"}
 }
 fn generated_context(){
-    return "let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\nlet Label = Label{draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nfn emit(event){ui.mailbox.set_text(ui.mailbox.text() + event.to_json() + \"\\n\")}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(){let value = ui.fact_state.text() if value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} start_timeout(0.1, || refresh())}\nstart_timeout(0.02, || {last_facts = ui.fact_state.text() ui.body.render() emit({action:\"rendered\"}) start_timeout(0.1, || refresh())})\n"
+    return "let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\nlet Label = Label{width: Fill height: Fit flow: Flow.Right{wrap:true} draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nfn emit(event){ui.mailbox.set_text(ui.mailbox.text() + event.to_json() + \"\\n\")}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(){let value = ui.fact_state.text() if value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} start_timeout(0.1, || refresh())}\nstart_timeout(0.02, || {last_facts = ui.fact_state.text() ui.body.render() emit({action:\"rendered\"}) start_timeout(0.1, || refresh())})\n"
 }
 fn mount_interface(body, token, revision){
     if token != run_id || revision != interface_revision { return }
     clear_generated()
     interface_body = body interface_scene_json = body interface_run = token interface_inflight = false interface_error = ""
     let context = generated_context()
-    let source = context + "\nView{width: Fill height: Fill flow: Down\nmailbox := Label{visible:false text:\"\"}\nfact_state := Label{visible:false text:" + interface_facts().to_json().to_json() + "}\nScrollYView{width: Fill height: Fill flow: Down\nbody := View{width: Fill height: Fit flow: Down on_render: || {\nlet facts = snapshot()\n" + body + "\n}}\n}\n}"
+    let source = context + "\nView{width: Fill height: Fill flow: Down\nmailbox := Label{visible:false text:\"\"}\nfact_state := Label{visible:false text:" + interface_facts().to_json().to_json() + "}\nscroll := ScrollYView{width: Fill height: Fill flow: Down\nbody := View{width: Fill height: Fit flow: Down on_render: || {\nlet facts = snapshot()\n" + body + "\n}}\n}\n}"
     generated_active = true
     ui.generated.diagnostics()
     try { ui.generated.set_text(source) } { interface_error = "生成的Splash执行失败；可重新查询生成" }
-    render_content() save_audit()
+    render_content()
 }
 
 
@@ -1732,13 +1489,9 @@ fn ui_dispatch_action(action){
  let name=route_get(action,"action") let id=route_get(action,"id")
  if name=="rendered" {generated_rendered()}
  elif name=="map" {register_map(action.widget,action.target,route_get(action,"status_widget"))}
- elif name=="view_route" {let route=ui_route(id) if route!=nil {view_route(route.id)} else {show_status("路线已不在当前查询中")}}
- elif name=="confirm_route" {confirmation_requested=true let route=ui_route(id) if route!=nil {viewed_route_id=route.id} agent_user_text("用户明确确认当前查看路线："+viewed_route_id)}
+ elif name=="view_route" {let route=ui_route(id) if route!=nil {view_route(route.id)} else {show_status("路线已不在本次查询中")}}
  elif name=="runtime_error" {generated_error(route_get(action,"message"))}
- elif name=="change_conditions" {agent_user_text(route_get(action,"text"))}
- elif name=="continue" {resume_task()}
- elif name=="refresh" {agent_user_text("请更新当前界面")}
- else {agent_user_text("用户操作："+action.to_json())}
+ else {show_status("本地动作未实现："+name)}
  return true
 }
 fn enqueue_generated_line(index, line, offset, token, generation){
@@ -1779,16 +1532,15 @@ fn update_map_widget(slot){
         }
     } { interface_error = "此图控件加载失败；其它图和行程保留" ui.feedback.render() }
 }
-start_timeout(0.05, || restore_trip())
 SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.color: #xf7f7f7
-    sentence := TextInput{width: Fill height: 48 on_return: || shell_action() text: "40 分钟内到机场，预算 50，尽量便宜。" empty_text: "描述行程、纠正地点或修改预算"
+    sentence := TextInput{width: Fill height: 48 on_return: || shell_action() text: "40 分钟内到机场，预算 50，尽量便宜。" empty_text: "描述本次行程、时限与预算"
         draw_text +: {text_style: NavRegular color: ink color_hover: ink color_focus: ink color_empty: muted}}
     control := View{width: Fill height: Fit on_render: || {
         ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: if shell_busy() { "终止" } else { "查询" } width: 120 height: 36 on_click: || shell_action()}
     }}
-    content := View{width: Fill height: Fill flow: Down spacing: 8
+    content := ScrollYView{width: Fill height: Fill flow: Down spacing: 8
         feedback := View{width: Fill height: Fit on_render: || {
-            Label{draw_text.text_style: NavRegular width: Fill visible: interface_error != "" || interface_inflight || (!generated_active && runtime_status != "")
+            Label{draw_text.text_style: NavRegular width: Fill height: Fit flow: Flow.Right{wrap:true} visible: interface_error != "" || interface_inflight || (!generated_active && runtime_status != "")
                 text: if interface_error != "" { "运行时：" + interface_error } elif interface_inflight { "Agent 正在生成界面；可终止" } else { runtime_status } draw_text.color: ink}
         }}
         generated := Splash{width: Fill height: Fill}

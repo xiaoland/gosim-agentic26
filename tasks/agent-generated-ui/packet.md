@@ -1,8 +1,35 @@
 # Agent 直接生成 Navigation 界面
 
-状态：2026-10-04，单一工具调用 harness 与按需技能已实现，真实 M3 自主查询／比较／生成原生界面及一次生成按钮交互已发生。起点显式 demo，macOS 宿主 Android 手机模式；不称真实 GPS 或 Android 真机。模型后续解释与确定性不可确认结果不一致、长行裁切仍待解决，不称路线和 UI 质量验收通过。源码与实际负例截图已冻结，本轮自有实例已关闭，正式封装与实际挂载一致性已通过，准备本地提交。
+状态：2026-10-05，用户已授权修复并收敛为无持久化、无澄清的独立查询。0.8.0已移除旧行程保存／恢复及跨次会话，文字换行与自然滚动验证已通过，正式封装及挂载一致性已通过，准备本地提交；以下0.7及更早记录仅保留历史依据。
 
-## 目标、授权与责任
+## 本轮授权、取舍与计划
+
+用户原话：“好的，继续修复。而且关于‘旧任务污染’，不知道我前面有没有跟你提到不要做任何持久化，也就是，不存在上一轮运行结果恢复；也暂时不存在问题澄清（因为我们还不是对话式的交互）。”这取代调查阶段关于修复历史Trip恢复边界、让澄清变成生成UI的提案；本轮直接撤除这些行为，不为它们建设更完善的恢复或问答系统。
+
+每次查询独立初始化本次位置、来源、约束、候选与工具历史。标准工具调用会话只在本次Agent执行内存在，新输入不是上一轮补充；终止后的下一次查询也新建。不保存或恢复Trip、用户历史、模型会话或结果审计。凭据配置、打包技能、显式模拟输入文件与宿主调试日志不是应用业务结果；必要子实例通信材料只允许当前运行临时生命周期，不作恢复读取。
+
+正常live不提供演示日历／笔记工具。模型可自行查询公开地点和交通，说明机场推断、具体缺失或失败；不请求用户澄清，不把测试资料伪装成真实来源。输出仍由LLM自由生成，不规定工具顺序或页面模板。修复反馈Label换行，提供正确的Fit／Fill与文本wrap语法，保证外壳生成区域具备真实可用的滚动视口；不添加组件白名单、输出校验或地图数量限制。
+
+稳定ui_finish拥有必要应用／技能／smoke／实际截图实现、修复和有限验证；native_error_api已确认既有原生机制足够，不需新Rust，保留必要包装及最终一次check／build／doctor责任。根负责版本0.8.0、长期文档和任务包整合。保留其它工作，不操作用户实例，不重复全量94回归或多轮无目的M3。完成依据为独立首次与再次查询无旧状态、无保存恢复／澄清入口，Android模式实际长内容换行与滚动，最终包与挂载一致。本地提交沿用既有授权，不推送、发布或签名。
+
+## 根因调查依据
+
+本机只读证据build/research/agent-generated-ui/clarification-layout/current-state-safe.json：配置live，最新history没有agent_begin的system、只有ask_user，render_source_bytes=0；首facts带旧confirmed Trip的模拟日历／笔记／位置。query_task复用已恢复user_limits，完整新指令也未调用start_task。纯文本通过父feedback显示，位于生成Splash的ScrollYView外。
+
+布局证据build/research/agent-generated-ui/nested-splash/layout-result-safe.json：默认Label和仅width:Fill仍为23px单行；显式width:Fill height:Fit flow:Flow.Right{wrap:true}变100px自然换行。ScrollYView固定视口→body Fit→模型根Fill不产生预期可滚动内容，模型根Fit能见0–4行，滚动后12–17行。根已读取两份证据，负责人已看截图并关闭实验实例。
+
+advisor已就生命周期／呈现通道／真实来源给建议；用户新指示进一步删除持久化和澄清，不能沿用旧提案当实施要求。当前无待用户决定事项。
+
+实施中单一父ScrollYView跨Splash实测仍有末尾两行不可达；已采用有限父容器／Splash视口、子ScrollYView与内容Fit的现成路径，不要求单一全局滚动条，不需新增Rust。修复后的9项实际原生、合成模型检查全部通过，证据build/smoke/navigation-harness-dldf0lwz/report.json，根已读取：本次多个call_id、独立system/user历史、真实render、无调用结束、旧结果文件未读未改、停止迟到拒绝、新查询新的时间／预算、Android换行及最后一行可达。产品main 1699f02b7b113322f1b3d0222dbd08406092aa74e7f6c0533e81b8ddeb3bc838，注入摘要另记，合成模型不冒称真实路线任务。
+
+正常live启动不依赖demo初始化，显式demo空来源拒绝、三文件齐备继续，三个入口隔离检查通过；证据build/research/agent-start-mode/result-safe.json，根已读取，无进程或凭据读取。
+
+本轮真实live M3查询已发生，定位超时，取得4个真实高德POI；两次生成错误Parser/width not found与status not found之后可见缺失结果，不读demo、不等待澄清，也没有产生路线。旧观察器未取得完整工具history，不拿桌面idle记录证明真实调用序列。实际稿在修复后重新挂载验证，不追加M3；根已读取build/research/agent-generated-ui/native-stateless/result-safe.json并查看final-top.png／final-bottom.png，末尾字段实际可达。自身实验实例已关闭。
+
+实测稿仍出现内部函数、POI ID、Unix时间戳与生成时“正在处理”标题，模型自行推断北京/CNY，目的地未被规划器采用。根采用滚动证据但不把这些文字当内容质量通过；只补一句面向用户输出目标，不新增强system、结构检查或人工改稿，没有额外模型验证。9项产品main为1699f02b…c838，当前布局查看版c7e7c818…32c2只追加viewport实际读取及文字清理；最终main 8e334492e011df57c34d509cb2e5a854419091fb0e7df9ec74d4f2765e1df931再补简短输出目标。此前c7e7构建已完成，必要文字改动后再次打包／增量构建，只为最终摘要一致，不重跑行为验收。含输出目标的首次正式封装已通过gate／build／doctor并实际挂载一致，证据native-stateless-final-package/result-safe.json（主源码8e334492）。根最终权限整合发现maps.pick已随旧交互撤除，故清单删除unused maps、listing同步不宣称当前Maps往返；该metadata不改行为，不追加模型或原生检查。最终stamp／gate／build／doctor及实际挂载逐文件一致已通过，证据build/research/agent-generated-ui/native-stateless-permissions-package/result-safe.json取代前一次包记录，根已读取。最终能力storage／net／location，源包7,239,143 bytes；source aggregate90039435952ce5e59a4242c94f2a0b98a8bbb445c6ce2be6d1354adcb826be41，bundle BLAKE3 4b264dbf872233d2f7a24cd85b5fd2c76398f4d3c04525e8575c4fa2c9bf4b5c，binary SHA256 e94472bf192a70a3643d4b5fb295ef7d37c4527023611d9e466f1a29d44ae2af。没有追加M3／行为测试，实验实例全关闭。根本地提交，不推送。
+
+
+## 此前目标、授权与责任（历史）
 
 固定外壳只保留输入框和查询／终止按钮，其余内容让 Agent 组织。Navigation 使用无衬线字体，其它应用保持原样。用户先指出分区协议约束过多、预制组件包装度高及一图限制，授权“是的，继续”；继而明确：“我个人建议不要在这个开发阶段做任何的安全边界、一致性校验、输出限制等等各种限制”。这更新了本轮取舍，不再为开发期界面建设沙箱或组件协议。根已告知按直接原生生成推进；用户指定的时间／预算仍是路线任务条件，密钥仍不进入 Git 或模型输入。
 
@@ -10,7 +37,7 @@
 
 根负责协调、决策、长期文档、证据采用与最终提交。GPT-6.1 Sol medium 的稳定负责人 ui_finish 负责应用、smoke、截图及实际交互；host_finish 已完成原生接口验证，但后续两次模型capacity失败且没有执行操作。新增诊断与工具链收尾正式转交 GPT-6.1 Sol low 的稳定负责人 native_error_api；直接对接 ui_finish，保留原host变更／证据，不重复原探针。advisor 只作 consequential judgment，不作 reviewer。现有改动和失败证据保留，不继续旧 schema 验收。
 
-## 已决定的实现
+## 0.7.0 已实现设计（历史）
 
 用户原话已纠正为“不是workflow”：只提供元提示词、工具、技能等资料，由LLM自己处理、组合完成目标。根已承认此前限制／协议／重复回归过多，停止全量验收和旧展示错误重问流程，不再为旧稿窄修延误模式迁移。
 
@@ -46,7 +73,7 @@ diagnostics 已由公开fixture闭环验证：具体on_render类型文本可读�
 
 接口边界归toolchain/README：首次调用只启用当前实例以后捕获，读取不消耗缓存、set_text清空、原log tee保留，其它Splash默认不捕获；try主动捕获的异常依然会清除，不能恢复具体文本。不宣称已获全部错误类型。
 
-## 当前完成依据与恢复点
+## 0.7.0 完成依据
 
 单一正文技能为 bundle/assets/skills/native_ui.md 与 navigation_data.md；官方 bundle/skills 目录保留给 peer 声明，故材料放 assets，应用运行目录仍为 skills。启动器从构建包材料化到应用私有目录，read_skill 按需读取；未引入 kernel、SDK 后端或通用技能平台。材料化逐字节一致证据为 build/research/agent-generated-ui/skills-materialization/result-safe.json。6项实际原生、合成模型验证为 build/smoke/navigation-harness-807l3mw4/report.json，覆盖同一回复多个调用、原消息和call_id、真实render诊断、无调用结束、原deadline与实际按钮回同一历史；根已读取，不重复全量旧回归。
 
