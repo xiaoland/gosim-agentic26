@@ -279,7 +279,15 @@ fn map_geometry(candidate){
             if polyline != nil { geometries.push(polyline) } elif route_get(line, "polyline") != nil { omitted += 1 }
         } }
         if geometries.len() == 0 { omitted += 1 }
-        for line in geometries { paths.push(line) }
+        for line in geometries {
+            // 仅去掉相邻分段共有的端点；不跨缺口补线，保留供应商全部折线。
+            let points = line.split(";")
+            let last = if paths.len() > 0 { paths[paths.len()-1].split(";") } else { [] }
+            if last.len() > 0 && last[last.len()-1] == points[0] {
+                let tail = [] for index point in points { if index > 0 { tail.push(point) } }
+                paths[paths.len()-1] += ";" + text_join(tail, ";")
+            } else { paths.push(line) }
+        }
     }
     return {paths: paths omitted: omitted}
 }
@@ -315,7 +323,9 @@ fn register_map(widget, target, status_widget){
         slot = {id: widget target: target generation: map_generation request: 0 state: "new" status: "地图待加载" bytes: nil target_id: "" caption: "" handle: nil handle_generation: -1 loaded_generation: -1 loaded_request: -1 status_widget: status_widget}
         map_slots[widget] = slot
     }
+    slot.status_widget = status_widget
     load_interface_map()
+    update_map_widget(slot)
 }
 fn load_route_map(candidate){ load_interface_map() }
 fn load_interface_map(){
@@ -325,7 +335,7 @@ fn load_interface_map(){
         elif slot.target_id != candidate.id || slot.generation != map_generation || slot.state == "new" || slot.state == "stale" {
             slot.request += 1 slot.generation = map_generation slot.target_id = candidate.id slot.bytes = nil
             slot.caption = if slot.target == "viewed" { "跟随查看：" } else { "绑定目标：" }
-            slot.caption += if slot.target == "destination" { destination_record.name } elif slot.target == "preview" { picker_preview_poi.name } else { kind_text(candidate.kind) + " · " + candidate.id }
+            slot.caption += if slot.target == "destination" { destination_record.name } elif slot.target == "preview" { picker_preview_poi.name } else { kind_text(candidate.kind) + " · " + duration_text(candidate.duration_seconds) + " · " + money_text(candidate.price_cents) }
             slot.state = "loading" slot.status = "地图加载中"
             let current = slot let route = candidate
             start_timeout(0.01, || load_map_slot(current, route))
@@ -360,6 +370,11 @@ fn load_map_slot(slot, candidate){
 }
 fn accept_map_slot(slot, bytes, token, request, target_id, detail){
     if !map_slot_current(slot, token, request, target_id) { return false }
+    // 静态地图也会以 HTTP 200 返回业务错误 JSON，不能把它标为图片成功。
+    let error = nil try { error = bytes.to_string().parse_json() } {}
+    if error != nil && route_get(error, "status") != nil {
+        map_slot_fail(slot, "地图服务未返回图片（" + route_get(error, "infocode") + "）：" + route_get(error, "info")) return false
+    }
     slot.bytes = bytes slot.state = "ready" slot.status = "高德地图 © AutoNavi；" + detail update_map_widget(slot)
     return true
 }
@@ -1318,7 +1333,7 @@ tools.push(tool("set_constraints","按实际日历/笔记原文形成行程约�
  return tools
 }
 fn agent_begin(){
- agent_messages=[{role:"system" content:"你是Navigation出行Agent。每次输入是独立查询；自己选择工具和按需技能，取得可得事实，用render_ui呈现本次结果或具体缺失。当前不进行问答澄清、不保存查询结果；时间费用由工具计算，明示实际来源。面向用户用自然语言呈现本次出行结果或具体缺失，不把工具名、内部ID、Unix时间戳当作用户需要处理的信息；本次已完成的结果不要保留正在处理标题。可用技能native_ui和navigation_data。"} {role:"user" content:({request:request_text facts:interface_facts()}).to_json()}]
+ agent_messages=[{role:"system" content:"你是Navigation出行Agent。每次输入是独立查询；自己选择工具和按需技能，取得可得事实，用render_ui呈现本次结果或具体缺失。当前不进行问答澄清、不保存查询结果；时间费用由工具计算，明示实际来源。面向用户用自然语言呈现本次出行结果或具体缺失，路线详情包含所选路线的实际地图、分段、费用及限制；地图不可用时说明实际原因。不把工具名、内部ID、Unix时间戳当作用户需要处理的信息；本次已完成的结果不要保留正在处理标题。可用技能native_ui和navigation_data。"} {role:"user" content:({request:request_text facts:interface_facts()}).to_json()}]
  agent_active=true agent_pump(run_id)
 }
 

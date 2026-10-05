@@ -69,12 +69,27 @@ start_timeout(1,||{
  ] agent_call_index=0 agent_execute_next(run_id)
 })
 '''
+MAP_FIXTURE=r'''
+start_timeout(1,||{
+ let route={id:"map-fixture" kind:"taxi" segments:[{polyline:"114,22;114.1,22.1"} {polyline:"114.1,22.1;114.2,22.2"} {polyline:"114.3,22.3;114.4,22.4"}]}
+ let geometry=map_geometry(route)
+ candidates=[route]
+ let slot={id:"missing_image" target:"map-fixture" generation:map_generation request:1 target_id:"map-fixture" state:"loading" bytes:nil caption:"" status_widget:"" handle:nil}
+ map_slots[slot.id]=slot
+ let accepted=accept_map_slot(slot,"{\"status\":\"0\",\"info\":\"UNKNOWN_ERROR\",\"infocode\":\"20003\"}",run_id,1,"map-fixture","")
+ fs.write("harness-smoke.json",{checks:[
+ {name:"连续端点无损合并且不跨几何缺口" passed:geometry.paths.len()==2 && geometry.paths[0]=="114,22;114.1,22.1;114.2,22.2" && geometry.paths[1]=="114.3,22.3;114.4,22.4"}
+ {name:"HTTP200业务错误不能成为ready图片" passed:!accepted && slot.state=="error" && slot.bytes==nil && slot.status.search("20003")>=0}
+ ]}.to_json())
+})
+'''
 def main():
  sp=importlib.util.spec_from_file_location('agent',ROOT/'tools/agent.py');a=importlib.util.module_from_spec(sp);sp.loader.exec_module(a)
  (ROOT/'build/smoke').mkdir(exist_ok=True,parents=True);w=Path(tempfile.mkdtemp(prefix='navigation-harness-',dir=ROOT/'build/smoke'))
  a.STATE=w/'private-state';a.HOME_DIR=a.STATE/'home';a.CORE=a.STATE/'core';a.SESSION=a.STATE/'session.json'
  for p in [a.STATE,a.HOME_DIR,a.CORE]:p.mkdir(parents=True,exist_ok=True)
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
+ if '--map-details' in sys.argv:source=original+'\n'+MAP_FIXTURE
  if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
  env=a.host_env(True);process=None;port=None
  def q(route,**args):return urlopen(f'http://127.0.0.1:{port}/'+route+('?' + urlencode(args) if args else ''),timeout=15).read()
@@ -113,9 +128,9 @@ def main():
    time.sleep(.1)
   assert report,'宿主未完成工具会话；查看 '+str(w/'native.log')
   assert all(row['passed'] for row in report['checks']),report
-  if recovery:
+  if recovery or '--map-details' in sys.argv:
    report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True)
-   (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print('PASS: 3界面错误恢复检查；'+str(w/'report.json'));return
+   (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print('PASS: '+str(len(report['checks']))+'项定向原生检查；'+str(w/'report.json'));return
   time.sleep(3)
   q('k',c='Space',cmd=1,wait=1)
   for ch in 'android':q('k',c='Key'+ch.upper(),wait=1)

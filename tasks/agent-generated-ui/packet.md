@@ -1,6 +1,26 @@
 # Agent 直接生成 Navigation 界面
 
-状态：2026-10-05，0.8.2详情页面低层示例、生成视口修正、六项原生交互及最终封装完成；沿用户授权本地提交，用户新查询验收待进行。0.8.1本地提交c6d3783，无持久化、无澄清、独立查询边界保持。
+状态：2026-10-05，用户确认0.8.2点击与页面切换可用。接续授权完善候选详情地图，并独立评估AppCard运行链路复用。当前0.8.3实现、针对性交互及最终封装完成，沿授权本地提交；不迁移助手、不新增持久化或澄清。
+
+## 本轮地图实现与AppCard评估
+
+用户同意“先补齐地图＋详情切换的可运行低层示例，明确详情应包含路线地图；同时单独评估AppCard的生成与运行链路能否复用”，授权原话：“嗯，同意这个方向，推进”。地图相关必要应用／技能修改、验证和说明已获授权，AppCard范围为调查与隔离实验，不直接调整宿主构建或迁移产品。
+
+稳定ui_finish负责通用Image＋地图事件／来源反馈和详情切换、最小呈现目标及实际Android模式验证；native_error_api负责AppCard工具、技能、模型、生成修复与kernel依赖的可复用性调查，以及冻结后一次封装。根负责整合、决策、版本与知识回流。本次不改写生成稿，不引入预制业务卡、第二模型循环、规定工具顺序或输出限制。地图切路线仍是本地操作，几何／费用／原期限保留真实来源。
+
+完成依据：实际原生地图可见、切两条路线对应图片、返回列表状态保留；生成行为与地图桥验证分开报告，必要仅一次正常M3样本，不做大范围重复抽样。AppCard报告须区分源码具备、实调用和接入缺口，由advisor处理是否复用的工程取舍；无迁移授权则保留具体提议。沿既有授权本地提交，不推送。私有地点、地图URL／密钥、原始稿与日志留忽略目录。
+
+地图实施发现同目标缓存再次注册未同步更新隐藏Image的缺口，UI owner已在register_map共用路径同步update_map_widget，并刷新status_widget。技能增加命名Image与来源标签、详情打开后按真实route id发事件；提示目标明确详情包含地图。当前真实公开demo地点高德返回3个驾车候选；首静态图HTTP200但实际为56B业务错误JSON（UNKNOWN_ERROR／20003），并非有效PNG；解码日志不能证明当前控件收到图。桥此前错误标为ready，已增加业务错误反馈。官方静态图只允许最多4个折线／多边形，原24个分段按共享端点无损合并为4个连续路径，533个含重复端点→513个非重复几何点全部保留后实际返回74355B PNG。不跨缺口补线、不裁段；正在实际页面验收。native源码核对hidden View仍转发Actions，无原生修改依据。
+
+地图实现冻结：main SHA256 26e33e3022d4109c316ab53f05aa95325b1ef185b8c2fa9735abb525e649bc8c，native_ui 360fe23557488be5aa217a2c46e084d0042c6f42960dbec9ea03cb5a70aec84c。根已读取map-details/result-safe.json和build/smoke/navigation-harness-sac3qoex/report.json，并查看android-map-second.png。Android实际两条公开demo端点的真实高德地图可见且不同，返回列表中段rect相同，缓存同目标重开可见；自有实例已关闭。两项原生回归通过，命令python3 tools/smoke.py --map-details：共享端点无损合并／不跨缺口、HTTP200错误JSON不成为ready图片。本轮模型请求0次，这是技能示例与地图桥联调，不冒称M3生成行为可靠或GPS实测；更多不连续path仍可能被provider拒绝，显示错误而非截段。原样技能实例含演示文案，仅在忽略实验目录，不是产品固定稿。冻结后一次check／agent-build／agent-doctor通过，根已读取map-details-final-package/result-safe.json，10文件stage／嵌入pack／实际挂载字节一致。source aggregate e8a9db15e8beda5273cbc50b0bf450234ad79c95b52d8da797db9a97e2652b7a，runtime BLAKE3 3a29432b6b67a4517af00285f8087ea27fef19e0241191d37b797c47c511006f，binary SHA256 ab5ae356912d7e1002ff73d4e4caa87fc43802108f39fe26dd655d3e17dac1bb；解码包7,244,157 bytes。无Rust／宿主改动，封装不追加模型／服务，实例关闭；根本地提交，不推送，用户新查询验收待进行。
+
+AppCard调查与advisor取舍完成：不直接接入整个助手，不复制生成修复实现；现有完整tool history已保留原始意图。锁定octos_ui客户端tool_context为空且send_tool_result忽略，完整迁移需kernel与业务tool桥；M3配置存在不证明运行。待工具结果入口可用，最小判别实验才是同一实际M3会话完成read_skill结果、render_ui真实诊断并自主修正。长期说明回流docs/architecture.md；本次源码只读，无AppCard构建或服务调用。地图实现继续，不等待完整助手接入。
+
+## 当前地图与AppCard调查
+
+用户实测确认按钮与页面切换可用，但候选详情只有文字，询问AppCard能否利用。此前只读调查未改应用或操作用户实例；本轮授权范围见上。根已读取map-readonly/result-safe.json：当前生成正文没有Image、地图字样或map事件；8条路线且maps_available=true，但没有发起地图请求，不能归因于加载失败或缺失几何。隐蔽mailbox未直接读取，未向用户实例注入脚本。当前技能完整详情例子仅文字，地图只有接口签名，可能引导了生成行为，此因果解释属于推断。
+
+AppCard是OctoSense apps/appcard的原生Ask anything助手，有Agent/kernel与L0检查、lower/eval及卡片Splash链路；当前lock仅启用app-hub、未启app-appcard。Makepad widgets的appcard feature与它不同，在锁定版本为空feature。MapView已编译，支持路线叠加和触控，但默认本地vector MBTiles、非高德静态图；中国底图、候选映射、GCJ/WGS与网络域名尚未接入或验证。不能直接将导出类型称为可用的中国路线地图。建议先补现有Image+map事件的完整可运行低层示例，后续单独评估MapView与AppCard运行链路；调查期间零模型请求，无新增源码或构建。
 
 ## 当前详情呈现改动
 

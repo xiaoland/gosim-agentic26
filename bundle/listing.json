@@ -21,7 +21,7 @@
     "support": "https://example.com/support",
     "privacy_policy_url": "https://example.com/privacy"
   },
-  "release_notes": "为 Agent 提供基于原生 View 的详情页面与返回示例，查看操作在本地完成并保留方案列表。呈现内容仍由 Agent 自主组织，不增加预制路线详情组件或展示模型循环。保持独立查询、无持久化、无澄清和局部无衬线字体；验收以 macOS 宿主 Android 模式为准。发布者信息仍为占位。",
+  "release_notes": "补齐原生 Image 地图加载与详情页面切换的低层交互资料，候选详情呈现路线地图与来源反馈。内容仍由 Agent 自主生成，不增加预制路线详情组件或展示模型循环。保持独立查询、无持久化与无澄清；验收以 macOS 宿主 Android 模式为准。发布者信息仍为占位。",
   "age_rating": "all",
   "license": "Apache-2.0"
 }

@@ -34,7 +34,10 @@ fn open_detail(id){
     ui.body.find("detail_text").set_text(route_detail(snapshot(), id))
     ui.body.find("list_page").set_visible(false)
     ui.body.find("detail_page").set_visible(true)
+    ui.body.find("route_map").set_visible(false)
+    ui.body.find("map_note").set_text("正在加载所选路线地图")
     emit({action:"view_route" id:id})
+    emit({action:"map" widget:"route_map" target:id status_widget:"map_note"})
 }
 fn return_to_list(){
     ui.body.find("detail_page").set_visible(false)
@@ -57,6 +60,8 @@ View{width:Fill height:facts.viewport.height flow:Overlay
     detail_page := View{width:Fill height:Fill flow:Down visible:false
         back := Button{text:"返回列表" on_click: || return_to_list()}
         detail_scroll := ScrollYView{width:Fill height:Fill flow:Down
+            route_map := Image{width:Fill height:200 visible:false}
+            map_note := Label{text:""}
             detail_text := Label{text:""}
         }
     }
@@ -65,9 +70,9 @@ View{width:Fill height:facts.viewport.height flow:Overlay
 
 on_facts_changed 是外层已定义的脚本变量，在原生 View 表达式外设置。不会自动重建整个界面；Input 编辑内容应保留。不存在外层 on_render、self.snapshot、self.viewport 等变量。
 
-路线查看的交互目标是打开独立详情页或浮层，关闭／返回后保留原列表的位置和内容；页面样式与结构由生成稿自行组织。
+路线查看的交互目标是打开包含所选路线实际地图、分段、费用和限制的独立详情页或浮层；地图无法加载时显示实际原因。关闭／返回后保留原列表的位置和内容；页面样式与结构由生成稿自行组织。
 
-用户动作 emit({action:"view_route" id:真实路线ID或"viewed"}) 只本地切换当前查看路线，随后 snapshot().viewed_route_id 更新；它不会自动创建详情页面。提供查看按钮时，生成稿应通过 on_facts_changed 根据实际当前路线更新自己呈现的选择或路线信息，让用户看见操作结果；不得仅发出事件而保持所有内容不变。父应用只处理本次路线查看和地图加载；不把事件转为第二条用户消息或查询续聊。地图可自由放多个命名 Image，emit({action:"map" widget:"image_name" target:真实路线ID或"viewed"或"destination" status_widget:"caption_name"})。父应用分别请求和加载真实高德静态地图；status_widget 是可选命名 Label，显示来源和加载错误。未知或缺失几何不伪造直线。
+用户动作 emit({action:"view_route" id:真实路线ID或"viewed"}) 只本地切换当前查看路线，随后 snapshot().viewed_route_id 更新；它不会自动创建详情页面。提供查看按钮时，生成稿应通过 on_facts_changed 根据实际当前路线更新自己呈现的选择或路线信息，让用户看见操作结果；不得仅发出事件而保持所有内容不变。父应用只处理本次路线查看和地图加载；不把事件转为第二条用户消息或查询续聊。地图可自由放多个命名 Image，emit({action:"map" widget:"image_name" target:真实路线ID或"viewed"或"destination" status_widget:"caption_name"})。父应用分别请求和加载真实高德静态地图；status_widget 是可选命名 Label，显示来源和加载错误。target 用当前实际路线ID可固定本次详情目标；用 "viewed" 会随父查看状态更新，"destination" 仅显示实际目的地。命名 Image 应已构造且具有限高度，先显示详情页再发事件，父才能向实际实例加载字节。切换目标先隐藏旧图并显示加载状态，避免把前一条路线图误认成当前图；同一目标再次打开可复用当前run缓存。来源与加载反馈由 status_widget 接收。未知或缺失几何不伪造直线。
 
 render_ui 返回本稿真实 diagnostics。错误说明实际变量、语法或原生类型问题，可以根据结果提交下一稿；应用不改写生成源码。
 
