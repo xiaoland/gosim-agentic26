@@ -114,3 +114,9 @@ Navigation Sans CN 的字体、完整 OFL 原文与复现说明一起放在 `bun
 `Splash.diagnostics()` 首次调用启用该实例后续诊断，因此父应用在 `set_text` 前调用它。接口返回最近收集的原始诊断字符串，重复读取不消耗；每次 `set_text` 清除旧稿诊断，空串停止子实例，捕获启用状态留给下一稿。已被日志排出的历史错误无法补回。只有调用接口的实例启用捕获，其日志通过 tee 保留；其它 Splash 默认行为不变。
 
 脚本 `try` 主动捕获的异常仍按原 VM 清除，接口不会恢复它。原生 `on_render` 的属性类型错误已有实际证据返回 `expected DrawQuad, got object`，使应用能向 M3 反馈具体执行结果。这个接口属于现有 UI overlay，补丁摘要和 runtime tree 由锁文件管理，不是读取全局日志或新增界面校验。
+
+## AutoNaviMapView 原生视口
+
+UI overlay还导出AutoNaviMapView原型，复用Image纹理而保留普通Image行为。fit_bounds、set_camera、zoom_by、load_map_image与on_camera_changed管理GCJ02相机及当前图片；控件不持有候选ID或凭据。应用继续通过官方net接口请求高德视口图片，原生提供单指拖动、双击缩放，页面可调用zoom_by。当前未实现双指捏合，不是连续瓦片地图。
+
+该覆盖与脚本原型导出都由agent-runtime.lock.json及现有UI patch摘要／tree锁定。新checkout按锁定顺序重建，现有工具链需重新运行agent-dev／agent-hidden，不使用旧二进制冒充新接口。供应商scale=1图片按真实标记验证512像素Mercator基准；原生相机请求会使旧解码key失效，纹理安装只接受当前key。实际接口、手势和图片位移证据见[交互地图任务](../tasks/interactive-map/packet.md)，本机Android模式不代表Android真机。此类型是本仓库覆盖，不能宣称stock宿主已有该接口。

@@ -70,6 +70,8 @@ start_timeout(1,||{
 })
 '''
 MAP_FIXTURE=r'''
+let map_smoke_dispatches=0
+fn load_map_slot(slot,candidate){map_smoke_dispatches+=1}
 start_timeout(1,||{
  let route={id:"map-fixture" kind:"taxi" segments:[{polyline:"114,22;114.1,22.1"} {polyline:"114.1,22.1;114.2,22.2"} {polyline:"114.3,22.3;114.4,22.4"}]}
  let geometry=map_geometry(route)
@@ -77,10 +79,18 @@ start_timeout(1,||{
  let slot={id:"missing_image" target:"map-fixture" generation:map_generation request:1 target_id:"map-fixture" state:"loading" bytes:nil caption:"" status_widget:"" handle:nil}
  map_slots[slot.id]=slot
  let accepted=accept_map_slot(slot,"{\"status\":\"0\",\"info\":\"UNKNOWN_ERROR\",\"infocode\":\"20003\"}",run_id,1,"map-fixture","")
- fs.write("harness-smoke.json",{checks:[
+ let error_rejected=slot.state=="error" && slot.bytes==nil && slot.status.search("20003")>=0
+ slot.state="loading" slot.target_id="different-route" fit_map_slot(slot,route)
+ let obsolete_fit_skipped=slot.state=="loading"
+ slot.target_id=route.id slot.interactive=true slot.camera=nil
+ map_camera_changed({widget:slot.id center_lon:114 center_lat:22 zoom:9 width:388 height:240 request:10})
+ map_camera_changed({widget:slot.id center_lon:114.1 center_lat:22 zoom:9 width:388 height:240 request:11})
+ start_timeout(0.1,||fs.write("harness-smoke.json",{checks:[
  {name:"连续端点无损合并且不跨几何缺口" passed:geometry.paths.len()==2 && geometry.paths[0]=="114,22;114.1,22.1;114.2,22.2" && geometry.paths[1]=="114.3,22.3;114.4,22.4"}
- {name:"HTTP200业务错误不能成为ready图片" passed:!accepted && slot.state=="error" && slot.bytes==nil && slot.status.search("20003")>=0}
- ]}.to_json())
+ {name:"HTTP200业务错误不能成为ready图片" passed:!accepted && error_rejected}
+ {name:"已替换路线不派发旧fit" passed:obsolete_fit_skipped}
+ {name:"同批camera只派发仍当前的请求" passed:map_smoke_dispatches==1 && slot.camera.request==11}
+ ]}.to_json()))
 })
 '''
 def main():
@@ -89,7 +99,7 @@ def main():
  a.STATE=w/'private-state';a.HOME_DIR=a.STATE/'home';a.CORE=a.STATE/'core';a.SESSION=a.STATE/'session.json'
  for p in [a.STATE,a.HOME_DIR,a.CORE]:p.mkdir(parents=True,exist_ok=True)
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
- if '--map-details' in sys.argv:source=original+'\n'+MAP_FIXTURE
+ if '--map-details' in sys.argv:source=original.replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_FIXTURE
  if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
  env=a.host_env(True);process=None;port=None
  def q(route,**args):return urlopen(f'http://127.0.0.1:{port}/'+route+('?' + urlencode(args) if args else ''),timeout=15).read()

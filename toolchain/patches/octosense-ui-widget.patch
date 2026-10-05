@@ -1,5 +1,5 @@
 diff --git a/runtime-patches.lock.json b/runtime-patches.lock.json
-index 71aa0ad..73b3b05 100644
+index 71aa0ad..3770143 100644
 --- a/runtime-patches.lock.json
 +++ b/runtime-patches.lock.json
 @@ -4,7 +4,7 @@
@@ -7,7 +7,7 @@ index 71aa0ad..73b3b05 100644
      "patch": "tools/runtime-patches/makepad-settings.patch",
      "sha256": "1bf3c9d5367bb35a0e2ab0eb92b614507817066d31d8030404cbb0655c758268",
 -    "tree": "e9520ccb3740f3af8629d981d06d7e53aad48c06",
-+    "tree": "4f2d590852cd98f479848636ce80c882477e0579",
++    "tree": "534b7e5732e63d35bedffc596b8386c78d572ca1",
      "product_fixes": [
        "Settings integration: Android IME synchronization, accessibility and reduced motion, GLES program-cache validation, obscured-gesture cancellation and scroll-position observation.",
        "Contained-app isolation and secret-input restrictions come from the pinned upstream runtime; the Settings overlay preserves those gates.",
@@ -28,143 +28,16 @@ index 71aa0ad..73b3b05 100644
 +      },
 +      {
 +        "patch": "tools/runtime-patches/makepad-ui-find-rect.patch",
-+        "sha256": "58dd6161824d8c9d0863e436ef4966816ca443f7382354eef7e1a5c96fe50c6f"
++        "sha256": "6f194c71ff1e6f0de5bc1982cefedcc0cd2acb3ad90b7453e95c599ee5311a3a"
        }
      ]
    }
 diff --git a/tools/runtime-patches/makepad-ui-find-rect.patch b/tools/runtime-patches/makepad-ui-find-rect.patch
 new file mode 100644
-index 0000000..32d1c07
+index 0000000..75bd35f
 --- /dev/null
 +++ b/tools/runtime-patches/makepad-ui-find-rect.patch
-@@ -0,0 +1,261 @@
-+diff --git a/widgets/src/widget.rs b/widgets/src/widget.rs
-+index b6e496a..abbc64e 100644
-+--- a/widgets/src/widget.rs
-++++ b/widgets/src/widget.rs
-+@@ -805,6 +805,20 @@ pub fn script_call(
-+             vm.with_cx_mut(|cx| self.set_text(cx, &text));
-+             return ScriptAsyncResult::Return(NIL);
-+         }
-++        // Geometry is read only and comes from this widget's painted, clipped area.
-++        // A not-yet-drawn widget has no usable viewport: report nil, not a guessed size.
-++        if method == live_id!(rect) {
-++            let area = self.area();
-++            let rect = vm.with_cx(|cx| area.is_valid(cx).then(|| area.clipped_rect(cx)));
-++            let Some(rect) = rect else { return ScriptAsyncResult::Return(NIL); };
-++            let object = vm.bx.heap.new_object();
-++            let trap = vm.bx.threads.cur().trap.pass();
-++            for (key, value) in [(id!(x), rect.pos.x), (id!(y), rect.pos.y),
-++                                 (id!(width), rect.size.x), (id!(height), rect.size.y)] {
-++                vm.bx.heap.set_value(object, key.into(), value.into(), trap);
-++            }
-++            return ScriptAsyncResult::Return(object.into());
-++        }
-+         if method == live_id!(text) {
-+             let text = self.text();
-+             return ScriptAsyncResult::Return(vm.bx.heap.new_string_from_str(&text));
-+diff --git a/widgets/src/widget_async.rs b/widgets/src/widget_async.rs
-+index d2f22ab..550c707 100644
-+--- a/widgets/src/widget_async.rs
-++++ b/widgets/src/widget_async.rs
-+@@ -1233,20 +1233,8 @@ fn widget_to_script_call(
-+     }
-+ }
-+ 
-+-fn register_ui_handle(vm: &mut ScriptVm) {
-+-    let vm_id = vm.cx_mut().global::<CxWidgetAsync>().current_vm_id;
-+-    if vm
-+-        .cx_mut()
-+-        .global::<CxWidgetAsync>()
-+-        .ui_handle_types
-+-        .contains_key(&vm_id)
-+-    {
-+-        return;
-+-    }
-+-
-+-    let ui_type = vm.new_handle_type(id_lut!(ui));
-+-
-+-    vm.set_handle_getter(ui_type, move |vm, pself, prop| {
-++// Static and string-based lookup share the same isolate-root confinement.
-++fn lookup_ui_handle(vm: &mut ScriptVm, pself: ScriptValue, prop: LiveId) -> ScriptValue {
-+         if let Some(handle) = pself.as_handle() {
-+             let Some(target_uid) = vm
-+                 .downcast_handle_gc::<CxWidgetHandleGc>(handle)
-+@@ -1320,19 +1308,37 @@ fn register_ui_handle(vm: &mut ScriptVm) {
-+                 return script_err_not_found!(vm.trap(), "widget has no uid");
-+             }
-+ 
-+-            let gc = CxWidgetHandleGc {
-+-                handle: ScriptHandle::ZERO,
-+-                uid: child_uid,
-+-            };
-+-            let child_handle = vm.bx.heap.new_handle(ui_type, Box::new(gc));
-+-            return child_handle.into();
-++            return vm.build_ui_handle_for_uid(child_uid);
-+         }
-+ 
-+         script_err_not_found!(vm.trap(), "invalid ui handle")
-+-    });
-++}
-++
-++fn register_ui_handle(vm: &mut ScriptVm) {
-++    let vm_id = vm.cx_mut().global::<CxWidgetAsync>().current_vm_id;
-++    if vm
-++        .cx_mut()
-++        .global::<CxWidgetAsync>()
-++        .ui_handle_types
-++        .contains_key(&vm_id)
-++    {
-++        return;
-++    }
-++
-++    let ui_type = vm.new_handle_type(id_lut!(ui));
-++
-++    vm.set_handle_getter(ui_type, lookup_ui_handle);
-+ 
-+     vm.set_handle_call(ui_type, move |vm, args, method| {
-+         let pself = script_value!(vm, args.self);
-++        if method == live_id!(find) {
-++            let trap = vm.bx.threads.cur().trap.pass();
-++            let value = vm.bx.heap.vec_value(args, 0, trap);
-++            let Some(name) = vm.bx.heap.cast_to_owned_string(value, "finding a named widget") else {
-++                return script_err_not_found!(vm.trap(), "ui.find expects a widget name string");
-++            };
-++            return lookup_ui_handle(vm, pself, LiveId::from_str(&name));
-++        }
-+         if let Some(handle) = pself.as_handle() {
-+             let Some(uid) = vm
-+                 .downcast_handle_gc::<CxWidgetHandleGc>(handle)
-+@@ -1341,6 +1347,29 @@ fn register_ui_handle(vm: &mut ScriptVm) {
-+                 return script_err_not_found!(vm.trap(), "invalid ui handle");
-+             };
-+ 
-++            if method == live_id!(child) {
-++                let trap = vm.bx.threads.cur().trap.pass();
-++                let value = vm.bx.heap.vec_value(args, 0, trap);
-++                let Some(index) = value.as_number().filter(|n| n.is_finite() && *n >= 0.0 && n.fract() == 0.0 && *n <= usize::MAX as f64) else {
-++                    return script_err_not_found!(vm.trap(), "ui.child expects a non-negative integer index");
-++                };
-++                // Handles are minted by this VM's confined lookup. Descending its
-++                // direct children cannot widen the current script-root boundary.
-++                let child = vm.with_cx(|cx| {
-++                    let parent = cx.widget_tree().widget(uid);
-++                    let mut ordinal = 0usize;
-++                    let mut child = WidgetRef::empty();
-++                    parent.try_children(&mut |_, widget| {
-++                        if ordinal == index as usize { child = widget.clone(); }
-++                        ordinal += 1;
-++                    });
-++                    child
-++                });
-++                if child.is_empty() {
-++                    return script_err_not_found!(vm.trap(), "widget child index is out of range or its instance is gone");
-++                }
-++                return vm.build_ui_handle_for_uid(child.widget_uid());
-++            }
-+             let ui_handle = vm.build_ui_handle_for_uid(uid);
-+             force_set_map_value(&mut vm.bx.heap, args, id!(ui), ui_handle);
-+ 
+@@ -0,0 +1,511 @@
 +diff --git a/platform/script/src/vm.rs b/platform/script/src/vm.rs
 +index c579c89..f11b4ac 100644
 +--- a/platform/script/src/vm.rs
@@ -230,7 +103,7 @@ index 0000000..32d1c07
 +     #[rust]
 +@@ -256,6 +261,7 @@ fn eval_styled_body_with_apply(&mut self, cx: &mut Cx, preserve: bool, apply: &A
 +         };
-+ 
++
 +         let vm_id = self.vm_id;
 ++        let capture_diagnostics = self.capture_execution_diagnostics;
 +         let sheet=self.stylesheet.clone();
@@ -262,7 +135,7 @@ index 0000000..32d1c07
 +@@ -620,8 +627,30 @@ fn drop(&mut self) {
 +     }
 + }
-+ 
++
 ++impl Splash {
 ++    fn collect_execution_diagnostics(&mut self, cx: &mut Cx) {
 ++        if !self.capture_execution_diagnostics || self.vm_id == MAIN_SPLASH_VM_ID { return; }
@@ -292,10 +165,387 @@ index 0000000..32d1c07
 +                 crate::widget_async::handle_splash_network_responses(cx, self.vm_id, responses);
 +@@ -682,6 +711,8 @@ fn text(&self) -> String {
 +     }
-+ 
++
 +     fn set_text(&mut self, cx: &mut Cx, v: &str) {
 ++        self.collect_execution_diagnostics(cx);
 ++        self.execution_diagnostics.clear();
 +         if self.body.as_ref() != v {
 +             self.body.set(v);
 +             // Empty body = tear down the app: reclaim its isolate (stopping its
++diff --git a/widgets/src/widget.rs b/widgets/src/widget.rs
++index b6e496a..abbc64e 100644
++--- a/widgets/src/widget.rs
+++++ b/widgets/src/widget.rs
++@@ -805,6 +805,20 @@ pub fn script_call(
++             vm.with_cx_mut(|cx| self.set_text(cx, &text));
++             return ScriptAsyncResult::Return(NIL);
++         }
+++        // Geometry is read only and comes from this widget's painted, clipped area.
+++        // A not-yet-drawn widget has no usable viewport: report nil, not a guessed size.
+++        if method == live_id!(rect) {
+++            let area = self.area();
+++            let rect = vm.with_cx(|cx| area.is_valid(cx).then(|| area.clipped_rect(cx)));
+++            let Some(rect) = rect else { return ScriptAsyncResult::Return(NIL); };
+++            let object = vm.bx.heap.new_object();
+++            let trap = vm.bx.threads.cur().trap.pass();
+++            for (key, value) in [(id!(x), rect.pos.x), (id!(y), rect.pos.y),
+++                                 (id!(width), rect.size.x), (id!(height), rect.size.y)] {
+++                vm.bx.heap.set_value(object, key.into(), value.into(), trap);
+++            }
+++            return ScriptAsyncResult::Return(object.into());
+++        }
++         if method == live_id!(text) {
++             let text = self.text();
++             return ScriptAsyncResult::Return(vm.bx.heap.new_string_from_str(&text));
++diff --git a/widgets/src/widget_async.rs b/widgets/src/widget_async.rs
++index d2f22ab..550c707 100644
++--- a/widgets/src/widget_async.rs
+++++ b/widgets/src/widget_async.rs
++@@ -1233,20 +1233,8 @@ fn widget_to_script_call(
++     }
++ }
++
++-fn register_ui_handle(vm: &mut ScriptVm) {
++-    let vm_id = vm.cx_mut().global::<CxWidgetAsync>().current_vm_id;
++-    if vm
++-        .cx_mut()
++-        .global::<CxWidgetAsync>()
++-        .ui_handle_types
++-        .contains_key(&vm_id)
++-    {
++-        return;
++-    }
++-
++-    let ui_type = vm.new_handle_type(id_lut!(ui));
++-
++-    vm.set_handle_getter(ui_type, move |vm, pself, prop| {
+++// Static and string-based lookup share the same isolate-root confinement.
+++fn lookup_ui_handle(vm: &mut ScriptVm, pself: ScriptValue, prop: LiveId) -> ScriptValue {
++         if let Some(handle) = pself.as_handle() {
++             let Some(target_uid) = vm
++                 .downcast_handle_gc::<CxWidgetHandleGc>(handle)
++@@ -1320,19 +1308,37 @@ fn register_ui_handle(vm: &mut ScriptVm) {
++                 return script_err_not_found!(vm.trap(), "widget has no uid");
++             }
++
++-            let gc = CxWidgetHandleGc {
++-                handle: ScriptHandle::ZERO,
++-                uid: child_uid,
++-            };
++-            let child_handle = vm.bx.heap.new_handle(ui_type, Box::new(gc));
++-            return child_handle.into();
+++            return vm.build_ui_handle_for_uid(child_uid);
++         }
++
++         script_err_not_found!(vm.trap(), "invalid ui handle")
++-    });
+++}
+++
+++fn register_ui_handle(vm: &mut ScriptVm) {
+++    let vm_id = vm.cx_mut().global::<CxWidgetAsync>().current_vm_id;
+++    if vm
+++        .cx_mut()
+++        .global::<CxWidgetAsync>()
+++        .ui_handle_types
+++        .contains_key(&vm_id)
+++    {
+++        return;
+++    }
+++
+++    let ui_type = vm.new_handle_type(id_lut!(ui));
+++
+++    vm.set_handle_getter(ui_type, lookup_ui_handle);
++
++     vm.set_handle_call(ui_type, move |vm, args, method| {
++         let pself = script_value!(vm, args.self);
+++        if method == live_id!(find) {
+++            let trap = vm.bx.threads.cur().trap.pass();
+++            let value = vm.bx.heap.vec_value(args, 0, trap);
+++            let Some(name) = vm.bx.heap.cast_to_owned_string(value, "finding a named widget") else {
+++                return script_err_not_found!(vm.trap(), "ui.find expects a widget name string");
+++            };
+++            return lookup_ui_handle(vm, pself, LiveId::from_str(&name));
+++        }
++         if let Some(handle) = pself.as_handle() {
++             let Some(uid) = vm
++                 .downcast_handle_gc::<CxWidgetHandleGc>(handle)
++@@ -1341,6 +1347,29 @@ fn register_ui_handle(vm: &mut ScriptVm) {
++                 return script_err_not_found!(vm.trap(), "invalid ui handle");
++             };
++
+++            if method == live_id!(child) {
+++                let trap = vm.bx.threads.cur().trap.pass();
+++                let value = vm.bx.heap.vec_value(args, 0, trap);
+++                let Some(index) = value.as_number().filter(|n| n.is_finite() && *n >= 0.0 && n.fract() == 0.0 && *n <= usize::MAX as f64) else {
+++                    return script_err_not_found!(vm.trap(), "ui.child expects a non-negative integer index");
+++                };
+++                // Handles are minted by this VM's confined lookup. Descending its
+++                // direct children cannot widen the current script-root boundary.
+++                let child = vm.with_cx(|cx| {
+++                    let parent = cx.widget_tree().widget(uid);
+++                    let mut ordinal = 0usize;
+++                    let mut child = WidgetRef::empty();
+++                    parent.try_children(&mut |_, widget| {
+++                        if ordinal == index as usize { child = widget.clone(); }
+++                        ordinal += 1;
+++                    });
+++                    child
+++                });
+++                if child.is_empty() {
+++                    return script_err_not_found!(vm.trap(), "widget child index is out of range or its instance is gone");
+++                }
+++                return vm.build_ui_handle_for_uid(child.widget_uid());
+++            }
++             let ui_handle = vm.build_ui_handle_for_uid(uid);
++             force_set_map_value(&mut vm.bx.heap, args, id!(ui), ui_handle);
++
++diff --git a/widgets/src/image.rs b/widgets/src/image.rs
++index ad05583..a64ae1d 100644
++--- a/widgets/src/image.rs
+++++ b/widgets/src/image.rs
++@@ -3,9 +3,9 @@
++     image_cache::*,
++     makepad_derive_widget::*,
++     makepad_draw::*,
++-    makepad_script::ScriptArrayStorage,
+++    makepad_script::{ScriptArrayStorage,ScriptFnRef},
++     widget::*,
++-    widget_async::ScriptAsyncResult,
+++    widget_async::{ScriptAsyncResult,CxWidgetToScriptCallExt},
++ };
++ use std::path::{Path, PathBuf};
++ use std::sync::Arc;
++@@ -71,6 +71,20 @@
++         width: 100
++         height: 100
++     }
+++    mod.widgets.AutoNaviMapView = mod.widgets.Image{
+++        camera_enabled:true
+++        fit:mod.widgets.ImageFit.Stretch
+++        draw_bg +: {
+++            get_color_scale_pan: fn(scale:vec2,pan:vec2) {
+++                let uv=self.pos*scale+pan
+++                if uv.x<0.0 || uv.x>1.0 || uv.y<0.0 || uv.y>1.0 {
+++                    return vec4(0.95,0.95,0.95,1.0)
+++                }
+++                return self.image_texture.sample_as_bgra(uv)
+++            }
+++        }
+++    }
+++
++ }
++
++ #[derive(Script, ScriptHook)]
++@@ -123,8 +137,40 @@ pub enum ImageAnimation {
++     BounceFps(f64),
++ }
++
+++// Camera coordinates are GCJ-02, matching the public AutoNavi staticmap API.
+++// This widget owns spatial interaction only; its script supplies image bytes.
+++#[derive(Default)]
+++struct RasterCamera {
+++    center: Vec2d,
+++    zoom: f64,
+++    configured: bool,
+++    request: u64,
+++    dirty: bool,
+++    size: Vec2d,
+++    bounds: Option<(f64,f64,f64,f64)>,
+++    drag: Option<(Vec2d,Vec2d)>,
+++    loaded: Option<(Vec2d,f64,Vec2d)>,
+++    pending: Option<(Vec2d,f64,Vec2d)>,
+++}
+++// Public staticmap scale=1 was measured against both endpoint marker tips:
+++// its level uses 512 world pixels, not the common 256-pixel tile convention.
+++const AUTO_NAVI_WORLD_PIXELS: f64 = 512.0;
+++fn map_world(lon:f64,lat:f64)->Vec2d {
+++    let lat=lat.clamp(-85.05112878,85.05112878).to_radians();
+++    dvec2((lon+180.0)/360.0,(1.0-(lat.tan()+1.0/lat.cos()).ln()/std::f64::consts::PI)/2.0)
+++}
+++fn map_geo(p:Vec2d)->(f64,f64) {
+++    (p.x*360.0-180.0, (std::f64::consts::PI*(1.0-2.0*p.y)).sinh().atan().to_degrees())
+++}
+++
++ #[derive(Script, ScriptHook, Widget, Animator)]
++ pub struct Image {
+++    #[live]
+++    camera_enabled: bool,
+++    #[live]
+++    on_camera_changed: ScriptFnRef,
+++    #[rust]
+++    camera: RasterCamera,
++     #[uid]
++     uid: WidgetUid,
++     #[source]
++@@ -321,6 +367,49 @@ fn script_call(
++             }
++             return ScriptAsyncResult::Return(NIL);
++         }
+++        if self.camera_enabled && [live_id!(set_camera),live_id!(fit_bounds),live_id!(zoom_by),live_id!(load_map_image)].contains(&method) {
+++            let values = args.as_object().map(|o| {
+++                let trap=vm.bx.threads.cur().trap.pass();
+++                (0..vm.bx.heap.vec_len(o)).map(|i| vm.bx.heap.vec_value(o,i,trap)).collect::<Vec<_>>()
+++            }).unwrap_or_default();
+++            let number=|i:usize| values.get(i).and_then(|v|v.as_number()).unwrap_or(0.0);
+++            if method == live_id!(set_camera) {
+++                self.camera.center=map_world(number(0),number(1));
+++                self.camera.zoom=number(2).clamp(1.0,17.0);
+++                self.camera.configured=true;
+++                self.camera.bounds=None;
+++                vm.with_cx_mut(|cx|self.camera_changed(cx));
+++                return ScriptAsyncResult::Return(NIL);
+++            }
+++            if method == live_id!(fit_bounds) {
+++                self.camera.bounds=Some((number(0),number(1),number(2),number(3)));
+++                self.texture=None;
+++                self.camera.loaded=None;
+++                self.draw_bg.draw_vars.empty_texture(0);
+++                vm.with_cx_mut(|cx|self.camera_changed(cx));
+++                return ScriptAsyncResult::Return(NIL);
+++            }
+++            if method == live_id!(zoom_by) {
+++                self.camera.zoom=(self.camera.zoom+number(0)).clamp(1.0,17.0);
+++                vm.with_cx_mut(|cx|self.camera_changed(cx));
+++                return ScriptAsyncResult::Return(NIL);
+++            }
+++            if method == live_id!(load_map_image) {
+++                if number(1) as u64 != self.camera.request {
+++                    return ScriptAsyncResult::Return(FALSE);
+++                }
+++                if let Some(array)=values.first().and_then(|v|v.as_array()) {
+++                    if let ScriptArrayStorage::U8(data)=vm.bx.heap.array_storage(array) {
+++                        let bytes=Arc::new(data.clone());
+++                        let path=PathBuf::from(format!("map_image_data://{}",LiveId::unique().0));
+++                        self.camera.pending=Some((self.camera.center,self.camera.zoom,dvec2(number(2),number(3))));
+++                        vm.with_cx_mut(|cx| {let _=self.load_image_from_data_async(cx,&path,bytes);});
+++                        return ScriptAsyncResult::Return(TRUE);
+++                    }
+++                }
+++                return ScriptAsyncResult::Return(FALSE);
+++            }
+++        }
++         if method == live_id!(load_image_from_data_async) {
++             if let Some(args_obj) = args.as_object() {
++                 let trap = vm.bx.threads.cur().trap.pass();
++@@ -346,6 +435,34 @@ fn script_call(
++     }
++
++     fn handle_event(&mut self, cx: &mut Cx, event: &Event, _scope: &mut Scope) {
+++        if self.camera_enabled && self.visible && self.camera.configured {
+++            match event.hits(cx,self.draw_bg.area()) {
+++                Hit::FingerDown(fe) => {
+++                    self.camera.drag=Some((fe.abs,self.camera.center));
+++                    if fe.tap_count==2 {
+++                        self.camera.zoom=(self.camera.zoom+1.0).min(17.0);
+++                        self.camera_changed(cx);
+++                    }
+++                }
+++                Hit::FingerMove(fe) => {
+++                    if let Some((start,center))=self.camera.drag {
+++                        let scale=AUTO_NAVI_WORLD_PIXELS*2.0_f64.powf(self.camera.zoom);
+++                        let source=self.map_request_size();
+++                        let delta=fe.abs-start;
+++                        self.camera.center=center-dvec2(delta.x*source.x/self.camera.size.x,delta.y*source.y/self.camera.size.y)/scale;
+++                        self.redraw(cx);
+++                    }
+++                }
+++                Hit::FingerUp(_) => {
+++                    if self.camera.drag.take().is_some() {self.camera_changed(cx);}
+++                }
+++                Hit::FingerScroll(fe) => {
+++                    self.camera.zoom=(self.camera.zoom-if fe.scroll.y>0.0 {1.0}else{-1.0}).clamp(1.0,17.0);
+++                    self.camera_changed(cx);
+++                }
+++                _=>{}
+++            }
+++        }
++         if self.animator_handle_event(cx, event).must_redraw() {
++             self.draw_bg.redraw(cx);
++         }
++@@ -378,6 +495,7 @@ fn handle_event(&mut self, cx: &mut Cx, event: &Event, _scope: &mut Scope) {
++                         // Record which async load produced the texture, so a later
++                         // load for a different key knows it is stale.
++                         self.texture_async_source = Some(image_path.to_path_buf());
+++                        if self.camera_enabled {self.camera.loaded=self.camera.pending.take();}
++                         self.animator_play(cx, ids!(async_load.off));
++                         self.redraw(cx);
++                     }
++@@ -639,6 +757,37 @@ pub fn draw_walk_image(&mut self, cx: &mut Cx2d, mut walk: Walk) -> DrawStep {
++         // we change either nothing, or width or height
++         let rect = cx.peek_walk_turtle(walk);
++         let dpi = cx.current_dpi_factor();
+++        if self.camera_enabled && rect.size.x>0.0 && rect.size.y>0.0 {
+++            let size=dvec2(rect.size.x.floor(),rect.size.y.floor());
+++            let size_changed=self.camera.size!=size;
+++            self.camera.size=size;
+++            let source_size=self.map_request_size();
+++            if let Some((west,south,east,north))=self.camera.bounds.take() {
+++                let a=map_world(west,north);let b=map_world(east,south);
+++                self.camera.center=(a+b)*0.5;
+++                let delta=b-a;let span=dvec2(delta.x.abs(),delta.y.abs());
+++                self.camera.zoom=((source_size.x/(AUTO_NAVI_WORLD_PIXELS*span.x.max(1e-10))).log2()
+++                    .min((source_size.y/(AUTO_NAVI_WORLD_PIXELS*span.y.max(1e-10))).log2())-0.3).floor().clamp(1.0,17.0);
+++                self.camera.configured=true;
+++                self.camera_changed(cx);
+++            }
+++            if size_changed {if self.camera.configured {self.camera_changed(cx);}}
+++            if self.camera.dirty {
+++                self.camera.dirty=false;
+++                let (lon,lat)=map_geo(self.camera.center);
+++                cx.widget_to_script_call(self.uid,NIL,self.source.clone(),self.on_camera_changed.clone(),
+++                    &[lon.into(),lat.into(),self.camera.zoom.into(),source_size.x.into(),source_size.y.into(),(self.camera.request as f64).into()]);
+++            }
+++            if let Some((center,zoom,source_size))=self.camera.loaded {
+++                let ratio=2.0_f64.powf(zoom-self.camera.zoom);
+++                let world_scale=AUTO_NAVI_WORLD_PIXELS*2.0_f64.powf(zoom);
+++                let requested=self.map_request_size();
+++                let scale=dvec2(requested.x/source_size.x,requested.y/source_size.y)*ratio;
+++                let pan=dvec2(0.5,0.5)-scale*0.5+(self.camera.center-center)*world_scale/source_size;
+++                self.draw_bg.image_scale=vec2(scale.x as f32,scale.y as f32);
+++                self.draw_bg.image_pan=vec2(pan.x as f32,pan.y as f32);
+++            }
+++        }
++
++         let (width, height) = if let Some((w, h)) = &self.async_image_size {
++             // Still loading. Any texture present here is legitimate current content
++@@ -765,6 +914,23 @@ pub fn load_image_file_by_path_async(
++         Ok(())
++     }
++
+++    fn map_request_size(&self)->Vec2d {
+++        let size=self.camera.size;
+++        let scale=(1024.0/size.x.max(size.y).max(1.0)).min(1.0);
+++        dvec2((size.x*scale).floor().max(1.0),(size.y*scale).floor().max(1.0))
+++    }
+++
+++    fn camera_changed(&mut self,cx:&mut Cx) {
+++        self.camera.request+=1;
+++        self.camera.dirty=true;
+++        // Invalidates the old decode key before its Actions can install a texture.
+++        // Keep the last installed image for spatial feedback while the new view loads.
+++        self.async_image_path=None;
+++        self.async_image_size=None;
+++        self.camera.pending=None;
+++        self.redraw(cx);
+++    }
+++
++     pub fn load_image_from_data_async<D>(
++         &mut self,
++         cx: &mut Cx,
++@@ -822,7 +988,7 @@ fn begin_async_load(&mut self, cx: &mut Cx, image_path: &Path, size: (usize, usi
++             .texture_async_source
++             .as_deref()
++             .is_some_and(|source| source != image_path);
++-        if texture_is_stale {
+++        if texture_is_stale && !self.camera_enabled {
++             self.texture = None;
++             self.texture_async_source = None;
++         }
++@@ -854,6 +1020,7 @@ fn finish_async_load(&mut self, cx: &mut Cx, image_path: &Path) {
++         // later load for a different key would wrongly keep it visible on a
++         // recycled widget while the new source decodes.
++         self.texture_async_source = Some(image_path.to_path_buf());
+++        if self.camera_enabled {self.camera.loaded=self.camera.pending.take();}
++         self.animator_play(cx, ids!(async_load.off));
++         self.redraw(cx);
++     }

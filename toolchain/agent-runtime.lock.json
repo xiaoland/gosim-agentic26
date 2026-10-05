@@ -4,14 +4,14 @@
     "url": "https://github.com/OctoSense-org/OctoSense.git",
     "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
     "cargo_lock_sha256": "b89ff117a6adca8341e428d6c7254e96f52c02109a1c49b00c142aa5d06560cd",
-    "runtime_patches_lock_sha256": "a25f9df2feb5690bb9090fda5c51b3ccc2f0b1336aac32a0809b997ab3b49b83"
+    "runtime_patches_lock_sha256": "1d90ea83ee769dd8fbb56c9a05446f433937287fa5c83c5156e250ebae418d56"
   },
   "app_hub_revision": "58c3c8aed8fc811a16d67c5f784a8a44214ff876",
   "octos_revision": "ae230ce04d57f3c29cf6c2518e5956a86c07d788",
   "runtime": {
     "octoscript_makepad": "e0df0b5177f9cb0d8ad0ad0225d40ebcf8389a1b",
     "makepad_base": "e29a0eaa68781231eb9ec582e5f02648c6dad7e9",
-    "makepad_patched_tree": "4f2d590852cd98f479848636ce80c882477e0579",
+    "makepad_patched_tree": "534b7e5732e63d35bedffc596b8386c78d572ca1",
     "octoscript": "dbd48cfb799551c11e30970c393777d29644a605"
   },
   "build": {
@@ -73,10 +73,10 @@
     "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
     "base_tree": "711ecca75cc0034e98a9573b3a7107e112eb2acf",
     "patch": "toolchain/patches/octosense-ui-widget.patch",
-    "patch_sha256": "10d1b19385b46e66588e02117bc3f875a5da5ed7182ca4bb2c9863c705bf28ec",
-    "tree": "668cfb41686ec8780381b47494368b98a8f1aad2",
+    "patch_sha256": "7b9850367958f44640cc5b4979fa64fdd71a664895177e00b27e8135756ee78b",
+    "tree": "f3974b955cafbf3ed779e5296e9052946a10d4c7",
     "makepad_base_tree": "e9520ccb3740f3af8629d981d06d7e53aad48c06",
     "makepad_patch": "toolchain/patches/makepad-ui-find-rect.patch",
-    "makepad_patch_sha256": "58dd6161824d8c9d0863e436ef4966816ca443f7382354eef7e1a5c96fe50c6f"
+    "makepad_patch_sha256": "6f194c71ff1e6f0de5bc1982cefedcc0cd2acb3ad90b7453e95c599ee5311a3a"
   }
 }

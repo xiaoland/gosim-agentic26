@@ -292,7 +292,7 @@ fn map_geometry(candidate){
     return {paths: paths omitted: omitted}
 }
 fn text_join(values, separator){ let text = "" for value in values { if text != "" { text += separator } text += value } return text }
-fn static_map_params(candidate){
+fn static_map_params(candidate, camera){
     let markers = [] let paths = [] let omitted = 0
     if candidate != nil {
         if route_point(route_get(candidate, "requested_origin")) != nil { markers.push(route_get(candidate, "requested_origin")) }
@@ -300,6 +300,9 @@ fn static_map_params(candidate){
         let geometry = map_geometry(candidate) paths = geometry.paths omitted = geometry.omitted
     }
     let params = "&size=640*320&scale=1"
+    if camera != nil {
+        params = "&size=" + camera.source_width + "*" + camera.source_height + "&scale=1&location=" + (camera.center_lon + "," + camera.center_lat).url_encode() + "&zoom=" + camera.zoom
+    }
     if markers.len() > 0 { let styles = [] for index marker in markers { let label = "A" if index == 1 || route_point(route_get(candidate, "requested_origin")) == nil { label = "B" } styles.push("mid,0x345D4A," + label + ":" + marker) } params += "&markers=" + text_join(styles, "|").url_encode() }
     if paths.len() > 0 { let encoded = [] for path in paths { encoded.push("4,0x345D4A,1,,:" + path) } params += "&paths=" + text_join(encoded, "|").url_encode() }
     return {params: params markers: markers paths: paths omitted: omitted}
@@ -317,10 +320,10 @@ fn map_candidate(target){
 fn map_slot_current(slot, token, request, target_id){
     return token == run_id && slot.generation == map_generation && map_slots[slot.id] == slot && slot.request == request && route_get(map_candidate(slot.target), "id") == target_id
 }
-fn register_map(widget, target, status_widget){
+fn register_map(widget, target, status_widget, interactive){
     let slot = map_slots[widget]
-    if slot == nil || slot.target != target {
-        slot = {id: widget target: target generation: map_generation request: 0 state: "new" status: "地图待加载" bytes: nil target_id: "" caption: "" handle: nil handle_generation: -1 loaded_generation: -1 loaded_request: -1 status_widget: status_widget}
+    if slot == nil || slot.target != target || slot.interactive != (interactive == true) {
+        slot = {id: widget target: target interactive: interactive == true camera: nil generation: map_generation request: 0 state: "new" status: "地图待加载" bytes: nil target_id: "" caption: "" handle: nil handle_generation: -1 loaded_generation: -1 loaded_request: -1 status_widget: status_widget}
         map_slots[widget] = slot
     }
     slot.status_widget = status_widget
@@ -338,15 +341,45 @@ fn load_interface_map(){
             slot.caption += if slot.target == "destination" { destination_record.name } elif slot.target == "preview" { picker_preview_poi.name } else { kind_text(candidate.kind) + " · " + duration_text(candidate.duration_seconds) + " · " + money_text(candidate.price_cents) }
             slot.state = "loading" slot.status = "地图加载中"
             let current = slot let route = candidate
-            start_timeout(0.01, || load_map_slot(current, route))
+            start_timeout(0.01, || { if current.interactive {fit_map_slot(current, route)} else {load_map_slot(current, route)} })
         }
     }
+}
+fn fit_map_slot(slot, candidate){
+    if map_slots[slot.id] != slot || slot.generation != map_generation || slot.target_id != candidate.id {return}
+    let points = []
+    for value in [route_get(candidate, "requested_origin") route_get(candidate, "requested_destination")] {
+        let point = route_point(value) if point != nil {points.push(point)}
+    }
+    for line in map_geometry(candidate).paths {for value in line.split(";") {let point=route_point(value) if point!=nil {points.push(point)}}}
+    if points.len()==0 {map_slot_fail(slot,"没有可核实几何或端点；此图不可用") return}
+    let bounds={west:points[0].lon east:points[0].lon south:points[0].lat north:points[0].lat}
+    for point in points {
+        if point.lon<bounds.west {bounds.west=point.lon} if point.lon>bounds.east {bounds.east=point.lon}
+        if point.lat<bounds.south {bounds.south=point.lat} if point.lat>bounds.north {bounds.north=point.lat}
+    }
+    try {ui.generated.find(slot.id).set_visible(true) ui.generated.find(slot.id).fit_bounds(bounds.west,bounds.south,bounds.east,bounds.north)}
+    {map_slot_fail(slot,"交互地图控件初始化失败")}
+}
+fn map_camera_changed(event){
+    let slot=map_slots[event.widget]
+    if slot==nil || !slot.interactive {return}
+    let candidate=map_candidate(slot.target) if candidate==nil {return}
+    // camera/request由原生控件产生；父应用只绑定本次路线与网络响应。
+    if slot.camera!=nil && event.request<=slot.camera.request {return}
+    let width=event.width let height=event.height
+    let scale=1.0 if width>1024 {scale=1024/width} if height*scale>1024 {scale=1024/height}
+    let camera={center_lon:event.center_lon center_lat:event.center_lat zoom:event.zoom width:width height:height source_width:floor(width*scale) source_height:floor(height*scale) request:event.request}
+    slot.camera=camera slot.request+=1 slot.bytes=nil slot.state="loading" slot.status="地图视口更新中"
+    update_map_widget(slot)
+    let current=slot let route=candidate let request=slot.request
+    start_timeout(0.01,||{if current.request==request {load_map_slot(current,route)}})
 }
 fn map_slot_fail(slot, text){ slot.state = "error" slot.status = text slot.bytes = nil update_map_widget(slot) }
 fn load_map_slot(slot, candidate){
     let token = run_id let request = slot.request let target_id = candidate.id
     if !map_slot_current(slot, token, request, target_id) { return }
-    let geometry = static_map_params(candidate)
+    let geometry = static_map_params(candidate, slot.camera)
     if geometry.markers.len() == 0 { map_slot_fail(slot, "没有可核实端点；此图不可用") return }
     let detail = "路线概览；缺失几何不补直线"
     if geometry.paths.len() == 0 { detail = "仅端点：供应商未提供可展示几何" }
@@ -1503,7 +1536,9 @@ fn generated_error(message){
 fn ui_dispatch_action(action){
  let name=route_get(action,"action") let id=route_get(action,"id")
  if name=="rendered" {generated_rendered()}
- elif name=="map" {register_map(action.widget,action.target,route_get(action,"status_widget"))}
+ elif name=="map" {register_map(action.widget,action.target,route_get(action,"status_widget"),route_get(action,"interactive"))}
+ elif name=="map_camera" {map_camera_changed(action)}
+ elif name=="map_fit" {let slot=map_slots[action.widget] if slot!=nil && slot.interactive {let route=map_candidate(slot.target) if route!=nil {fit_map_slot(slot,route)}}}
  elif name=="view_route" {let route=ui_route(id) if route!=nil {view_route(route.id)} else {show_status("路线已不在本次查询中")}}
  elif name=="runtime_error" {generated_error(route_get(action,"message"))}
  else {show_status("本地动作未实现："+name)}
@@ -1539,10 +1574,12 @@ fn poll_generated(){
 fn update_map_widget(slot){
     if !generated_active { return }
     try {
-        ui.generated.find(slot.id).set_visible(slot.bytes != nil)
+        ui.generated.find(slot.id).set_visible(slot.interactive == true || slot.bytes != nil)
         if slot.status_widget.is_string() && slot.status_widget != "" { ui.generated.find(slot.status_widget).set_text(slot.caption + "\n" + slot.status) }
         if slot.bytes != nil && (slot.loaded_generation != ui_render_generation || slot.loaded_request != slot.request) {
-            ui.generated.find(slot.id).load_image_from_data_async(slot.bytes)
+            if slot.interactive {
+                ui.generated.find(slot.id).load_map_image(slot.bytes,slot.camera.request,slot.camera.source_width,slot.camera.source_height)
+            } else {ui.generated.find(slot.id).load_image_from_data_async(slot.bytes)}
             slot.loaded_generation = ui_render_generation slot.loaded_request = slot.request
         }
     } { interface_error = "此图控件加载失败；其它图和行程保留" ui.feedback.render() }
