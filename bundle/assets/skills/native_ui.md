@@ -10,12 +10,13 @@ snapshot() 返回当前真实任务事实，包括 viewport、limits、origin、
 
 有类型的原生成员需要实际类型构造或已有成员扩展，普通对象不能替代它。背景可写 show_bg:true draw_bg +: {color:#xf7f7f7} 或 draw_bg.color:#xf7f7f7。文字可写 draw_text +: {text_style:NavRegular{font_size:14} color:#x162e35}。padding/margin 可用数字或 Inset{top:4 right:4 bottom:4 left:4}；align 用 Align{x:0.5 y:0.5}。这对应锁定 Makepad theme_desktop_dark/button 的原生写法。
 
-以下是实际执行过的基础表达式，仅说明语法：
+以下示例使用普通 View 的可见性切换形成独立详情页面。它是低层交互示例，页面、标题、内容组织由生成稿决定；不提供 RouteSheet 或自动详情组件。两个页面有各自的滚动容器，返回只改变可见性，不重新 render 列表。viewport 是生成区域最近已绘制的可用范围，有限高度让内部 Fill 容器能够计算滚动。
 
 ```splash
-fn route_detail(current){
+let opened_route = ""
+fn route_detail(current, id){
     for route in current.routes {
-        if route.id == current.viewed_route_id {
+        if route.id == id {
             let text = route.kind_label + " · " + route.duration_label + " · " + route.price_label
             if !route.passed {text += "\n" + route.reason}
             for segment in route.segments {
@@ -26,19 +27,48 @@ fn route_detail(current){
             return text
         }
     }
-    return "点路线查看本次查询取得的分段与费用"
+    return "本次查询没有这条路线"
 }
-on_facts_changed = fn(current){ui.body.find("detail").set_text(route_detail(current))}
-View{width:Fill height:Fit flow:Down spacing:8
-    detail := Label{text:route_detail(facts)}
-    if facts.routes.len() > 0 {
-        Button{text:"查看第一条路线" on_click: || emit({action:"view_route" id:facts.routes[0].id})}
+fn open_detail(id){
+    opened_route = id
+    ui.body.find("detail_text").set_text(route_detail(snapshot(), id))
+    ui.body.find("list_page").set_visible(false)
+    ui.body.find("detail_page").set_visible(true)
+    emit({action:"view_route" id:id})
+}
+fn return_to_list(){
+    ui.body.find("detail_page").set_visible(false)
+    ui.body.find("list_page").set_visible(true)
+    opened_route = ""
+}
+on_facts_changed = fn(current){
+    if opened_route != "" {ui.body.find("detail_text").set_text(route_detail(current, opened_route))}
+}
+View{width:Fill height:facts.viewport.height flow:Overlay
+    list_page := ScrollYView{width:Fill height:Fill flow:Down
+        Label{text:"本次候选"}
+        if facts.routes.len() > 0 {
+            open_first := Button{text:"查看第一条路线" on_click: || open_detail(facts.routes[0].id)}
+        }
+        if facts.routes.len() > 1 {
+            Button{text:"查看另一条路线" on_click: || open_detail(facts.routes[1].id)}
+        }
+    }
+    detail_page := View{width:Fill height:Fill flow:Down visible:false
+        back := Button{text:"返回列表" on_click: || return_to_list()}
+        detail_scroll := ScrollYView{width:Fill height:Fill flow:Down
+            detail_text := Label{text:""}
+        }
     }
 }
 ```
 
-on_facts_changed 是外层已定义的脚本变量。可在 View 表达式外设置 on_facts_changed = fn(facts){ui.body.find("title").set_text(facts.status)}。不会自动重建整个界面；Input 编辑内容应保留。不存在外层 on_render、self.snapshot、self.viewport 等变量。
+on_facts_changed 是外层已定义的脚本变量，在原生 View 表达式外设置。不会自动重建整个界面；Input 编辑内容应保留。不存在外层 on_render、self.snapshot、self.viewport 等变量。
+
+路线查看的交互目标是打开独立详情页或浮层，关闭／返回后保留原列表的位置和内容；页面样式与结构由生成稿自行组织。
 
 用户动作 emit({action:"view_route" id:真实路线ID或"viewed"}) 只本地切换当前查看路线，随后 snapshot().viewed_route_id 更新；它不会自动创建详情页面。提供查看按钮时，生成稿应通过 on_facts_changed 根据实际当前路线更新自己呈现的选择或路线信息，让用户看见操作结果；不得仅发出事件而保持所有内容不变。父应用只处理本次路线查看和地图加载；不把事件转为第二条用户消息或查询续聊。地图可自由放多个命名 Image，emit({action:"map" widget:"image_name" target:真实路线ID或"viewed"或"destination" status_widget:"caption_name"})。父应用分别请求和加载真实高德静态地图；status_widget 是可选命名 Label，显示来源和加载错误。未知或缺失几何不伪造直线。
 
 render_ui 返回本稿真实 diagnostics。错误说明实际变量、语法或原生类型问题，可以根据结果提交下一稿；应用不改写生成源码。
+
+通用句柄 set_visible(bool)／visible() 可用于页面或自定义浮层。锁定版本 Modal.open/close 与 StackNavigation.push/pop 只有 Rust 接口，当前没有相应 Splash 句柄方法，不能直接写 ui.modal.open()。普通页面切换不销毁隐藏页；不要为打开详情而重建整个列表。

@@ -21,7 +21,7 @@
     "support": "https://example.com/support",
     "privacy_policy_url": "https://example.com/privacy"
   },
-  "release_notes": "修正路线查看的技能接口说明及本地详情更新示例，避免仅发送选择事件却不更新可见内容。渲染修正过程中显示简短反馈，原始执行诊断继续回给 Agent。保持独立查询，不保存或恢复行程、不进行问题澄清。Navigation 局部无衬线字体，默认验收 macOS 宿主 Android 手机模式。发布者信息仍为占位。",
+  "release_notes": "为 Agent 提供基于原生 View 的详情页面与返回示例，查看操作在本地完成并保留方案列表。呈现内容仍由 Agent 自主组织，不增加预制路线详情组件或展示模型循环。保持独立查询、无持久化、无澄清和局部无衬线字体；验收以 macOS 宿主 Android 模式为准。发布者信息仍为占位。",
   "age_rating": "all",
   "license": "Apache-2.0"
 }

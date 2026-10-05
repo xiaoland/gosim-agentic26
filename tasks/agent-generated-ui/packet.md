@@ -1,6 +1,18 @@
 # Agent 直接生成 Navigation 界面
 
-状态：2026-10-05，0.8.0已本地提交1e88020；接续用户实际运行中的渲染恢复诊断和“查看路线／查看方案”按钮无响应。无持久化、无澄清、独立查询边界保持；0.8.1针对性验证与正式封装通过，准备本地提交。
+状态：2026-10-05，0.8.2详情页面低层示例、生成视口修正、六项原生交互及最终封装完成；沿用户授权本地提交，用户新查询验收待进行。0.8.1本地提交c6d3783，无持久化、无澄清、独立查询边界保持。
+
+## 当前详情呈现改动
+
+用户建议：“更新可见详情？我会建议用 popup/sheet 或者进入一个新的页面来呈现。”在说明提供通用原语与用法、由Agent组织内容后，用户授权：“是的。开始修改吧。”本轮必要源码、资料、原生交互检查和说明更新获授权；沿既有授权本地提交，不推送。
+
+先核对锁定Makepad已有浮层、显示／关闭与页面切换能力，优先直接提供实际可用的原生语法。不能把路线详情封装成强制业务组件，不能新增展示模型循环、问答、持久化或输出限制。Agent选择呈现方式并组织真实详情；查看、关闭／返回只本地执行。
+
+稳定ui_finish负责应用、技能、必要smoke与Android模式实际交互；native_error_api核对原生能力及冻结后一次封装；根负责取舍、版本和权威说明。验收关注真实打开详情、关闭／返回后保留方案列表，以及长详情自然滚动；隔离实例使用公开事实，不操作用户实例。原生能力与模型实际交付分别报告，不把示例通过称为所有生成稿均可靠。锁定版本Modal和StackNavigation虽有Rust方法，但未暴露Splash打开／关闭／push／pop调用；不把类型导出当作方法可用。现成通用set_visible可调用，采用普通View切换详情页与返回，不新增Rust或导航框架。advisor建议保留控件实例，以实际生成区域高度建立有限视口；判别检查为列表滚到中部、长详情到底、返回后位置不丢且隐藏列表不响应点击。示例解释语法，不要求固定节点名或页面结构。
+
+完成：main仅修正interface_facts的viewport优先读取generated.rect，缺少绘制area时沿原content.rect路径；技能以普通View/set_visible提供可选详情页与返回，长详情独立滚动、列表实例保留。未新增原生API、业务RouteSheet、导航框架或模型请求。
+
+根已读取build/research/agent-generated-ui/page-navigation/result-safe.json并查看detail-bottom.png与list-returned.png。Android412×892隔离原生六项通过：打开独立详情、隐藏列表不响应点击、详情滚动到底23段、返回恢复原列表位置、保留编辑内容、无诊断；实例已关闭。main SHA256 4ed9b1ffb4a46086e3db2d91127a95d205e107b6b4e8e3996dc55c8fe105c6cc，native_ui af0270b19aa7f49c51c4cf3dac8e2b29538bf3f289b8be5bf1b4f63f4a19b777。validate.py与driver.py保留在忽略实验目录，可重跑本轮检查；未重跑旧全量验收。事实为合成路线、模型请求0次，不代表正常M3查询自动生成页面可靠；未接系统返回手势，显式返回按钮已验证。最终0.8.2 check／agent-build／agent-doctor通过；根已读取page-navigation-final-package/result-safe.json，10文件stage／嵌入pack／实际挂载逐字节一致。source aggregate 3f86da69424cefdcd0913849f8ba4c7deeb91bae4d24758a927c2b93547c0404，runtime BLAKE3 263a090a1f9096e600cebfe434c3543272317c1e64ccdbbff257665aeae19312，binary SHA256 7b4750ed71d123ca2a02e20e4b04586aaa8ab6c485edd27ddd1886b8a21034d9；解码包7,242,184 bytes。封装未追加服务请求或行为测试，实例已关闭，无Rust／工具链变更。根本地提交，不推送；用户新查询验收待进行。
 
 ## 当前按钮与诊断修复
 

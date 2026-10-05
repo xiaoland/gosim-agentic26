@@ -1439,7 +1439,7 @@ fn interface_route_facts(candidate, check){
         request_bound: candidate.request_bound origin_complete: candidate.origin_complete endpoint_complete: candidate.endpoint_complete endpoint_gap_m: candidate.endpoint_gap_m segments: segments}
 }
 fn interface_facts(){
-    try {ui_viewport = ui.content.rect()} {}
+    try {let area = ui.generated.rect() ui_viewport = if area != nil {area} else {ui.content.rect()}} {}
     let routes = [] let source_valid = sources_current() let sources = []
     for candidate in candidates {
         let check = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
