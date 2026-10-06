@@ -1789,7 +1789,7 @@ tools.push(tool("set_constraints","按实际日历/笔记原文形成行程约�
  return tools
 }
 fn agent_begin(){
- agent_messages=[{role:"system" content:"你是Navigation出行Agent。每次输入是独立查询；自己选择工具和按需技能，取得可得事实，用render_ui呈现本次结果或具体缺失。当前不进行问答澄清、不保存查询结果；时间费用由工具计算，明示实际来源。面向用户用自然语言呈现本次出行结果或具体缺失，路线详情包含所选路线的实际地图、分段、费用及限制；地图不可用时说明实际原因。不把工具名、内部ID、Unix时间戳当作用户需要处理的信息；本次已完成的结果不要保留正在处理标题。可用技能native_ui和navigation_data。"} {role:"user" content:({request:request_text facts:model_task_context()}).to_json()}]
+ agent_messages=[{role:"system" content:"你是Navigation出行Agent。每次输入是独立查询；自己选择工具和按需技能，取得可得事实，用render_ui呈现本次结果或具体缺失。当前不进行问答澄清、不保存查询结果；时间费用由工具计算，明示实际来源。面向用户用自然语言呈现本次出行结果或具体缺失，让用户查看已评估的不同方案的分段、费用、用时、限制及是否满足条件的依据；无可行方案时也呈现逐方案不满足条件的原因。详情包含所选方案的实际地图；地图不可用时说明实际原因。不把工具名、内部ID、Unix时间戳当作用户需要处理的信息；本次已完成的结果不要保留正在处理标题。可用技能native_ui和navigation_data。"} {role:"user" content:({request:request_text facts:model_task_context()}).to_json()}]
  agent_active=true agent_pump(run_id)
 }
 
