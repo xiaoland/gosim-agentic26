@@ -18,3 +18,6 @@ extend_route(prefix_id,to_ref,mode,strategy) 查询一条完整新路段并延�
 known_cost_cents 是已知费用小计；任一 leg 费用未知时 price_cents 仍未知。budget_status 可为 within_estimate、over_budget、unknown；deadline_status 同样独立。候车未知时预计最早到站场景仍可计算 waiting_slack_seconds，但这个余量不能当作真实候车时间。后续公交按工具计算的最早到站场景查询；前序未知等待可能使班次失效。未来驾车 leg 的耗时／价格仍来自查询当时交通估算，不冒称预测或实际叫车成交价。passed=false 的具体不成立原因仍需保留；预算内的已知估价与准时抵达保证是不同结论。
 
 滴滴询价是独立供应商来源。`search_didi_places({query,city})` 返回本轮真实地点ref，`quote_didi({from_ref,to_ref})` 只使用这些ref，返回多车型当前估价、原始price_text及可精确解析的整数分。优惠价保留但不默认适用；无法精确解析的显示文本不是零元。供应商文档未声明坐标系，因此报价地点不能直接冒充高德leg端点；`attach_quote({prefix_id,leg_id,quote_ref,place_basis})`可将选定车型当前报价关联为明确taxi leg费用估计，代码替换原高德价并重算派生prefix总价，不与原价叠加。place_basis须保两端真实名称、城市、地址和入口/航站楼对应依据；这是有依据的语义关联假设，不是坐标或无缝上下车认证，明显地点/方向冲突不应关联。报价与路线城市明确不同会返回错误。原prefix、供应商各自坐标/回显与未核连接均保留。未来接驳时刻与当前报价时刻不同，估价不是未来保证价格；这些工具不下单。缺key不影响高德路线查询。
+
+
+地图由真实路线几何绘制。`get_route` 与原生 `snapshot().routes` 的 `map_paths` 列出全部可用折线的 index、start、end、point_count；费用及可行性仍针对整条路线，分图不会重新计算或切摊票价。高德静态图每次最多4条独立折线；可用 map 事件的 path_indices 在多个独立命名地图中选择不同完整折线，资料见 native_ui。应用不自动截断、分组或跨缺口补线；模型可以决定分步查看或并列展示，保留完整路线及实际缺失说明。

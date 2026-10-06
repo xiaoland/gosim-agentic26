@@ -292,20 +292,41 @@ fn map_geometry(candidate){
     return {paths: paths omitted: omitted}
 }
 fn text_join(values, separator){ let text = "" for value in values { if text != "" { text += separator } text += value } return text }
-fn static_map_params(candidate, camera){
+// 索引对应最终相接合并后的真实折线，不能拿原segments下标代替。
+fn map_path_catalog(candidate){
+ let result=[]
+ for index line in map_geometry(candidate).paths {let points=line.split(";") result.push({index:index point_count:points.len() start:points[0] end:points[points.len()-1]})}
+ return result
+}
+fn selected_map_geometry(candidate, indices){
+ let geometry=map_geometry(candidate)
+ if indices==nil {return {paths:geometry.paths omitted:geometry.omitted total:geometry.paths.len() selected:false error:nil}}
+ if !indices.is_array() {return {paths:[] omitted:geometry.omitted total:geometry.paths.len() selected:true error:"path_indices需要实际折线索引数组"}}
+ let paths=[]
+ for index in indices {
+  if !index.is_number() || index%1!=0 || index<0 || index>=geometry.paths.len() {return {paths:[] omitted:geometry.omitted total:geometry.paths.len() selected:true error:"本次路线不存在所选折线索引；请按当前map_paths目录选择"}}
+  paths.push(geometry.paths[index])
+ }
+ return {paths:paths omitted:geometry.omitted total:geometry.paths.len() selected:true error:nil}
+}
+fn static_map_params(candidate, camera){return static_map_params_selected(candidate,camera,nil)}
+fn static_map_params_selected(candidate, camera, indices){
     let markers = [] let paths = [] let omitted = 0
     if candidate != nil {
         if route_point(route_get(candidate, "requested_origin")) != nil { markers.push(route_get(candidate, "requested_origin")) }
         if route_point(route_get(candidate, "requested_destination")) != nil { markers.push(route_get(candidate, "requested_destination")) }
-        let geometry = map_geometry(candidate) paths = geometry.paths omitted = geometry.omitted
+        let geometry = selected_map_geometry(candidate,indices)
+        if geometry.error!=nil {return {params:"" markers:[] paths:[] omitted:geometry.omitted error:geometry.error selected:true total:geometry.total}}
+        paths = geometry.paths omitted = geometry.omitted
+        if geometry.selected {markers=[] if paths.len()>0 {let first=paths[0].split(";") let last=paths[paths.len()-1].split(";") markers=[first[0] last[last.len()-1]]}}
     }
     let params = "&size=640*320&scale=1"
     if camera != nil {
         params = "&size=" + camera.source_width + "*" + camera.source_height + "&scale=1&location=" + (camera.center_lon + "," + camera.center_lat).url_encode() + "&zoom=" + camera.zoom
     }
-    if markers.len() > 0 { let styles = [] for index marker in markers { let label = "A" if index == 1 || route_point(route_get(candidate, "requested_origin")) == nil { label = "B" } styles.push("mid,0x345D4A," + label + ":" + marker) } params += "&markers=" + text_join(styles, "|").url_encode() }
+    if markers.len() > 0 { let styles = [] for index marker in markers { let label = "A" if index == 1 || indices==nil && route_point(route_get(candidate, "requested_origin")) == nil { label = "B" } styles.push("mid,0x345D4A," + label + ":" + marker) } params += "&markers=" + text_join(styles, "|").url_encode() }
     if paths.len() > 0 { let encoded = [] for path in paths { encoded.push("4,0x345D4A,1,,:" + path) } params += "&paths=" + text_join(encoded, "|").url_encode() }
-    return {params: params markers: markers paths: paths omitted: omitted}
+    return {params: params markers: markers paths: paths omitted: omitted error:nil selected:indices!=nil}
 }
 // 每幅地图持有独立目标、请求和代际；供应商字节不由模型提供。
 let map_slots = {}
@@ -320,10 +341,11 @@ fn map_candidate(target){
 fn map_slot_current(slot, token, request, target_id){
     return token == run_id && slot.generation == map_generation && map_slots[slot.id] == slot && slot.request == request && route_get(map_candidate(slot.target), "id") == target_id
 }
-fn register_map(widget, target, status_widget, interactive){
+fn register_map(widget, target, status_widget, interactive){register_map_paths(widget,target,status_widget,interactive,nil)}
+fn register_map_paths(widget, target, status_widget, interactive, indices){
     let slot = map_slots[widget]
-    if slot == nil || slot.target != target || slot.interactive != (interactive == true) {
-        slot = {id: widget target: target interactive: interactive == true camera: nil generation: map_generation request: 0 state: "new" status: "地图待加载" bytes: nil target_id: "" caption: "" handle: nil handle_generation: -1 loaded_generation: -1 loaded_request: -1 status_widget: status_widget}
+    if slot == nil || slot.target != target || slot.interactive != (interactive == true) || route_get(slot,"path_indices").to_json()!=indices.to_json() {
+        slot = {id: widget target: target path_indices:indices interactive: interactive == true camera: nil generation: map_generation request: 0 state: "new" status: "地图待加载" bytes: nil target_id: "" caption: "" handle: nil handle_generation: -1 loaded_generation: -1 loaded_request: -1 status_widget: status_widget}
         map_slots[widget] = slot
     }
     slot.status_widget = status_widget
@@ -339,6 +361,7 @@ fn load_interface_map(){
         elif slot.target_id != candidate.id || slot.generation != map_generation || slot.state == "new" || slot.state == "stale" {
             slot.request += 1 slot.generation = map_generation slot.target_id = candidate.id slot.bytes = nil
             slot.caption = if slot.target == "viewed" { "跟随查看：" } else { "绑定目标：" }
+            if slot.path_indices!=nil {slot.caption += "所选折线 " + slot.path_indices.to_json() + "；"}
             slot.caption += if slot.target == "destination" { destination_record.name } elif slot.target == "preview" { picker_preview_poi.name } else { kind_text(candidate.kind) + " · " + duration_text(candidate.duration_seconds) + " · " + money_text(candidate.price_cents) }
             slot.state = "loading" slot.status = "地图加载中"
             trace_map("map_loading",slot)
@@ -350,10 +373,12 @@ fn load_interface_map(){
 fn fit_map_slot(slot, candidate){
     if map_slots[slot.id] != slot || slot.generation != map_generation || slot.target_id != candidate.id {return}
     let points = []
-    for value in [route_get(candidate, "requested_origin") route_get(candidate, "requested_destination")] {
+    let geometry=selected_map_geometry(candidate,slot.path_indices)
+    if geometry.error!=nil {map_slot_fail(slot,geometry.error) return}
+    if !geometry.selected {for value in [route_get(candidate, "requested_origin") route_get(candidate, "requested_destination")] {
         let point = route_point(value) if point != nil {points.push(point)}
-    }
-    for line in map_geometry(candidate).paths {for value in line.split(";") {let point=route_point(value) if point!=nil {points.push(point)}}}
+    }}
+    for line in geometry.paths {for value in line.split(";") {let point=route_point(value) if point!=nil {points.push(point)}}}
     if points.len()==0 {map_slot_fail(slot,"没有可核实几何或端点；此图不可用") return}
     let bounds={west:points[0].lon east:points[0].lon south:points[0].lat north:points[0].lat}
     for point in points {
@@ -382,11 +407,12 @@ fn map_slot_fail(slot, text){ slot.state = "error" slot.status = text slot.bytes
 fn load_map_slot(slot, candidate){
     let token = run_id let request = slot.request let target_id = candidate.id
     if !map_slot_current(slot, token, request, target_id) { return }
-    let geometry = static_map_params(candidate, slot.camera)
+    let geometry = static_map_params_selected(candidate, slot.camera,slot.path_indices)
+    if geometry.error!=nil {map_slot_fail(slot,geometry.error) return}
     if geometry.markers.len() == 0 { map_slot_fail(slot, "没有可核实端点；此图不可用") return }
-    let detail = "路线概览；缺失几何不补直线"
+    let detail = if geometry.selected {"本图分段端点，非全行程起终点；仅所选真实折线，缺口不补直线"} else {"路线概览；缺失几何不补直线"}
     if geometry.paths.len() == 0 { detail = "仅端点：供应商未提供可展示几何" }
-    elif geometry.omitted > 0 { detail = "部分可用几何；起点A/终点B，缺失几何分段未展示" }
+    elif geometry.omitted > 0 { detail += "；供应商另有缺失几何未展示" }
     let private = nil try { let config = read_text("private-config.json") if config != nil { private = config.parse_json() } } { map_slot_fail(slot, "地图配置无效") return }
     let key = route_get(private, "amap_api_key")
     if !key.is_string() || key.trim() == "" { map_slot_fail(slot, "尚未配置地图服务") return }
@@ -1507,7 +1533,7 @@ fn trace_initialize(){
     trace_emit("instance_started",{metadata:route_get(config,"development_trace_metadata")},nil)
 }
 fn trace_map(event,slot){
-    trace_emit(event,{widget:slot.id target:slot.target target_id:slot.target_id state:slot.state status:slot.status request:slot.request generation:slot.generation camera:slot.camera},nil)
+    trace_emit(event,{widget:slot.id target:slot.target target_id:slot.target_id state:slot.state status:slot.status request:slot.request generation:slot.generation camera:slot.camera path_indices:route_get(slot,"path_indices")},nil)
 }
 fn request_finished(record, state){
     record.state = state record.completed_at = time_now()
@@ -1918,7 +1944,7 @@ fn interface_route_facts(candidate, check){
         passed: check.passed reason: check.reason reasons: route_reasons(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
         source: candidate.source source_ts: candidate.source_ts expires_at: candidate.expires_at estimated: candidate.estimated warnings: candidate.warnings
         waiting_included: candidate.waiting_included waiting_basis: candidate.waiting_basis taxi_wait_verified: candidate.taxi_wait_verified
-        request_bound: candidate.request_bound origin_complete: candidate.origin_complete endpoint_complete: candidate.endpoint_complete endpoint_gap_m: candidate.endpoint_gap_m segments: segments}
+        request_bound: candidate.request_bound origin_complete: candidate.origin_complete endpoint_complete: candidate.endpoint_complete endpoint_gap_m: candidate.endpoint_gap_m map_paths:map_path_catalog(candidate) segments: segments}
 }
 fn interface_facts(){
     try {let area = ui.generated.rect() ui_viewport = if area != nil && area.width > 0 && area.height > 0 {area} else {ui.content.rect()}} {}
@@ -1937,7 +1963,7 @@ fn interface_facts(){
         semantics: "点路线只查看；未知金额/等待不等于零。"}
 }
 fn generated_context(){
-    return "let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\nlet Label = Label{width: Fill height: Fit flow: Flow.Right{wrap:true} draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nfn emit(event){ui.mailbox.set_text(ui.mailbox.text() + event.to_json() + \"\\n\")}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(){let value = ui.fact_revision.text() if value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} start_timeout(0.1, || refresh())}\nstart_timeout(0.02, || {last_facts = ui.fact_revision.text() ui.body.render() emit({action:\"rendered\"}) start_timeout(0.1, || refresh())})\n"
+    return "let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\nlet Label = Label{width: Fill height: Fit flow: Flow.Right{wrap:true} draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nlet mailbox_buffer = \"\"\nfn emit(event){mailbox_buffer += event.to_json() + \"\\n\" ui.mailbox.set_text(mailbox_buffer)}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(){let value = ui.fact_revision.text() if value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} start_timeout(0.1, || refresh())}\nstart_timeout(0.02, || {last_facts = ui.fact_revision.text() ui.body.render() emit({action:\"rendered\"}) start_timeout(0.1, || refresh())})\n"
 }
 fn mount_interface(body, token, revision){
     if token != run_id || revision != interface_revision { return }
@@ -1992,7 +2018,7 @@ fn ui_dispatch_action(action){
  trace_emit("local_event",{event:action.to_json()},nil)
  let name=route_get(action,"action") let id=route_get(action,"id")
  if name=="rendered" {generated_rendered()}
- elif name=="map" {register_map(action.widget,action.target,route_get(action,"status_widget"),route_get(action,"interactive"))}
+ elif name=="map" {register_map_paths(action.widget,action.target,route_get(action,"status_widget"),route_get(action,"interactive"),route_get(action,"path_indices"))}
  elif name=="map_camera" {map_camera_changed(action)}
  elif name=="map_fit" {let slot=map_slots[action.widget] if slot!=nil && slot.interactive {let route=map_candidate(slot.target) if route!=nil {fit_map_slot(slot,route)}}}
  elif name=="view_route" {let route=ui_route(id) if route!=nil {view_route(route.id)} else {show_status("路线已不在本次查询中")}}

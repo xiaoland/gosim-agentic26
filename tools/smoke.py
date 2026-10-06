@@ -93,6 +93,53 @@ start_timeout(1,||{
  ]}.to_json()))
 })
 '''
+
+MAP_SECTIONS_FIXTURE=r'''
+let sections_started=false let sections_checks=[] let sections_loaded={} let sections_fit=[]
+fn fit_map_slot(slot,candidate){sections_fit.push(slot.id) fs.write("sections-fit.json",sections_fit.to_json()) product_fit_map_slot(slot,candidate)}
+fn load_map_slot(slot,candidate){
+ let params=static_map_params_selected(candidate,slot.camera,slot.path_indices)
+ sections_loaded[slot.id]=params
+ let bytes=fs.read_bytes(if slot.id=="part_a" {"part-a.png"} else {"part-b.png"})
+ accept_map_slot(slot,bytes,run_id,slot.request,candidate.id,if params.selected {"本图分段端点，非全行程起终点"} else {"路线概览"})
+}
+fn sections_check(){
+ let a=map_slots["part_a"] let b=map_slots["part_b"] let candidate=candidates[0]
+ let whole=map_geometry(candidate).paths let one=sections_loaded["part_a"] let two=sections_loaded["part_b"]
+ if one==nil || two==nil {fs.write("harness-smoke.json",{checks:[{name:"两个地图实际派发" passed:false}] fit_calls:sections_fit loaded:sections_loaded callback_marks:[ui.generated.probe_a.text() ui.generated.probe_b.text()] rectangles:[ui.generated.find("part_a").rect() ui.generated.find("part_b").rect()] mailbox:ui.generated.mailbox.text() slots:map_slots}.to_json()) return}
+ let coverage=one.paths.len()+two.paths.len()==whole.len()
+ for i path in one.paths {if path!=whole[i] {coverage=false}}
+ for i path in two.paths {if path!=whole[i+3] {coverage=false}}
+ sections_checks.push({name:"两个分地图完整覆盖原折线且不补缺口" passed:coverage && whole.len()==6})
+ sections_checks.push({name:"目录索引端点点数全部对应真实折线" passed:map_path_catalog(candidate).len()==6 && map_path_catalog(candidate)[5].index==5 && map_path_catalog(candidate)[5].point_count==2 && map_path_catalog(candidate)[0].start=="114,22"})
+ sections_checks.push({name:"默认仍完整请求不自动截四条" passed:static_map_params(candidate,nil).paths.len()==6})
+ sections_checks.push({name:"分图AB为实际本段端点" passed:one.markers[0]=="114,22" && two.markers[0]=="114.03,22.03" && one.markers[1]==whole[2].split(";")[1] && two.markers[1]==whole[5].split(";")[1]})
+ sections_checks.push({name:"两图独立fit和加载状态" passed:a.state=="ready" && b.state=="ready" && a.camera.center_lon!=b.camera.center_lon && a.path_indices.to_json()!=b.path_indices.to_json()})
+ let old=a register_map_paths("part_a",candidate.id,"note_a",true,[0])
+ start_timeout(0.4,||{
+  sections_checks.push({name:"同目标改索引新实例请求不复用旧范围" passed:map_slots["part_a"]!=old && sections_loaded["part_a"].paths.len()==1 && sections_loaded["part_b"].paths.len()==3})
+  sections_checks.push({name:"不存在的索引明确失败不静默丢段" passed:selected_map_geometry(candidate,[6]).error!=nil})
+  fs.write("harness-smoke.json",{checks:sections_checks selected_paths:[map_slots["part_a"].path_indices map_slots["part_b"].path_indices] snapshot_directory_count:interface_facts().routes[0].map_paths.len()}.to_json())
+ })
+}
+fn sections_tick(){
+ let identity=ui.trace_identity.text().parse_json()
+ if trace_state==nil || identity.instance!=trace_state.instance {start_timeout(0.1,||sections_tick()) return}
+ if !sections_started && fs.exists("sections-go.json") {
+  sections_started=true run_id+=1 received_at=time_now() arrive_by=received_at+2400 constraints={budget_cents:5000} user_limits={minutes:40 budget_cents:5000} phase="proposal"
+  let seg=[] for i in 6 {let start=""+(114+i*0.01)+","+(22+i*0.01) let end=""+(114+i*0.01+0.001)+","+(22+i*0.01+0.001) seg.push({polyline:start+";"+end})}
+  candidates=[route_candidate("fixture-route","public_transit",1200,500,received_at,received_at,"114.051,22.051","114.051,22.051",true,seg)]
+  candidates[0].requested_origin="114,22" candidates[0].requested_destination="114.051,22.051"
+  interface_revision+=1
+  mount_interface("View{width:Fill height:Fit flow:Down padding:8 Label{text:\"合成折线分图：原生控件／无外网请求\"} probe_a := Label{visible:false text:\"\"} probe_b := Label{visible:false text:\"\"} part_a := AutoNaviMapView{width:Fill height:160 on_camera_changed:fn(lon,lat,zoom,width,height,request){ui.probe_a.set_text(\"A callback\") emit({action:\"map_camera\" widget:\"part_a\" center_lon:lon center_lat:lat zoom:zoom width:width height:height request:request})}} note_a := Label{text:\"\"} part_b := AutoNaviMapView{width:Fill height:160 on_camera_changed:fn(lon,lat,zoom,width,height,request){ui.probe_b.set_text(\"B callback\") emit({action:\"map_camera\" widget:\"part_b\" center_lon:lon center_lat:lat zoom:zoom width:width height:height request:request})}} note_b := Label{text:\"\"}}",run_id,interface_revision)
+  start_timeout(0.4,||{ui_dispatch_action({action:"map" widget:"part_a" target:"fixture-route" path_indices:[0 1 2] status_widget:"note_a" interactive:true}) ui_dispatch_action({action:"map" widget:"part_b" target:"fixture-route" path_indices:[3 4 5] status_widget:"note_b" interactive:true})})
+  start_timeout(1.3,||sections_check())
+ }
+ start_timeout(0.1,||sections_tick())
+}
+start_timeout(0.2,||sections_tick())
+'''
+
 TERMINAL_FIXTURE=r'''
 let terminal_task=0 let terminal_token=-1 let terminal_turn=0 let terminal_checks=[]
 let terminal_code="```splash\nLabel{text:\"未执行代码\"}\n```"
@@ -362,6 +409,7 @@ def main():
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
  if '--trace' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+TRACE_FIXTURE
  if '--mixed-routing' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn amap_request(','fn product_amap_request(',1)+'\n'+MIXED_FIXTURE
+ if '--map-sections' in sys.argv:source=original.replace('fn fit_map_slot(','fn product_fit_map_slot(',1).replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_SECTIONS_FIXTURE
  if '--map-details' in sys.argv:source=original.replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_FIXTURE
  if '--terminal-content' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1)+'\n'+TERMINAL_FIXTURE
  if '--late-render' in sys.argv:
@@ -403,10 +451,25 @@ def main():
   manifest=json.loads((mount/'manifest.json').read_text());manifest['id']='os.agentic26-navigation';(mount/'manifest.json').write_text(json.dumps(manifest));(mount/'main.splash').write_text(source)
   subprocess.run([str(ROOT.parent/'.octosense-agentic26/OctoSense-App-Hub/target/release/hub'),'stamp',str(mount)],stdout=subprocess.DEVNULL,check=True)
   a.init_demo();jail=a.jail_path();a.materialize_skills(ROOT/'bundle',jail);(jail/'private-config.json').write_text('{"location_mode":"demo"}');(jail/'trip.json').write_text('historical fixture ignored');(jail/'agent-run.json').write_text('historical audit ignored')
-  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
-  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv:
+  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
+  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv:
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   launch('native');report=None
+  if '--map-sections' in sys.argv:
+   import zlib,struct
+   def png(color):
+    def chunk(t,d):return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
+    scan=(b'\0'+bytes(color)*372)*160
+    return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',372,160,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(scan))+chunk(b'IEND',b'')
+   (jail/'part-a.png').write_bytes(png((50,130,190)));(jail/'part-b.png').write_bytes(png((190,130,50)))
+   time.sleep(3)
+   q('k',c='Space',cmd=1,wait=1)
+   for ch in 'android':q('k',c='Key'+ch.upper(),wait=1)
+   q('k',c='enter',wait=1);time.sleep(1)
+   q('m',k='down',x=200,y=300,wait=1)
+   for y in range(320,570,25):q('m',k='move',x=200,y=y,wait=1)
+   q('m',k='up',x=200,y=570,wait=1);q('t',t='Navigation',wait=1);q('k',c='enter',wait=1);time.sleep(1)
+   (jail/'sections-go.json').write_text('{}')
   if '--performance' in sys.argv:
    time.sleep(3)
    q('k',c='Space',cmd=1,wait=1)
@@ -550,8 +613,11 @@ def main():
    time.sleep(.1)
   assert report,'宿主未完成工具会话；查看 '+str(w/'native.log')
   assert all(row['passed'] for row in report['checks']),report
-  if recovery or '--map-details' in sys.argv or '--terminal-content' in sys.argv or '--mixed-routing' in sys.argv or '--performance' in sys.argv:
-   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True,mode='Android' if '--terminal-content' in sys.argv or '--performance' in sys.argv else 'desktop')
+  if recovery or '--map-sections' in sys.argv or '--map-details' in sys.argv or '--terminal-content' in sys.argv or '--mixed-routing' in sys.argv or '--performance' in sys.argv:
+   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True,mode='Android' if '--terminal-content' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv else 'desktop')
+   if '--map-sections' in sys.argv:
+    (w/'map-sections-android.png').write_bytes(q('g',raw=1))
+    report.update(no_external_services=True,synthetic_image_bytes=True)
    if '--performance' in sys.argv:
     native_errors=[line for line in (w/'native.log').read_text().splitlines() if '[E]' in line or 'heap allocation limit exceeded' in line or 'script time budget exceeded' in line]
     assert not native_errors, '性能fixture原生错误，详见私有native.log'
