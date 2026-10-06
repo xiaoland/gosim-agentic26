@@ -132,3 +132,5 @@ da93正常在线新失败：10M3第10响应HTTP200完整toolcalls，render_summa
 最终来源投影修复证据：build/research/runtime-upgrade/source-projection-final-safe.json；8项回归见build/smoke/navigation-harness-o_c7si8o/report.json。所有自有实例已关闭。
 
 最终封包check／build／doctor通过：source a9645a7588e0ddcb89c5940dcbd2c494d4eded13cb6713bba585ee528f00577b，binary 0daef8b826b0284b5afaf6a3f6db6d7f2082037cd4ffc2cdcb082f3861a1d906，bundle 3579572593d669ab4a2d9b05904750471cd4b173b9370d139ed1dd08c94a8619。最新catalog continuity check通过，scan七题完成作者自评，不冒称独立review。公开最终来源投影回归已脱除私有路径，归demo/source-projection-check.json。
+
+2026-10-06 23:42交付完成：main公开推送，v0.13.0固定702ea6cfca8240e6c3222b8dc5f375b8ca009866；Release非draft公开8附件，源码包与96s视频上传成功。App Hub issue116已实际创建，七题作者自评、完整本地gate、unsigned及官方兼容未通过明确列出。README补公开入口；维护者审核／商店录入尚未完成，不冒称成功验收。

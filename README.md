@@ -2,9 +2,9 @@
 
 “40 分钟内到机场，预算 50，尽量便宜。”
 
-[![96 秒演示：真实运行画面剪辑，含中文配音](demo/poster.png)](https://github.com/xiaoland/gosim-agentic26/raw/refs/heads/main/demo/Navigation-demo.mp4)
+[![96 秒演示：真实运行画面剪辑，含中文配音](demo/poster.png)](https://github.com/xiaoland/gosim-agentic26/releases/download/v0.13.0/Navigation-demo.mp4)
 
-[观看演示视频](https://github.com/xiaoland/gosim-agentic26/raw/refs/heads/main/demo/Navigation-demo.mp4) · [字幕](demo/Navigation-demo.srt) · [演示核验记录](demo/evidence.json) · [最终修正回归](demo/source-projection-check.json)
+[观看演示视频](https://github.com/xiaoland/gosim-agentic26/releases/download/v0.13.0/Navigation-demo.mp4) · [字幕](demo/Navigation-demo.srt) · [演示核验记录](demo/evidence.json) · [最终修正回归](demo/source-projection-check.json)
 
 这句话看起来简单，却包含了一个需要检索、计算和判断的任务：从哪里出发，去哪个机场，预算使用什么币种，有没有便宜且赶得上的接驳组合？用户没有指定机场或币种，系统只能从本次取得的位置、背景资料或有依据的假设中补足这些信息，并保留它们的来源。
 
@@ -49,6 +49,8 @@ M3 不只选择交通工具，也编写实际 Makepad／Splash DSL。固定外�
 应用运行在 macOS Apple Silicon 的锁定官方 OctoSense 宿主及本仓库覆盖上，手机交互检查使用宿主 Android 样式，不冒称 Android 真机验证。确定性工具和原生区块接口已经具备，验收同时使用隔离原生检查与真实M3、定位和交通服务。模型探索与生成质量仍有边界：真实测试曾出现遗漏可点击详情、没有继续探索混合接驳及错误转述数值。0.13.0的统一Route通过定向检查，真实询价也验证了新旧Route金额独立；真实在线一轮已经通过两候选详情、完整地图分页、拖动后新视口图片与返回；生成中的 DSL 错误由同一个 Agent 循环自行修正。但该轮未探索混合接驳，部分静态摘要与路线事实不符，失败整稿的残余已按成功区块状态修正，仍不能称为完整任务验收通过。最后一轮定位到渲染时来源文件重读耗时约332ms，已改为本次快照投影；12条真实Route的原生回归通过，未再进行修复后的完整模型任务。最新版官方原版的动态区块寻址也缺少必要脚本接口，不能将本地覆盖上的通过视为App Hub可安装。工具调用成功不能证明完整出行任务交付，当前依据见[最新宿主与完整验收](tasks/runtime-upgrade/packet.md)，路线数据依据见[路线任务](tasks/route-identity/packet.md)。
 
 ## 初赛交付与复现
+
+固定版本为 [`v0.13.0`](https://github.com/xiaoland/gosim-agentic26/releases/tag/v0.13.0)，完整源码 SHA 为 `702ea6cfca8240e6c3222b8dc5f375b8ca009866`。Release 提供精确 bundle 源码包、视频、字幕和核验资料。已按官方流程提交 [App Hub 审核 #116](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/116)，目前等待维护者审核，尚未上架。
 
 应用源码位于 `bundle/`，运行时覆盖与精确版本由 `toolchain/agent-runtime.lock.json` 和 `toolchain/patches/` 维护。演示使用 macOS Apple Silicon 上的锁定 OctoSense 宿主、Android 手机样式；这不是 Android 真机测试，也不是在未修改的官方桌面发行版上直接安装的证明。初赛交付为 OctoScript 应用源码及可构建的配套宿主，Rust 覆盖不放进 Hub bundle。
 
