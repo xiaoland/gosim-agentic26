@@ -257,7 +257,16 @@ fn map_polyline(value){
     for point in points { if route_point(point) == nil { return nil } }
     return value
 }
+// 候选几何创建后不再改写；报价和查看状态变化不使折线失效。
 fn map_geometry(candidate){
+    if candidate==nil {return {paths:[] omitted:0}}
+    let cached=route_get(candidate,"map_geometry_cache")
+    if cached!=nil {return cached}
+    let geometry=map_geometry_uncached(candidate)
+    candidate.map_geometry_cache=geometry
+    return geometry
+}
+fn map_geometry_uncached(candidate){
     let paths = [] let omitted = 0
     if candidate == nil || !candidate.segments.is_array() { return {paths: paths omitted: omitted} }
     for segment in candidate.segments {
@@ -294,8 +303,11 @@ fn map_geometry(candidate){
 fn text_join(values, separator){ let text = "" for value in values { if text != "" { text += separator } text += value } return text }
 // 索引对应最终相接合并后的真实折线，不能拿原segments下标代替。
 fn map_path_catalog(candidate){
+ let cached=route_get(candidate,"map_paths_cache")
+ if cached!=nil {return cached}
  let result=[]
  for index line in map_geometry(candidate).paths {let points=line.split(";") result.push({index:index point_count:points.len() start:points[0] end:points[points.len()-1]})}
+ candidate.map_paths_cache=result ui_facts_revision+=1
  return result
 }
 fn selected_map_geometry(candidate, indices){
@@ -1646,12 +1658,14 @@ fn start_task(){
 
 
 fn cancel_task(){
-    trace_emit("query_stopped",{},nil)
+    let stopped_run=run_id let stopped_at=time_now()
+    agent_active=false active_tool=nil
     cancelled_input = ui.sentence.text().trim()
     stop_interface()
     cancel_pending_location()
     agent_active=false active_tool=nil run_id += 1 phase = "cancelled" picker_request += 1 invalidate_map()
     if task_timer != nil { stop_timer(task_timer) task_timer = nil }
+    start_timeout(0.01,||trace_emit_run("query_stopped",{occurred_at:stopped_at},nil,stopped_run))
     show_status("本次查询已停止；下次查询开始新任务") render_content()
 }
 
@@ -1790,16 +1804,19 @@ fn agent_pump(token){
    if !current_task(token){return}
    let choice=route_get(data,"choices")[0] let message=route_get(choice,"message")
    if !message.is_object(){request_failed(record,"模型没有返回消息") return}
-   trace_emit("assistant_message",{step:record.step message:message.to_json()},nil)
+   let message_at=time_now()
    agent_messages.push(message)
+   start_timeout(0.01,||trace_emit_run("assistant_message",{step:record.step message:message.to_json() occurred_at:message_at},nil,token))
    let calls=route_get(message,"tool_calls")
    if !calls.is_array() || calls.len()==0 {
       let content=route_get(message,"content")
       answer_text=if content.is_string() {content} else {""}
       ui_facts_revision+=1
       runtime_status=if answer_text.trim()=="" && !generated_active {"Agent没有返回可展示内容，请重新查询"} else {""}
-      trace_emit("query_ended",{content:answer_text generated:generated_active rendered:generated_render_complete},nil)
-      agent_active=false if phase=="running" {phase="waiting"} render_content() return
+      agent_active=false active_tool=nil if phase=="running" {phase="waiting"}
+      let ended={content:answer_text generated:generated_active rendered:generated_render_complete occurred_at:time_now()}
+      start_timeout(0.01,||trace_emit_run("query_ended",ended,nil,token))
+      render_content() return
    }
    agent_calls=calls agent_call_index=0 start_timeout(0.01,||agent_execute_next(token))
  })
@@ -1807,15 +1824,18 @@ fn agent_pump(token){
 }
 fn agent_tool_result(result){
  if active_tool==nil {return}
- let call=active_tool active_tool=nil
- let content=result.to_json()
- trace_emit("tool_result",{name:call.function.name result:content},call.id)
+ let call=active_tool let content=result.to_json() let token=run_id let returned_at=time_now()
+ // 先提交完整回执，再释放当前工具并派发续轮；诊断/显示不能夹断这一步。
  agent_messages.push({role:"tool" tool_call_id:call.id content:content})
- decisions.push({tool:call.function.name call_id:call.id returned_at:time_now()})
+ decisions.push({tool:call.function.name call_id:call.id returned_at:returned_at})
  if call.function.name!="read_skill" && call.function.name!="get_route" && call.function.name!="get_route_graph" && call.function.name!="render_ui" {ui_facts_revision+=1}
- let token=run_id agent_call_index+=1
- refresh_generated_facts()
+ agent_call_index+=1 active_tool=nil
  start_timeout(0.01,||agent_execute_next(token))
+ agent_result_effects(call,content,token,returned_at)
+}
+fn agent_result_effects(call,content,token,returned_at){
+ start_timeout(0.01,||trace_emit_run("tool_result",{name:call.function.name result:content occurred_at:returned_at},call.id,token))
+ start_timeout(0.01,||{if token==run_id {refresh_generated_facts()}})
 }
 // 原始业务记录只存一份；模型取得本次增量或按ID读取，UI保留自己的当前事实视图。
 let tool_candidate_start=0
@@ -1852,7 +1872,8 @@ fn agent_execute_next(token){
  let call=agent_calls[agent_call_index] active_tool=call
  let name=call.function.name let p=nil
  tool_candidate_start=candidates.len() tool_node_refs=[] for ref node in route_nodes {tool_node_refs.push(ref)}
- trace_emit("tool_call",{name:name arguments:call.function.arguments},call.id)
+ let call_at=time_now()
+ start_timeout(0.01,||trace_emit_run("tool_call",{name:name arguments:call.function.arguments occurred_at:call_at},call.id,token))
  try {p=call.function.arguments.parse_json()} {agent_tool_result({success:false error:"工具参数JSON无法解析"}) return}
  try {
   if name=="read_skill" {let text=read_text("skills/"+p.name+".md") if text==nil {agent_tool_result({success:false error:"技能不存在；可用native_ui/navigation_data"})} else {agent_tool_result({success:true name:p.name content:text})}}
@@ -1875,12 +1896,17 @@ fn agent_execute_next(token){
   elif name=="quote_didi" {quote_didi(p,token)}
   elif name=="attach_quote" {attach_quote(p,token)}
   elif name=="compare_routes" {present_results("")}
-  elif name=="get_route" {let candidate=ui_route(p.id) if candidate==nil {agent_tool_result({success:false error:"路线ID不在本轮候选中"})} else {agent_tool_result({success:true route:interface_route_facts(candidate,route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")))})}}
+  elif name=="get_route" {let candidate=ui_route(p.id) if candidate==nil {agent_tool_result({success:false error:"路线ID不在本轮候选中"})} else {map_path_catalog(candidate) agent_tool_result({success:true route:interface_route_facts(candidate,route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")))})}}
   elif name=="get_route_graph" {prepare_route_graph() agent_tool_result({success:true graph:route_graph_facts()})}
   elif name=="render_ui" {
     interface_revision+=1 let revision=interface_revision mount_interface(p.source,token,revision)
     start_timeout(0.25,||{if current_task(token) && active_tool==call {let diagnostic=ui.generated.diagnostics() interface_error=diagnostic
-    trace_emit("render_result",{diagnostics:diagnostic notified:generated_render_notified viewport:ui_viewport},call.id) if diagnostic=="" && generated_render_notified {generated_render_complete=true} render_content() agent_tool_result({success:diagnostic=="" diagnostics:diagnostic notified:generated_render_notified viewport:ui_viewport})}})
+    if diagnostic=="" && generated_render_notified {generated_render_complete=true}
+    let render_finished_at=time_now()
+    let result={success:diagnostic=="" diagnostics:diagnostic notified:generated_render_notified viewport:ui_viewport}
+    agent_tool_result(result)
+    start_timeout(0.01,||trace_emit_run("render_result",{diagnostics:result.diagnostics notified:result.notified viewport:result.viewport occurred_at:render_finished_at},call.id,token))
+    start_timeout(0.01,||{if token==run_id {render_content()}})}})
   }
   else {agent_tool_result({success:false error:"未知工具："+name})}
  } {agent_tool_result({success:false error:"工具参数或数据执行错误" status:runtime_status})}
@@ -1905,7 +1931,12 @@ let ui_facts_written_revision=-1
 let mailbox_seen = ""
 let mailbox_lines = 0
 fn request_current(token,record){ return token == run_id && agent_active }
-fn request_failed(record,text){ trace_emit("transport_error",{step:record.step state:record.state error:text},nil) agent_active=false active_tool=nil phase="failed" show_status(text) }
+fn request_failed(record,text){
+ agent_active=false active_tool=nil phase="failed"
+ let token=run_id let failed_at=time_now()
+ start_timeout(0.01,||trace_emit_run("transport_error",{step:record.step state:record.state error:text occurred_at:failed_at},nil,token))
+ show_status(text)
+}
 fn stop_interface(){
     interface_revision += 1 interface_inflight = false generated_active = false generated_render_complete = false generated_render_notified = false generated_source = ""
     invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0
@@ -1944,7 +1975,7 @@ fn interface_route_facts(candidate, check){
         passed: check.passed reason: check.reason reasons: route_reasons(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
         source: candidate.source source_ts: candidate.source_ts expires_at: candidate.expires_at estimated: candidate.estimated warnings: candidate.warnings
         waiting_included: candidate.waiting_included waiting_basis: candidate.waiting_basis taxi_wait_verified: candidate.taxi_wait_verified
-        request_bound: candidate.request_bound origin_complete: candidate.origin_complete endpoint_complete: candidate.endpoint_complete endpoint_gap_m: candidate.endpoint_gap_m map_paths:map_path_catalog(candidate) segments: segments}
+        request_bound: candidate.request_bound origin_complete: candidate.origin_complete endpoint_complete: candidate.endpoint_complete endpoint_gap_m: candidate.endpoint_gap_m map_paths:route_get(candidate,"map_paths_cache") segments: segments}
 }
 fn interface_facts(){
     try {let area = ui.generated.rect() ui_viewport = if area != nil && area.width > 0 && area.height > 0 {area} else {ui.content.rect()}} {}
@@ -1969,7 +2000,9 @@ fn mount_interface(body, token, revision){
     if token != run_id || revision != interface_revision { return }
     clear_generated()
     trace_last_diagnostic = ""
-    trace_emit("render_source",{source:body revision:revision},if active_tool!=nil {active_tool.id} else {nil})
+    let render_call_id=if active_tool!=nil {active_tool.id} else {nil}
+    let render_source_at=time_now()
+    start_timeout(0.01,||trace_emit_run("render_source",{source:body revision:revision occurred_at:render_source_at},render_call_id,token))
     interface_run = token interface_inflight = false interface_error = ""
     let context = generated_context()
     let source = context + "\nView{width: Fill height: Fill flow: Down\nmailbox := Label{visible:false text:\"\"}\nfact_state := Label{visible:false text:" + interface_facts().to_json().to_json() + "}\nfact_revision := Label{visible:false text:\"" + ui_facts_revision + "\"}\nscroll := ScrollYView{width: Fill height: Fill flow: Down\nbody := View{width: Fill height: Fit flow: Down on_render: || {\nlet facts = snapshot()\n" + body + "\n}}\n}\n}"

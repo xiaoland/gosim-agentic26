@@ -140,6 +140,60 @@ fn sections_tick(){
 start_timeout(0.2,||sections_tick())
 '''
 
+LOOP_SETTLE_FIXTURE=r'''
+let settle_started=false let settle_checks=[] let settle_scans=0 let settle_trace_failed=false let settle_refresh_failed=false let settle_done=false
+fn map_geometry_uncached(candidate){settle_scans+=1 return product_map_geometry_uncached(candidate)}
+fn trace_emit_run(event,data,call_id,run){
+ if event=="tool_result" || event=="query_ended" || event=="query_stopped" {settle_trace_failed=true let unavailable=nil unavailable.failure() return}
+ product_trace_emit_run(event,data,call_id,run)
+}
+fn refresh_generated_facts(){
+ if settle_started && !settle_refresh_failed && agent_call_index>0 {settle_refresh_failed=true let unavailable=nil unavailable.failure() return true}
+ return product_refresh_generated_facts()
+}
+fn minimax_request(task,input,schema,token,record,done){start_timeout(0.01,||done({choices:[{message:{role:"assistant" content:"本轮结果已返回"}}]}))}
+fn settle_finish(){
+ if agent_active {start_timeout(0.1,||settle_finish()) return}
+ let tool_ids=[] for item in agent_messages {if item.role=="tool" {tool_ids.push(item.tool_call_id)}}
+ settle_checks.push({name:"诊断和facts入口失败后已提交回执仍续轮" passed:settle_trace_failed && settle_refresh_failed && tool_ids.len()==2 && tool_ids[0]=="cold-route" && tool_ids[1]=="after-route" && agent_call_index==2})
+ settle_checks.push({name:"终端日志失败不保留busy或active工具" passed:!agent_active && active_tool==nil && phase=="waiting" && answer_text=="本轮结果已返回"})
+ let directory=interface_facts().routes[0].map_paths let warm=map_geometry(candidates[0]) let before=settle_scans
+ map_path_catalog(candidates[0]) map_geometry(candidates[0]) interface_facts()
+ settle_checks.push({name:"冷读单候选目录完整且warm不重复扫描" passed:before==1 && settle_scans==before && directory.len()==settle_geometry.paths.len() && warm.paths.len()==settle_geometry.paths.len()})
+ let total=0 for item in directory {total+=item.point_count}
+ settle_checks.push({name:"657点完整冷读并保留其余候选未读状态" passed:total==657 && candidates.len()==16 && interface_facts().routes[15].map_paths==nil})
+ agent_active=true active_tool={id:"cancelled"} phase="running" cancel_task()
+ start_timeout(0.2,||{
+  settle_checks.push({name:"取消日志失败仍清busy恢复独立查询入口" passed:!agent_active && active_tool==nil && phase=="cancelled"})
+  fs.write("harness-smoke.json",{checks:settle_checks candidates:candidates.len() point_count:total cold_geometry_scans:settle_scans source_geometry:settle_geometry.source_geometry}.to_json())
+ })
+}
+let settle_geometry=nil
+fn settle_seed(){
+ settle_started=true settle_geometry=read_text("settle-geometry.json").parse_json()
+ run_id+=1 received_at=time_now() arrive_by=received_at+2400 user_limits={minutes:40 budget_cents:5000} constraints={budget_cents:5000} phase="running" agent_active=true
+ candidates=[] let segments=[] for line in settle_geometry.paths {segments.push({polyline:line})}
+ for i in 16 {candidates.push(route_candidate("settle-"+i,"taxi",900,2000,received_at,received_at,settle_geometry.endpoint,settle_geometry.endpoint,true,segments))}
+ ui_facts_revision+=1 interface_revision+=1
+ mount_interface("Label{text:\"本轮纯读快照：完整16候选，无预扫地图目录\"}",run_id,interface_revision)
+ start_timeout(0.3,||{
+  settle_checks.push({name:"首次原生mount不扫描全候选地图几何" passed:settle_scans==0 && generated_render_complete && ui.generated.diagnostics()=="" && ui.generated.fact_state.text().parse_json().routes.len()==16})
+  let untouched=true for candidate in candidates {if route_get(candidate,"map_paths_cache")!=nil {untouched=false}}
+  settle_checks.push({name:"未读取目录明确nil不是无几何" passed:untouched && interface_facts().routes[0].map_paths==nil})
+  agent_messages=[{role:"system" content:"isolated fixture"} {role:"user" content:"fixture"}]
+  agent_calls=[{id:"cold-route" type:"function" function:{name:"get_route" arguments:"{\"id\":\"settle-0\"}"}} {id:"after-route" type:"function" function:{name:"read_skill" arguments:"{\"name\":\"navigation_data\"}"}}]
+  agent_messages.push({role:"assistant" tool_calls:agent_calls}) agent_call_index=0
+  start_timeout(0.01,||agent_execute_next(run_id)) start_timeout(0.3,||settle_finish())
+ })
+}
+fn settle_tick(){
+ let identity=ui.trace_identity.text().parse_json()
+ if trace_state!=nil && identity.instance==trace_state.instance && fs.exists("loop-settle-go.json") && !settle_started {settle_seed()}
+ if !settle_started {start_timeout(0.1,||settle_tick())}
+}
+start_timeout(0.2,||settle_tick())
+'''
+
 TERMINAL_FIXTURE=r'''
 let terminal_task=0 let terminal_token=-1 let terminal_turn=0 let terminal_checks=[]
 let terminal_code="```splash\nLabel{text:\"未执行代码\"}\n```"
@@ -402,6 +456,7 @@ start_timeout(1,||performance_tick())
 '''
 
 def main():
+ if '--loop-settle-private-replay' in sys.argv:assert '--loop-settle' in sys.argv, 'private replay is an explicit modifier of --loop-settle'
  sp=importlib.util.spec_from_file_location('agent',ROOT/'tools/agent.py');a=importlib.util.module_from_spec(sp);sp.loader.exec_module(a)
  (ROOT/'build/smoke').mkdir(exist_ok=True,parents=True);w=Path(tempfile.mkdtemp(prefix='navigation-harness-',dir=ROOT/'build/smoke'))
  a.STATE=w/'private-state';a.HOME_DIR=a.STATE/'home';a.CORE=a.STATE/'core';a.SESSION=a.STATE/'session.json'
@@ -409,6 +464,7 @@ def main():
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
  if '--trace' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+TRACE_FIXTURE
  if '--mixed-routing' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn amap_request(','fn product_amap_request(',1)+'\n'+MIXED_FIXTURE
+ if '--loop-settle' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('fn map_geometry_uncached(','fn product_map_geometry_uncached(',1).replace('fn trace_emit_run(','fn product_trace_emit_run(',1).replace('fn refresh_generated_facts(','fn product_refresh_generated_facts(',1)+'\n'+LOOP_SETTLE_FIXTURE
  if '--map-sections' in sys.argv:source=original.replace('fn fit_map_slot(','fn product_fit_map_slot(',1).replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_SECTIONS_FIXTURE
  if '--map-details' in sys.argv:source=original.replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_FIXTURE
  if '--terminal-content' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1)+'\n'+TERMINAL_FIXTURE
@@ -451,11 +507,27 @@ def main():
   manifest=json.loads((mount/'manifest.json').read_text());manifest['id']='os.agentic26-navigation';(mount/'manifest.json').write_text(json.dumps(manifest));(mount/'main.splash').write_text(source)
   subprocess.run([str(ROOT.parent/'.octosense-agentic26/OctoSense-App-Hub/target/release/hub'),'stamp',str(mount)],stdout=subprocess.DEVNULL,check=True)
   a.init_demo();jail=a.jail_path();a.materialize_skills(ROOT/'bundle',jail);(jail/'private-config.json').write_text('{"location_mode":"demo"}');(jail/'trip.json').write_text('historical fixture ignored');(jail/'agent-run.json').write_text('historical audit ignored')
-  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
-  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv:
+  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
+  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   launch('native');report=None
-  if '--map-sections' in sys.argv:
+  if '--loop-settle' in sys.argv:
+   if '--loop-settle-private-replay' in sys.argv:
+    from urllib.parse import parse_qs
+    raw=ROOT/'build/research/map-20003/trace-private.jsonl'
+    maps=[json.loads(json.loads(l)['data']) for l in raw.read_text().splitlines() if json.loads(l)['event']=='map_request']
+    paths=[]
+    for item in maps:
+     rows=parse_qs(item['params'].lstrip('&')).get('paths',[''])[0].split('|')
+     found=[line.split(':',1)[1] for line in rows if ':' in line]
+     if sum(len(line.split(';')) for line in found)==657:paths=found;break
+    assert paths,'explicit private replay requires existing657point geometry; no service fallback'
+    source_geometry='existing private map-20003 taxi request; not the entire failed run1'
+   else:
+    paths=[';'.join(f'{110+part*.1+point*.00001:.5f},{21+part*.1+point*.00001:.5f}' for point in range(219)) for part in range(3)]
+    source_geometry='public synthetic three disconnected paths with219points each; no private artifact read'
+   a.write_private(jail/'settle-geometry.json',json.dumps({'paths':paths,'endpoint':paths[-1].split(';')[-1],'source_geometry':source_geometry}).encode())
+  if '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
    import zlib,struct
    def png(color):
     def chunk(t,d):return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
@@ -469,7 +541,7 @@ def main():
    q('m',k='down',x=200,y=300,wait=1)
    for y in range(320,570,25):q('m',k='move',x=200,y=y,wait=1)
    q('m',k='up',x=200,y=570,wait=1);q('t',t='Navigation',wait=1);q('k',c='enter',wait=1);time.sleep(1)
-   (jail/'sections-go.json').write_text('{}')
+   (jail/('loop-settle-go.json' if '--loop-settle' in sys.argv else 'sections-go.json')).write_text('{}')
   if '--performance' in sys.argv:
    time.sleep(3)
    q('k',c='Space',cmd=1,wait=1)
@@ -613,8 +685,11 @@ def main():
    time.sleep(.1)
   assert report,'宿主未完成工具会话；查看 '+str(w/'native.log')
   assert all(row['passed'] for row in report['checks']),report
-  if recovery or '--map-sections' in sys.argv or '--map-details' in sys.argv or '--terminal-content' in sys.argv or '--mixed-routing' in sys.argv or '--performance' in sys.argv:
-   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True,mode='Android' if '--terminal-content' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv else 'desktop')
+  if recovery or '--loop-settle' in sys.argv or '--map-sections' in sys.argv or '--map-details' in sys.argv or '--terminal-content' in sys.argv or '--mixed-routing' in sys.argv or '--performance' in sys.argv:
+   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True,mode='Android' if '--terminal-content' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv else 'desktop')
+   if '--loop-settle' in sys.argv:
+    (w/'loop-settle-android.png').write_bytes(q('g',raw=1))
+    report.update(no_external_services=True,expected_injected_errors=['diagnostic side entry unavailable','facts side entry unavailable'])
    if '--map-sections' in sys.argv:
     (w/'map-sections-android.png').write_bytes(q('g',raw=1))
     report.update(no_external_services=True,synthetic_image_bytes=True)

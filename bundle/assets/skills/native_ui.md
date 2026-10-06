@@ -92,7 +92,7 @@ render_ui 返回本稿真实 diagnostics；success 只表示执行时没有已�
 通用句柄 set_visible(bool)／visible() 可用于页面或自定义浮层。锁定版本 Modal.open/close 与 StackNavigation.push/pop 只有 Rust 接口，当前没有相应 Splash 句柄方法，不能直接写 ui.modal.open()。普通页面切换不销毁隐藏页；不要为打开详情而重建整个列表。
 
 
-高德静态地图接口每次最多接收 **4 条独立折线（paths）**，这是供应商接口能力，不是应用自动分组规则。`snapshot().routes`／`get_route({id})` 的每条路线都有 `map_paths` 目录：`index` 是最终相接合并后的折线索引，`start`／`end` 是真实几何端点，`point_count` 是点数。目录完整保留全部折线；它与公交 `segments` 下标不是同一概念。
+高德静态地图接口每次最多接收 **4 条独立折线（paths）**，这是供应商接口能力，不是应用自动分组规则。`snapshot().routes`／`get_route({id})` 的每条路线都有 `map_paths` 目录：`index` 是最终相接合并后的折线索引，`start`／`end` 是真实几何端点，`point_count` 是点数。目录完整保留全部折线；它与公交 `segments` 下标不是同一概念。snapshot 中 map_paths 为 nil 表示本轮尚未读取该目录，不表示没有几何；get_route 按所请求路线首次取得并缓存目录，普通地图无需先读目录。
 
 地图事件可选 `path_indices`，从该目录选择完整折线，例如 `emit({action:"map",widget:"part_map",target:id,path_indices:[0,1,2],status_widget:"part_note",interactive:true})`。未提供时仍请求完整路线；不会自动截前四条、拆图或跨缺口连接。多于四条时，可以根据目录分步嵌入多张独立命名地图，每张选择至多四条，张数、分组、打开步骤和布局由生成稿决定。展示完整路线时，各图的索引选择合起来应覆盖全部实际折线，缺失几何仍说明真实缺失。索引随当前路线目录变化，不猜测索引，也不把某些分段称作完整路线。
 

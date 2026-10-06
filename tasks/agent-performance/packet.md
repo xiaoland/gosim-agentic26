@@ -1,6 +1,6 @@
 # Agent 生成耗时与失败诊断
 
-状态：2026-10-06，0.11.2性能与状态修复完成；0.11.3按用户选择加入Agent分图资料与折线选择，并修复同批事件覆盖，七项定向检查及唯一封装通过。没有新增正常M3验收，完整生成界面可靠性仍未通过；保留本任务作为接续入口。
+状态：2026-10-06，0.11.4已修复0.11.3全候选目录重算导致的挂起，并分离工具结果提交与日志／UI副作用；挂起边界和分图共十四项定向检查、默认可运行回归及唯一封装通过。没有新增正常M3验收，生成语法与完整界面可靠性仍未通过；保留本任务作为接续入口。
 
 ## 目标与授权
 
@@ -88,3 +88,19 @@ UI稳定owner负责技能资料与必要的最小地图事件能力，让Agent�
 根已读取 `build/research/map-sections/result-safe.json` 与 `build/smoke/navigation-harness-jmgq90xe/report.json`，并查看实际Android模式截图。main2f42bc78…冻结，七项定向检查通过：六条不相接折线按[0,1,2]和[3,4,5]分两图，全部原折线逐条一致、目录端点／点数准确、默认不自动截断、分段A/B含义明确、独立camera／加载、同目标改索引重新取景及不存在索引明确失败。截图使用明确标注的蓝／橙合成图片，验证原生控件与事件链路，不是供应商地图。此次实测六条分两图，不是先前计划的十二条分三图；覆盖同一超四条与同批多图边界，未为数字另做重复检查。自有实例已关闭，无新模型或出行服务请求；没有证明M3会每次采用分图资料。一次隔离启动曾remote404，未进入夹具，不算检查通过。最终封装正在由native稳定owner执行。
 
 根已读取 `build/research/map-split/final-package/result-safe.json`：唯一0.11.3 check／build／doctor通过，source15c9de6e…、main2f42bc78…、runtime63c95db1…、binary40a4971d…；嵌入与实际挂载10文件逐字节一致、两技能材料化一致，锁定宿主覆盖树未变。自有隐藏loopback已关闭，未操作用户实例或复跑UI／模型／服务。当前获授权分图能力已完成；接续仅需在用户正常查询中观察Agent采用资料与实际分图表现，既有生成布局／失效控件问题仍按此前证据保留，不能把这次检查宣称为完整出行界面验收。
+
+## 当前恢复点：两次查询停在正在处理
+
+用户反馈两次正常尝试一直“正在处理”，要求参考Pi Agent的function calling harness与现代agent loop，质疑当前实现仍不够简化。先调查实际停点与官方Pi源级实现，不加提示词补丁、不将主观等待直接归因模型或界面。UI稳定owner只读当前可见实例的两轮时序和宿主错误；pi_loop_reference拥有官方固定版本源码对照，核工具完成、错误／终止／取消与UI生命周期边界，不重复导出用户实例。根整合证据后决定必要修复；不引入Node运行时、外部harness服务或新持久化作为预设答案，不操作用户实例或追加模型抽样。原始材料继续只放ignored build。
+
+根已读 `build/research/agent-loop-stall/result-safe.json`，当前0.11.3／vm-5的625个事件完整：run1全部12次模型调用返回，45.57秒进入render_ui，seq219调用／220源码后没有render或tool结果，约355秒后用户终止。宿主指令超限IP位于父route_point；native源确认每入口200000指令的硬Bail展开根栈，普通try不能捕获。render_source后mount同步interface_facts→全部routefacts→新map_path_catalog→map_geometry逐点计算，child安装及回执timer还未执行，因此显示busy没有控制后继。IP不证明route_point是唯一成本，但调用链及断点吻合上轮新目录重算回归。run3的22工具均有结果，十次render中前七次原生API／变量错误，126.24秒结束；只读截图与可见Label证明当前已显示结果／查询按钮。生成源码内嵌旧runtime_status并非可见文案，不能声称两轮都仍卡住。日志缺逐事件时间，不能精确复原用户两个观察时刻。
+
+Pi官方badlogic/pi-mono重定向earendil-works/pi，本次固定commit[28dcce2ba45ce4a9efeb0f5b686f0be830fd89b9](https://github.com/earendil-works/pi/commit/28dcce2ba45ce4a9efeb0f5b686f0be830fd89b9)。[agent-loop](https://github.com/earendil-works/pi/blob/28dcce2ba45ce4a9efeb0f5b686f0be830fd89b9/packages/agent/src/agent-loop.ts)同样保存assistant与tool批、取得结果后继续、无tool结束；Navigation已是该基本形态。值得采用的是[agent生命周期](https://github.com/earendil-works/pi/blob/28dcce2ba45ce4a9efeb0f5b686f0be830fd89b9/packages/agent/src/agent.ts)统一结算及控制状态先于UI事件处理；Pi finally自身也不能令永不settle的工具或原生硬Bail凭空返回。当前不移植Pi Node运行时，不切其Anthropic MiniMax endpoint，也不引入steering、follow-up或持久化。
+
+Advisor与native建议修已证根因并小范围解耦，不重写loop。依用户此前“开始修正”的性能与可靠性授权，UI稳定owner实现0.11.4：UI快照只引用按get_route首次构建并缓存的目录，未读取nil明确含义；普通地图仍可直接加载完整真实路线。合法tool结果先序列化、提交消息和索引，再安排下一控制入口；日志／UI更新移独立入口，结束／取消先清busy。不得提前续轮却缺对应结果，不把未挂载稿误报成功，也不加超时看门狗、硬步数或固定流程。验证首次mount无全候选扫描、单candidate冷读实际代表负载与副作用失败不阻断已提交结果续轮。若原失败几何未被记录，不冒称真实重放；不新增模型或地图抽样。native稳定owner仍负责唯一最终封装，根整合说明。
+
+根已读 `build/research/agent-loop-stall/repair-result-safe.json`，并查看两份实际Android模式截图：final mainb5cc2e3c…下挂起边界七项与既有分图七项通过。首次mount保16候选且几何扫描0；657点代表真实路线cold get_route只扫描该候选一次，warm复用，其余目录nil。诊断／facts副作用故障注入后两个对应tool_call_id均先提交，续轮到terminal；终端和取消先clear busy。日志五个nil.failure为刻意注入，不是自然宿主回归，没有指令／时间／堆超限。几何取自此前私有map-20003已存taxi请求，与本轮get_route目录657点规模一致；本轮原始全候选几何未记录，不能精确重放原run1。未知更长单候选仍可能触宿主真实单入口预算，不预设分批框架、裁数据或保证所有未来数据。没有新模型或服务请求，自有实例关闭，生成语法问题仍独立保留。
+
+根已读取唯一0.11.4 `build/research/agent-loop-stall/final-package/result-safe.json`：check／build／doctor通过，source311bd34c…、mainb5cc2e3c…、runtime01a5ce8b…、binary565cfd9e…；10文件嵌入／实际挂载逐字节一致、技能材料化一致，宿主覆盖树未变，自有隐藏loopback关闭。源码包摘要不包含smoke工具。整合时发现回归入口硬依赖ignored私有几何，已让UI仅调整工具：默认公开合成657点、显式选项读取私有代表数据，禁止把用户几何提交或自动调用服务；这一必要可运行性检查不重新构建应用。
+
+根已读 `build/research/agent-loop-stall/portable-test-safe.json` 与qjusm76a报告，默认 `python3 tools/smoke.py --loop-settle` 使用三条公开合成折线、每条219点，七项通过；显式 `--loop-settle --loop-settle-private-replay` 才读取本机既有私有代表数据，缺数据明确失败，不自动服务回退。工具SHAe5680b8a…，产品和技能仍同冻结摘要，私有检查未重跑，不重新封装。当前修复交付完成，后续正常查询仍需区分实际循环挂起与生成稿自修导致的长等待，不能把126秒已结束样本当持续busy，也不宣称所有未来原生预算或生成质量问题已消除。
