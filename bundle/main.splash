@@ -1445,7 +1445,7 @@ fn trace_scrub(text, keys){
     return text
 }
 fn trace_status(state){
-    return {v:1 session:state.session instance:state.instance run:state.run last_seq:state.written_seq state:if state.incomplete {"incomplete"} else {"recording"} error:if state.incomplete {"记录写入未完成；事件可能缺失"} else {""}}
+    return {v:1 format:"jsonl-segments" segments:state.segment session:state.session instance:state.instance run:state.run last_seq:state.written_seq state:if state.incomplete {"incomplete"} else {"recording"} error:if state.incomplete {"记录写入未完成；事件可能缺失"} else {""}}
 }
 fn trace_identity_json(){
     return {session:trace_session instance:if trace_state!=nil {trace_state.instance} else {nil} run:run_id state:if trace_initialization_error!="" {"incomplete"} elif trace_state!=nil && trace_state.incomplete {"incomplete"} else {"recording"} error:trace_initialization_error}.to_json()
@@ -1467,8 +1467,17 @@ fn trace_emit_run(event, data, call_id, run){
     let envelope = {v:1 session:state.session instance:state.instance run:run seq:seq event:event at:time_now() call_id:call_id data:data.to_json()}.to_json()
     start_timeout(0.01,||{
         try {
-            fs.write(state.directory + "/" + run + "-" + seq + ".json",trace_scrub(envelope,state.keys))
-            state.written_seq = seq state.run = run
+            let line=trace_scrub(envelope,state.keys)+"\n"
+            let bytes=line.to_bytes().len()
+            // 单文件1MiB是实际宿主存储限制；不截断事件或修改宿主配额。
+            if bytes>1048576 {state.incomplete=true}
+            else {
+                if state.segment==0 || state.segment_bytes+bytes>1048576 {state.segment+=1 state.segment_bytes=0}
+                let number=""+state.segment while number.len()<6 {number="0"+number}
+                fs.append(state.directory+"/segment-"+number+".jsonl",line)
+                state.segment_bytes+=bytes
+                if seq>state.written_seq {state.written_seq=seq} state.run=run
+            }
         } {state.incomplete = true}
         try {fs.write(state.directory + "/status.json",trace_status(state).to_json())} {state.incomplete=true}
         trace_marker()
@@ -1492,7 +1501,7 @@ fn trace_initialize(){
     try {fs.write(counter_path,{next:ordinal+1}.to_json())} {trace_initialization_error="实例标识写入失败；开发记录不完整" trace_marker() return}
     let keys=[]
     for name in ["minimax_api_key" "amap_api_key" "didi_mcp_key"] {let key=route_get(config,name) if key.is_string() && key!="" {keys.push(key) keys.push(key.url_encode())}}
-    trace_state={session:session instance:"vm-"+ordinal directory:"dev-trace/"+session+"/vm-"+ordinal seq:0 written_seq:0 run:run_id incomplete:false keys:keys}
+    trace_state={session:session instance:"vm-"+ordinal directory:"dev-trace/"+session+"/vm-"+ordinal seq:0 written_seq:0 segment:0 segment_bytes:0 run:run_id incomplete:false keys:keys}
     try {fs.write(trace_state.directory+"/status.json",trace_status(trace_state).to_json())} {trace_state.incomplete=true}
     trace_emit("instance_started",{metadata:route_get(config,"development_trace_metadata")},nil)
 }
@@ -1923,7 +1932,14 @@ fn refresh_generated_facts(){
     return true
 }
 fn generated_rendered(){
+    if !generated_active || interface_run!=run_id {return true}
     generated_render_notified = true
+    // 通知可能晚于render_ui诊断点或终端回复；以当前稿实际诊断补齐成功锁存。
+    let diagnostic=ui.generated.diagnostics()
+    if diagnostic=="" {generated_render_complete=true interface_error=""}
+    else {interface_error=diagnostic}
+    trace_emit("render_notification",{diagnostics:diagnostic rendered:generated_render_complete revision:interface_revision},nil)
+    render_content()
     ui_render_generation += 1
     for widget slot in map_slots { update_map_widget(slot) }
     return true

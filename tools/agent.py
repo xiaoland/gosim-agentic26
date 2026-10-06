@@ -510,6 +510,35 @@ def stop():
     print('已关闭本启动器的宿主实例。')
 
 
+def archive_stopped_traces(jail):
+    # start() calls this only after stop() has confirmed its launcher exited.
+    require(not SESSION.exists(), '宿主会话尚未停止；不迁出可能活跃的开发记录。')
+    executable = str(STATE / 'app/OctoSense Navigation.app/Contents/MacOS' / BINARY.name)
+    processes = subprocess.check_output(['ps', '-axo', 'pid=,comm='], text=True)
+    require(not any(line.strip().split(None, 1)[-1] == executable for line in processes.splitlines()),
+            '私有宿主仍有运行进程；保留开发记录，不迁出。')
+    source = jail / 'dev-trace'
+    if not source.exists():
+        return None
+    require(source.is_dir() and not source.is_symlink(), '开发记录目录必须是实际目录。')
+    paths = list(source.rglob('*'))
+    require(not any(path.is_symlink() for path in paths), '开发记录含符号链接；保留原位，不迁出。')
+    files = {path.relative_to(source).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+             for path in paths if path.is_file()}
+    archive = ROOT / 'build/traces/archives' / uuid.uuid4().hex
+    private_dir(archive)
+    archive.chmod(0o700)
+    source.rename(archive / 'dev-trace')
+    for path in (archive / 'dev-trace').rglob('*'):
+        path.chmod(0o700 if path.is_dir() else 0o600)
+    (archive / 'dev-trace').chmod(0o700)
+    write_private(archive / 'archive.json', json_bytes({
+        'v': 1, 'reason': 'launcher stopped before new development session',
+        'file_sha256': files
+    }))
+    return archive
+
+
 def packaged_host():
     # 本机实测裸二进制未完成授权；包内运行成功触发授权并取得定位样本。
     contents = STATE / 'app/OctoSense Navigation.app/Contents'
@@ -539,6 +568,7 @@ def start(hidden, demo=False, trace=True):
                 '模拟来源尚未初始化；先运行 make agent-init-demo。')
     metadata = build(values)
     stop()
+    archive_stopped_traces(jail)
     executable = packaged_host()
     trace_session = configure(values, jail, "demo" if demo else "live", trace=trace)
     private_dir(STATE / 'logs')
@@ -640,6 +670,75 @@ def current_trace_identity(host_session):
     return identity
 
 
+def trace_directory(jail, session_id, instance, historical=False):
+    directory = jail / 'dev-trace' / session_id / instance
+    if historical and not directory.exists():
+        matches = list((ROOT / 'build/traces/archives').glob(
+            '*/dev-trace/' + session_id + '/' + instance))
+        require(len(matches) <= 1, '归档中有多个同标识 trace；不猜测历史实例。')
+        if matches:
+            directory = matches[0]
+    require(directory.is_dir() and not directory.is_symlink(), '指定的开发 trace 实例目录不存在。')
+    return directory
+
+
+def trace_events(directory, status, session_id, instance, values, configured):
+    events, pending = [], []
+    def incomplete(message):
+        status.update(state='incomplete', error=message)
+    def parse(data):
+        no_secrets(data, values, 'trace 事件')
+        no_secrets(data, configured, 'trace 事件')
+        try:
+            event = json.loads(data)
+        except ValueError:
+            incomplete('event JSON is incomplete or invalid')
+            return
+        require((event.get('session'), event.get('instance')) == (session_id, instance), 'trace 事件与指定实例不符。')
+        sequence = event.get('seq')
+        if not isinstance(sequence, int) or sequence < 1:
+            incomplete('event sequence is invalid')
+        elif sequence > status['last_seq']:
+            pending.append(sequence)
+        else:
+            events.append(event)
+    if status.get('format') == 'jsonl-segments':
+        expected = ['segment-%06d.jsonl' % i for i in range(1, status.get('segments', 0) + 1)]
+        actual = {path.name for path in directory.glob('segment-*.jsonl')}
+        if actual != set(expected):
+            incomplete('segment files are missing or not committed by the status snapshot')
+        for name in sorted(actual):
+            path = directory / name
+            require(not path.is_symlink(), 'trace 分段不能是符号链接。')
+            if not path.is_file():
+                incomplete('segment path is not a readable file')
+                continue
+            data = path.read_bytes()
+            no_secrets(data, values, 'trace 分段')
+            no_secrets(data, configured, 'trace 分段')
+            if data and not data.endswith(b'\n'):
+                incomplete('segment has a truncated final record')
+            for line in data.splitlines(keepends=True):
+                if line.endswith(b'\n') and line.strip():
+                    parse(line)
+    else:
+        for path in directory.glob('*.json'):
+            if path.name == 'status.json':
+                continue
+            require(not path.is_symlink(), 'trace 事件不能是符号链接。')
+            if not path.is_file():
+                incomplete('event path is not a readable file')
+                continue
+            parse(path.read_bytes())
+    events.sort(key=lambda event: event['seq'])
+    if [event['seq'] for event in events] != list(range(1, status['last_seq'] + 1)):
+        incomplete('committed event sequence is missing or duplicated')
+    if pending:
+        status.update(state='incomplete', pending_sequences=sorted(pending),
+                      error='events are not yet committed by the status snapshot')
+    return events
+
+
 def read_trace(session_id=None, instance=None):
     jail = jail_path()
     config = json.loads((jail / 'private-config.json').read_bytes())
@@ -655,8 +754,7 @@ def read_trace(session_id=None, instance=None):
         identity = {'session': session_id, 'instance': instance, 'selection': 'explicit'}
     require(isinstance(session_id, str) and re.fullmatch(r'[0-9a-f]{32}', session_id), 'trace session 标识无效。')
     require(isinstance(instance, str) and re.fullmatch(r'vm-[0-9]+', instance), 'trace instance 标识无效。')
-    directory = jail / 'dev-trace' / session_id / instance
-    require(directory.is_dir() and not directory.is_symlink(), '指定的开发 trace 实例目录不存在。')
+    directory = trace_directory(jail, session_id, instance, historical=host_session is None)
     values = env_values(required=False)
     configured = {'MINIMAX_API_KEY': config.get('minimax_api_key', ''), 'AMAP_API_KEY': config.get('amap_api_key', ''),
                   'DIDI_MCP_KEY': config.get('didi_mcp_key', '')}
@@ -669,32 +767,7 @@ def read_trace(session_id=None, instance=None):
     require((status.get('session'), status.get('instance')) == (session_id, instance), 'trace 状态与指定实例不符。')
     if identity.get('state') == 'incomplete':
         status.update(state='incomplete', error='current VM marker reports trace initialization or write failure')
-    events = []
-    pending_sequences = []
-    for path in directory.glob('*.json'):
-        if path.name == 'status.json':
-            continue
-        sequence = int(path.stem.rsplit('-', 1)[-1])
-        if sequence > status['last_seq']:
-            pending_sequences.append(sequence)
-            continue
-        require(not path.is_symlink(), 'trace 事件不能是符号链接。')
-        if not path.is_file():
-            status.update(state='incomplete', error='event path is not a readable file')
-            continue
-        data = path.read_bytes()
-        no_secrets(data, values, 'trace 事件')
-        no_secrets(data, configured, 'trace 事件')
-        event = json.loads(data)
-        require((event.get('session'), event.get('instance')) == (session_id, instance), 'trace 事件与指定实例不符。')
-        events.append(event)
-    events.sort(key=lambda event: event['seq'])
-    sequences = [event['seq'] for event in events]
-    if sequences != list(range(1, status['last_seq'] + 1)):
-        status.update(state='incomplete', error='committed event sequence is missing or duplicated')
-    if pending_sequences:
-        status.update(state='incomplete', pending_sequences=sorted(pending_sequences),
-                      error='event files are not yet committed by the status snapshot')
+    events = trace_events(directory, status, session_id, instance, values, configured)
     status['selected_identity'] = identity
     status['configured_metadata'] = config.get('development_trace_metadata') if session_id == config.get('development_trace_session') else None
     status['runtime_mode'] = 'unknown'

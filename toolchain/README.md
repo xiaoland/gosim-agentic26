@@ -62,6 +62,8 @@ M3 地址只允许已实测的 `api.minimax.cn` HTTPS 主机、默认或 443 端
 `agent-hidden` 隐藏窗口；两种启动都会先关闭此启动器的旧实例，使用独立数据和随机
 localhost 端口。`.local-state/agent/session.json` 记录 PID、端口、进程起始标记、jail 和源码摘要。
 `agent-status`、`agent-tree`、`agent-logs`、`agent-shot` 使用官方远程接口；
+开发诊断以分段JSONL追加，读取同时兼容旧事件JSON。新启动在原宿主停止后将旧诊断完整迁到私有 `build/traces/archives/`，避免耗尽应用存储条目；存在活跃私有宿主时不迁出。显式指定历史session／instance可读取唯一对应归档，当前选择不采用归档。检查入口为 `python3 tools/test_agent_trace.py`，原生展示与追加行为仍由 `tools/smoke.py` 检查。
+
 日志和树输出会先检查精确凭据。截图是实际运行的 PNG。`agent-stop` 在核对 PID、
 进程起始标记与远程 `/s` 后请求 `/quit`，只管理它自己启动的实例。
 调试时可在记录的端口访问 `/snap?all=1`、`/click?x=…&y=…&wait=1`、`/t?t=…`；

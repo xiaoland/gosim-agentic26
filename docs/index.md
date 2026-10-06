@@ -19,7 +19,7 @@
 
 ## 当前任务
 
-[混合路线与打车价格](../tasks/mixed-routing/packet.md)保存当前优先实现与调查入口。[开发诊断](../tasks/observability/packet.md)保存可观测性／可诊断性实施与验证入口。[首次定位与查询交付](../tasks/query-delivery/packet.md)保存地图省略与UIUX待改善事项，以及既有真实运行缺陷、修复与harness验收入口。[交互地图](../tasks/interactive-map/packet.md)保留0.9.0原语接入、真实图联调和证据边界。[Agent 动态界面与局部字体](../tasks/agent-generated-ui/packet.md)保留0.8.3及此前原生生成、详情和静态图证据。[交互优化与应用联动](../tasks/interaction-integration/packet.md)保留 0.2 实现及实际宿主接口核对。[一句话机场 Navigation Agent](../tasks/capability-boundary/packet.md)保留直接服务接入方案、0.1 用户验收及历史运行证据。已完成的[本地开发与调试闭环](../tasks/local-development/packet.md)和[能力层项目初始化](../tasks/initialization/packet.md)保留各自验证与发布依据。此入口不重复 packet 的进度；后续非简单任务建立或接续对应 packet，并维护有效导航。
+[首次定位与查询交付](../tasks/query-delivery/packet.md)保存当前诊断日志配额与迟到渲染通知修复入口。[混合路线与打车价格](../tasks/mixed-routing/packet.md)保存0.11.0实现与证据边界。[开发诊断](../tasks/observability/packet.md)保存可观测性／可诊断性实施与验证入口。[首次定位与查询交付](../tasks/query-delivery/packet.md)保存地图省略与UIUX待改善事项，以及既有真实运行缺陷、修复与harness验收入口。[交互地图](../tasks/interactive-map/packet.md)保留0.9.0原语接入、真实图联调和证据边界。[Agent 动态界面与局部字体](../tasks/agent-generated-ui/packet.md)保留0.8.3及此前原生生成、详情和静态图证据。[交互优化与应用联动](../tasks/interaction-integration/packet.md)保留 0.2 实现及实际宿主接口核对。[一句话机场 Navigation Agent](../tasks/capability-boundary/packet.md)保留直接服务接入方案、0.1 用户验收及历史运行证据。已完成的[本地开发与调试闭环](../tasks/local-development/packet.md)和[能力层项目初始化](../tasks/initialization/packet.md)保留各自验证与发布依据。此入口不重复 packet 的进度；后续非简单任务建立或接续对应 packet，并维护有效导航。
 
 ## 采用的 SVC 范围
 

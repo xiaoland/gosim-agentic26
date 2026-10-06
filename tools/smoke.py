@@ -134,11 +134,20 @@ start_timeout(1,||terminal_start())
 TRACE_FIXTURE=r'''
 let trace_fixture_started=false
 let trace_failure_started=false
+fn trace_bulk(offset){
+ for i in 20 {trace_emit("burst",{ordinal:offset+i},nil)}
+ if offset+20<300 {start_timeout(0.03,||trace_bulk(offset+20))}
+ else {trace_emit("segment_rotation",{text:read_text("trace-large.txt")},nil) start_timeout(0.05,||trace_emit("segment_rotation",{text:read_text("trace-large.txt")},nil))}
+}
+fn trace_failure_completion(token){
+ if token==run_id && !agent_active {fs.write("trace-failure-complete.json",{run:token phase:phase calls:agent_call_index}.to_json())}
+ else {start_timeout(0.1,||trace_failure_completion(token))}
+}
 fn trace_fixture(){
  if trace_fixture_started {return} trace_fixture_started=true
  start_task()
  let probe={text:"trace-fixture-secret trace-map-secret" value:"before"}
- trace_emit("snapshot_probe",probe,nil) probe.value="after"
+ trace_emit("snapshot_probe",probe,nil) probe.value="after" start_timeout(0.1,||trace_bulk(0))
 }
 fn smoke_request(task,input,schema,token,record,done){
  request_stage(record,"entry")
@@ -154,7 +163,7 @@ fn smoke_request(task,input,schema,token,record,done){
 fn smoke_call(id,name,args){return {id:id type:"function" function:{name:name arguments:args.to_json()}}}
 fn trace_fixture_poll(){
  if read_text("trace-go.json")!=nil {trace_fixture()}
- if trace_state!=nil && !trace_failure_started && read_text("trace-fail-"+trace_state.instance+".json")!=nil {trace_failure_started=true trace_emit("write_failure_probe",{},nil) start_task()}
+ if trace_state!=nil && !trace_failure_started && read_text("trace-fail-"+trace_state.instance+".json")!=nil {trace_failure_started=true trace_state.segment_bytes=1048576 trace_emit("write_failure_probe",{},nil) start_task() let token=run_id start_timeout(0.1,||trace_failure_completion(token))}
  start_timeout(0.1,||trace_fixture_poll())
 }
 start_timeout(0.2,||trace_fixture_poll())
@@ -211,6 +220,46 @@ start_timeout(1,||{
 })
 '''
 
+LATE_FIXTURE=r'''
+let late_started=false let late_checks=[] let late_point=nil let late_token=-1
+fn agent_tool_result(result){
+ if active_tool!=nil && active_tool.function.name=="render_ui" {late_point={diagnostics:result.diagnostics notified:generated_render_notified complete:generated_render_complete}}
+ product_agent_tool_result(result)
+}
+fn agent_pump(token){agent_active=false phase="waiting" answer_text="迟到渲染前的文字兜底" render_content()}
+fn late_after(){
+ late_checks.push({name:"诊断点通知未到不误锁存" passed:late_point.diagnostics=="" && !late_point.notified && !late_point.complete})
+ late_checks.push({name:"终端后真实迟通知恢复原生单一结果" passed:!agent_active && generated_render_complete && generated_render_notified && ui.generated_area.visible() && !ui.final_answer.visible() && ui.generated.find("kept").text()=="Late native result"})
+ fs.write("late-ready.json",{stage:1}.to_json())
+}
+fn late_wrong(){
+ late_checks.push({name:"成功后局部错误不清成功锁存" passed:generated_render_complete && ui.generated_area.visible() && !ui.final_answer.visible() && interface_error!=""})
+ // 故意排队旧同run通知，然后换稿，验证现有generation隔离。
+ let token=run_id let generation=map_generation
+ enqueue_generated_line(0,"{\"action\":\"rendered\"}",0,token,generation)
+ interface_revision+=1 mount_interface("View{show_bg:true draw_bg:{color:#xff0000} Label{text:\"Invalid draw type\"}}",token,interface_revision)
+ answer_text="首次执行失败的文字兜底" render_content()
+ start_timeout(0.03,||{late_checks.push({name:"同run已排队旧通知不能误锁新稿" passed:!generated_render_notified && !generated_render_complete})})
+ start_timeout(1.0,||{
+   late_checks.push({name:"新稿实际类型错误不成功且文字兜底" passed:!generated_render_complete && ui.generated.diagnostics()!="" && !ui.generated_area.visible() && ui.final_answer.visible()})
+   fs.write("harness-smoke.json",{checks:late_checks final:{complete:generated_render_complete notified:generated_render_notified diagnostic:ui.generated.diagnostics() error:interface_error area_visible:ui.generated_area.visible() final_visible:ui.final_answer.visible() answer:answer_text}}.to_json()) fs.write("late-ready.json",{stage:2}.to_json())
+ })
+}
+fn late_tick(){
+ let identity=ui.trace_identity.text().parse_json()
+ if trace_state==nil || identity.instance!=trace_state.instance {start_timeout(0.1,||late_tick()) return}
+ if !late_started && fs.exists("late-start.json") {
+  late_started=true run_id+=1 late_token=run_id agent_active=true phase="running" received_at=time_now()
+  agent_messages=[{role:"user" content:"合成迟通知测试"}]
+  agent_calls=[{id:"late-render" function:{name:"render_ui" arguments:{source:"kept := Label{text:\"Late native result\"} Button{text:\"Local operation error\" on_click: || emit({action:\"runtime_error\" message:\"Local operation failed\"})}"}.to_json()}}]
+  agent_call_index=0 start_timeout(0.01,||agent_execute_next(late_token)) start_timeout(1.2,||late_after())
+ }
+ if fs.exists("late-next.json") && !fs.exists("late-claimed.json") {fs.write("late-claimed.json","{}") late_wrong()}
+ start_timeout(0.1,||late_tick())
+}
+start_timeout(0.2,||late_tick())
+'''
+
 def main():
  sp=importlib.util.spec_from_file_location('agent',ROOT/'tools/agent.py');a=importlib.util.module_from_spec(sp);sp.loader.exec_module(a)
  (ROOT/'build/smoke').mkdir(exist_ok=True,parents=True);w=Path(tempfile.mkdtemp(prefix='navigation-harness-',dir=ROOT/'build/smoke'))
@@ -221,6 +270,7 @@ def main():
  if '--mixed-routing' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn amap_request(','fn product_amap_request(',1)+'\n'+MIXED_FIXTURE
  if '--map-details' in sys.argv:source=original.replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_FIXTURE
  if '--terminal-content' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1)+'\n'+TERMINAL_FIXTURE
+ if '--late-render' in sys.argv:source=original.replace('start_timeout(0.02, || {last_facts','start_timeout(0.75, || {last_facts',1).replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+LATE_FIXTURE
  if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
  env=a.host_env(True);process=None;port=None
  def q(route,**args):return urlopen(f'http://127.0.0.1:{port}/'+route+('?' + urlencode(args) if args else ''),timeout=15).read()
@@ -251,9 +301,9 @@ def main():
   manifest=json.loads((mount/'manifest.json').read_text());manifest['id']='os.agentic26-navigation';(mount/'manifest.json').write_text(json.dumps(manifest));(mount/'main.splash').write_text(source)
   subprocess.run([str(ROOT.parent/'.octosense-agentic26/OctoSense-App-Hub/target/release/hub'),'stamp',str(mount)],stdout=subprocess.DEVNULL,check=True)
   a.init_demo();jail=a.jail_path();a.materialize_skills(ROOT/'bundle',jail);(jail/'private-config.json').write_text('{"location_mode":"demo"}');(jail/'trip.json').write_text('historical fixture ignored');(jail/'agent-run.json').write_text('historical audit ignored')
-  if '--trace' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
-  if '--trace' in sys.argv:
-   d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}')
+  if '--trace' in sys.argv or '--late-render' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
+  if '--trace' in sys.argv or '--late-render' in sys.argv:
+   d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   launch('native');report=None
   if '--trace' in sys.argv:
    time.sleep(2)
@@ -266,8 +316,8 @@ def main():
    (jail/'trace-go.json').write_text('{}')
    sessions=jail/'dev-trace/0123456789abcdef0123456789abcdef'
    for _ in range(150):
-    records=[json.loads(x.read_text()) for x in sessions.glob('vm-*/*-*.json')]
-    if any(x['event']=='query_ended' for x in records):break
+    records=[json.loads(line) for x in sessions.glob('vm-*/segment-*.jsonl') if x.is_file() for line in x.read_text().splitlines()]
+    if any(x['event']=='query_ended' for x in records) and sum(x['event']=='burst' for x in records)>=300 and sum(x['event']=='segment_rotation' for x in records)>=2:break
     time.sleep(.1)
    assert records and any(x['event']=='query_ended' for x in records),str(w/'native.log')
    instances=sorted(x.name for x in sessions.glob('vm-*') if x.is_dir())
@@ -277,11 +327,11 @@ def main():
    assert len(markers)==1,markers
    current=markers[0]['instance']
    for _ in range(100):
-    events=sorted((json.loads(x.read_text()) for x in (sessions/current).glob('*-*.json') if x.is_file()),key=lambda x:x['seq'])
+    events=sorted((json.loads(line) for x in (sessions/current).glob('segment-*.jsonl') if x.is_file() for line in x.read_text().splitlines()),key=lambda x:x['seq'])
     if any(x['event']=='query_ended' for x in events):break
     time.sleep(.1)
    time.sleep(.3)
-   events=sorted((json.loads(x.read_text()) for x in (sessions/current).glob('*-*.json') if x.is_file()),key=lambda x:x['seq'])
+   events=sorted((json.loads(line) for x in (sessions/current).glob('segment-*.jsonl') if x.is_file() for line in x.read_text().splitlines()),key=lambda x:x['seq'])
    # Effective-visible marker identifies the currently drawn Android root.
    assert len({x['seq'] for x in events})==len(events)
    bodies=[json.loads(json.loads(x['data'])['body']) for x in events if x['event']=='model_request']
@@ -292,21 +342,23 @@ def main():
    probe=next(json.loads(x['data']) for x in events if x['event']=='snapshot_probe');assert probe['value']=='before' and probe['text']=='[REDACTED] [REDACTED]'
    a.SESSION.write_text(json.dumps({'pid':process.pid,'process_stamp':a.process_stamp(process.pid),'port':port,'trace_session':'0123456789abcdef0123456789abcdef','log':str(w/'native.log')}))
    selected=a.read_trace();assert selected[1]==current
-   for file in sessions.rglob('*.json'):
+   for file in list(sessions.rglob('*.json'))+list(sessions.rglob('*.jsonl')):
     assert 'trace-fixture-secret' not in file.read_text() and 'trace-map-secret' not in file.read_text()
    last=events[-1]['seq'];run=events[-1]['run']
-   (sessions/current/f'{run}-{last+1}.json').mkdir()
+   segments=list((sessions/current).glob('segment-*.jsonl'));assert len(segments)>=2 and all(x.stat().st_size<=1048576 for x in segments)
+   assert sum(x['event']=='burst' for x in events)>=300
+   assert len(list(jail.rglob('*')))<40
+   status=json.loads((sessions/current/'status.json').read_text());(sessions/current/f'segment-{status["segments"]+1:06}.jsonl').mkdir()
    (jail/('trace-fail-'+current+'.json')).write_text('{}')
    for _ in range(100):
     status=json.loads((sessions/current/'status.json').read_text())
     rows=json.loads(q('snap',q='trace_identity'))['s']
     marked=json.loads(next(x['t'] for x in rows if x.get('i')=='trace_identity'))
     if status['state']=='incomplete' and marked['run']>run:
-     later=[json.loads(x.read_text()) for x in (sessions/current).glob('*-*.json') if x.is_file()]
-     if any(x['event']=='query_ended' and x['run']>run for x in later):break
+     if (jail/'trace-failure-complete.json').exists():break
     time.sleep(.1)
    assert status['state']=='incomplete' and marked['state']=='incomplete'
-   assert any(x['event']=='query_ended' and x['run']>run for x in later)
+   assert json.loads((jail/'trace-failure-complete.json').read_text())['phase']=='waiting'
    (w/'trace-android.png').write_bytes(q('g',raw=1))
    stop();before=sorted(str(x.relative_to(sessions)) for x in sessions.rglob('*'))
    (jail/'private-config.json').write_text('{"location_mode":"demo"}')
@@ -315,8 +367,32 @@ def main():
    assert not any(x.get('i')=='trace_identity' for x in json.loads(q('snap',q='trace_identity'))['s'])
    assert any(x.get('t')=='开发记录验证，实际原生界面' for x in json.loads(q('snap'))['s'])
    assert 'script time budget exceeded' not in (w/'native.log').read_text()+(w/'trace-off.log').read_text()
-   report={'checks':7,'instances':instances,'selected_current_instance':current,'events':len(events),'mode':'Android','synthetic_model':True,'real_native_controls':True,'source_sha256':hashlib.sha256(original.encode()).hexdigest(),'path':str(sessions),'limits':'No real HTTP/provider request; synthetic response uses actual harness/render hooks.'}
+   report={'checks':9,'instances':instances,'selected_current_instance':current,'events':len(events),'mode':'Android','synthetic_model':True,'real_native_controls':True,'source_sha256':hashlib.sha256(original.encode()).hexdigest(),'path':str(sessions),'limits':'No real HTTP/provider request; synthetic response uses actual harness/render hooks.'}
    (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print('PASS: trace '+str(w/'report.json'));return
+  if '--late-render' in sys.argv:
+   time.sleep(5)
+   q('k',c='Space',cmd=1,wait=1)
+   for ch in 'android':q('k',c='Key'+ch.upper(),wait=1)
+   q('k',c='enter',wait=1);time.sleep(1)
+   q('m',k='down',x=200,y=300,wait=1)
+   for y in range(320,570,25):q('m',k='move',x=200,y=y,wait=1)
+   q('m',k='up',x=200,y=570,wait=1);time.sleep(.8);q('t',t='Navigation',wait=1);q('k',c='enter',wait=1);time.sleep(1)
+   (jail/'late-start.json').write_text('{}')
+   for _ in range(70):
+    if (jail/'late-ready.json').exists():break
+    time.sleep(.1)
+   assert json.loads((jail/'late-ready.json').read_text())['stage']==1
+   rows=json.loads(q('snap'))['s'];(w/'late-snapshot.json').write_text(json.dumps(rows));assert any(x.get('t')=='Late native result' and x['r'][3]>0 for x in rows)
+   (w/'late-success.png').write_bytes(q('g',raw=1))
+   r=next(x['r'] for x in rows if x.get('t')=='Local operation error');q('click',x=r[0]+r[2]/2,y=r[1]+r[3]/2,wait=1);time.sleep(.3)
+   (w/'late-local-error.png').write_bytes(q('g',raw=1));(jail/'late-next.json').write_text('{}')
+   for _ in range(70):
+    if (jail/'harness-smoke.json').exists():break
+    time.sleep(.1)
+   report=json.loads((jail/'harness-smoke.json').read_text());assert all(x['passed'] for x in report['checks']),report
+   (w/'late-first-error.png').write_bytes(q('g',raw=1))
+   report.update(mode='Android',product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True)
+   (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print('PASS: late render '+str(w/'report.json'));return
   if '--terminal-content' in sys.argv:
    time.sleep(3)
    q('k',c='Space',cmd=1,wait=1)
