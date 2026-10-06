@@ -1,0 +1,15 @@
+{
+  "main_sha256": "d65188d4a799646577bb3eaf9bb40ca2818013980d58847b62d995e66592d3d6",
+  "change": "sources_current projects the current validity of the location in this run; no file/directory/raw consistency reread during interface_facts",
+  "clock_semantics": "position sampled-time/quality and Route TTL/current deadline assessment remain computed at current time",
+  "active_source_tools": "read_source_tool/calendar_tool/notes_tool/position_tool unchanged; active calls still read and validate sources",
+  "checks": 8,
+  "actual_route_count": 12,
+  "source_directory_removed": true,
+  "projection_read_count": 0,
+  "projection_elapsed_ms": 13.75889778137207,
+  "model_called": false,
+  "external_services_called": false,
+  "all_own_instances_closed": true,
+  "full_normal_task_acceptance_passed": false
+}

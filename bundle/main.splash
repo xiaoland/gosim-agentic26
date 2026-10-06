@@ -590,13 +590,7 @@ fn remember_source(path, raw){
     source_snapshots.push({path: path raw: raw kind: "file"})
 }
 fn sources_current(){
-    for snapshot in source_snapshots {
-        if snapshot.kind == "directory" {
-            if !fs.exists(snapshot.path) || fs.list(snapshot.path).to_json() != snapshot.raw { return false }
-        } elif snapshot.kind == "location" {
-            if position_record == nil || position_record.to_json() != snapshot.raw { return false }
-        } elif read_text(snapshot.path) != snapshot.raw { return false }
-    }
+    // 来源工具负责读取与校验；UI投影使用本轮已取得资料，不后台重读文件。
     return position_current(position_record)
 }
 fn render_content(){

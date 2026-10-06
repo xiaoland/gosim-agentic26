@@ -4,11 +4,11 @@
 
 用户转达赛事提醒更新最新OctoSense、阅读README了解App Hub提交；并明确“既然完整验收未通过，那就继续开发、修正”。授权必要应用、运行时、工具链与文档修改、隔离升级实验及在线验收。用户23:08进一步明确“授权你自由推送”，要求Android样式演示视频、README和必要App Hub交付，授权本次源码／视频提交推送、固定发布版本及按官方流程提交审核；不自行创建或公开签名私钥。临时模拟定位和充足M3在线验收授权继续有效。
 
-当前应用mainc8d192d6…／0.13.0，最终截图／listing后正式check／build／doctor通过，sourcee52165cd…／binary51087e50…，正式check／build／doctor通过。包含片段结构诊断、真实Route方式标签／地图目录、当前目录按需读取、明确目标的show_block(target_id)／hide_self()和首render私有取证。最新唯一正常Android样式demo-first-render-evidence已结束14M3，五块语法错误由同一循环自修，双候选文字与地图目标、三paths单页与八paths两页、真实PNG、拖动刷新、返回保列表均通过；七Route取证文件完整。证据见本包末尾及ignored build/research/runtime-upgrade/e2e/demo-first-render-evidence/。
+当前应用main d65188d4…／0.13.0已冻结。最后正常在线轮滴滴JSON询价及报价附加已完成，首次渲染因三份来源重读331.798ms超过64ms预算中止。来源投影已改为本次快照，仅继续检查当前定位有效性；主动来源读取不变。12条实际Route回归8项通过，移走资料目录后首次事实构造13.759ms、读取为零，原生Android样式实际显示、compare及定位／Route TTL过期检查均通过。未在此修正后再跑完整模型任务，不宣称完整混合任务通过。
 
-完整任务仍未通过：本轮无extend，未证明混合接驳；静态摘要与deadline／35min事实不符；第一次失败的__document部分内容混入随后五块。稳定应用owner接续既有advisor判断失败块生命周期最小修及模型技能／工具语义改进，不用业务UIvalidator、数值替换、固定工具顺序或模板掩盖。预算问题先前da93真实首render发生hard，本轮真实首render10.485ms未复现，native budget age未观测，不能称根因修复。官方原版安装兼容仍独立未通过。
+此前14M3正常轮已通过双候选详情、三paths单页与八paths两页、真实PNG、拖动刷新与返回，但无公共交通与打车接驳检索且静态叙述有误。失败块生命周期已按complete状态修正，官方原版安装兼容仍未通过。固定发布源码、视频与Hub审核提交由root收尾。
 
-统一Route定向二十一项通过，来源与真实新旧报价证据见[路线任务](../route-identity/packet.md)。64ms硬预算失败已在da93首render真实复现，此前正常轮没有复现，当前根因仍未定位，不宣称修复。最新版官方原版的核心脚本接口与定位仍不齐，隔离寻址补丁通过不等于App Hub可安装。具体证据与已执行修正按下文接续，不能继续以接口检查替代完整验收。
+统一Route定向二十一项通过，来源与真实新旧报价证据见[路线任务](../route-identity/packet.md)。64ms硬预算失败已在da93首render真实复现，此前正常轮没有复现，最终来源重读根因已有针对修复与原生回归，不宣称完整任务通过。最新版官方原版的核心脚本接口与定位仍不齐，隔离寻址补丁通过不等于App Hub可安装。具体证据与已执行修正按下文接续，不能继续以接口检查替代完整验收。
 
 原应用owner接续当前几何目录与正常在线，原宿主owner负责必要的正式封包交接；最新版隔离能力调查已完成有界证据，未整体迁移。预算调查不凭耗尽IP断言全部耗时根因，不提高预算／加看门狗掩盖，不盲缓存全状态，不把模拟位置冒称实时位置。各owner保完整私有请求／响应／工具／DSL／诊断与自有实例清理，只操作本任务实例。
 
@@ -127,3 +127,8 @@ da93正常在线新失败：10M3第10响应HTTP200完整toolcalls，render_summa
 23:08用户交付授权改变优先级：无时间人工验收，授权自由推送、制作Android样式视频并更新README、按官方说明必要AppHub交付。视频已制作96.45s／1080p／H264 AAC／2.5MB，实际旧已通过14M3场景截图剪辑、中文旁白、八镜头、字幕；root查看contact sheet及两张地图实际截图，声音／完整decode由视频owner验证；明确demo位置／日历／笔记、真实服务、非真机、条件结果，不虚称混合已测或最新稿全面通过。媒体归demo/，不放bundle；包截图改为实际两页地图并重新stamp。20a9正常语义轮7M3／17toolcall16return后quote未完成、无render／extend，独立trace timer在line.to_bytes().len耗预算并缺seq144；不能归因业务回调硬停。最终c8d192d6仅机械补日志nativeUTF8 len（三VM checks）与Didi非streaming Accept:application/json，真实HTTP200JSON0.589s及实际应用七车型回调通过；无新模型整轮，不宣称此前pending已完整重演或混合任务完成。所有自有实例关闭。公开参赛交付指南目前允许公开源码与可运行宿主扩展材料，不要求等待Hub上架；外部维护者录入／评奖不由本机预检证明。
 
 最终初赛源码封包：mainc8d192d6…／sourcee52165cd…／binary51087e50…，包摘要cdce323e…；两真实分页截图32文件已重盖摘要，check（含最新catalog continuity）／build／doctor通过。hub scan生成七题review packet，不冒称外部reviewer通过；原始packet仍ignored build。公开demo含96s视频／SRT／旁白／真实核验JSON／完整本地gate输出，无私有rawtrace。待提交51文件凭据原值／编码值扫描0匹配，不含.env／build／.local-state。源码含已完成技能标准化作为运行依赖，保持侧改动。用户新授权下开始当前源码与媒体commit／push及固定版本交付；外部Hub仍需维护者人工审查。
+
+
+最终来源投影修复证据：build/research/runtime-upgrade/source-projection-final-safe.json；8项回归见build/smoke/navigation-harness-o_c7si8o/report.json。所有自有实例已关闭。
+
+最终封包check／build／doctor通过：source a9645a7588e0ddcb89c5940dcbd2c494d4eded13cb6713bba585ee528f00577b，binary 0daef8b826b0284b5afaf6a3f6db6d7f2082037cd4ffc2cdcb082f3861a1d906，bundle 3579572593d669ab4a2d9b05904750471cd4b173b9370d139ed1dd08c94a8619。最新catalog continuity check通过，scan七题完成作者自评，不冒称独立review。公开最终来源投影回归已脱除私有路径，归demo/source-projection-check.json。

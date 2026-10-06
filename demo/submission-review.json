@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "app_id": "agentic26-navigation",
+  "version": "0.13.0",
+  "publisher": "xiaoland",
+  "signature": "unsigned first submission",
+  "review_basis": "Author self-review; not an independent hub reviewer or admission decision",
+  "stock_installation_verified": false,
+  "answers": [
+    {
+      "number": 1,
+      "question": "功能与说明是否一致",
+      "answer": "这是出行能力层原型。main.splash中的agent_step/execute_agent_tool组织真实function-calling，query_route/extend_route/attach_quote保管Route。演示证明详情、报价派生和地图交互，不证明全局最优、保证准时或本轮混合检索成功；listing明确未完成项。"
+    },
+    {
+      "number": 2,
+      "question": "平台和分类是否合适",
+      "answer": "travel；实际验证macOS Apple Silicon固定宿主的Android样式。未声明Android真机或官方原版直接安装成功。"
+    },
+    {
+      "number": 3,
+      "question": "权限和网络是否必要",
+      "answer": "location取得真实位置；storage用于私有配置、来源和几何及开发诊断；net只到api.minimax.cn、restapi.amap.com、mcp.didichuxing.com，分别用于M3、高德和正式滴滴询价。演示资料为独立来源；账户密钥不放bundle，不收集密码或验证码。"
+    },
+    {
+      "number": 4,
+      "question": "界面是否冒充系统或支付",
+      "answer": "没有自绘登录/支付/下单授权界面。系统定位授权由宿主与CoreLocation提供，询价不下单；供应商品牌用于标注数据来源。"
+    },
+    {
+      "number": 5,
+      "question": "源码是否有面向助手的指令",
+      "answer": "有：应用明确运行自己的M3工具循环，源码meta与assets/skills说明本应用的工具和Splash语法，不伪装用户内容或系统授权，不驱动外部助手账户。"
+    },
+    {
+      "number": 6,
+      "question": "是否有辱骂或针对个人的内容",
+      "answer": "源码、资料和演示未发现此类内容。"
+    },
+    {
+      "number": 7,
+      "question": "审核路径与理由",
+      "answer": "human-review。本地锁定工具链check/build/doctor和真实交互证据已具备，但官方原版缺少本应用依赖的原生接口，字体许可文档gate另有本地窄补丁；最终完整混合任务/生成语义尚未通过。请先审查宿主扩展交付路径，不将本地gate pass当作官方商店录入。"
+    }
+  ]
+}
