@@ -354,11 +354,13 @@ fn map_slot_current(slot, token, request, target_id){
     return token == run_id && slot.generation == map_generation && map_slots[slot.id] == slot && slot.request == request && route_get(map_candidate(slot.target), "id") == target_id
 }
 fn register_map(widget, target, status_widget, interactive){register_map_paths(widget,target,status_widget,interactive,nil)}
-fn register_map_paths(widget, target, status_widget, interactive, indices){
-    let slot = map_slots[widget]
+fn register_map_paths(widget,target,status_widget,interactive,indices){register_map_block(widget,target,status_widget,interactive,indices,"__document")}
+fn register_map_block(widget,target,status_widget,interactive,indices,block_id){
+    let key=block_map_key(block_id,widget)
+    let slot = map_slots[key]
     if slot == nil || slot.target != target || slot.interactive != (interactive == true) || route_get(slot,"path_indices").to_json()!=indices.to_json() {
-        slot = {id: widget target: target path_indices:indices interactive: interactive == true camera: nil generation: map_generation request: 0 state: "new" status: "地图待加载" bytes: nil target_id: "" caption: "" handle: nil handle_generation: -1 loaded_generation: -1 loaded_request: -1 status_widget: status_widget}
-        map_slots[widget] = slot
+        slot = {id:key widget:widget block_id:block_id target: target path_indices:indices interactive: interactive == true camera: nil generation: map_generation request: 0 state: "new" status: "地图待加载" bytes: nil target_id: "" caption: "" handle: nil handle_generation: -1 loaded_generation: -1 loaded_request: -1 status_widget: status_widget}
+        map_slots[key] = slot
     }
     slot.status_widget = status_widget
     trace_map("map_registered",slot)
@@ -397,7 +399,7 @@ fn fit_map_slot(slot, candidate){
         if point.lon<bounds.west {bounds.west=point.lon} if point.lon>bounds.east {bounds.east=point.lon}
         if point.lat<bounds.south {bounds.south=point.lat} if point.lat>bounds.north {bounds.north=point.lat}
     }
-    try {ui.generated.find(slot.id).set_visible(true) ui.generated.find(slot.id).fit_bounds(bounds.west,bounds.south,bounds.east,bounds.north)}
+    try {map_widget(slot).set_visible(true) map_widget(slot).fit_bounds(bounds.west,bounds.south,bounds.east,bounds.north)}
     {map_slot_fail(slot,"交互地图控件初始化失败")}
 }
 fn map_camera_changed(event){
@@ -581,9 +583,9 @@ fn render_content(){
     ui.feedback.render() ui.control.render() ui.answer_area.render()
     if !generated_area_ready {ui.generated_area.render() generated_area_ready = true}
     ui.generated_area.set_visible(generated_active && (answer_text == "" || generated_render_complete))
-    try {
-        if generated_active {ui.generated.set_visible(answer_text == "" || generated_render_complete)}
-    } {}
+    let overlay_open=false for block in overlay_blocks {if block.visible && block.installed {overlay_open=true}}
+    ui.content.set_visible(!overlay_open)
+    for block in ui_blocks {set_block_visibility(block)}
     start_timeout(0.01, || {refresh_generated_facts() return true})
     return true
 }
@@ -1779,7 +1781,7 @@ fn agent_tools(){let tools = [
  tool("compare_routes","确定性重新计算所有当前候选的时间、费用与原截止是否成立，返回已查范围；不自动选方案/结束。",{},[])
  tool("get_route","按实际候选ID取得完整分段、费用、来源与当前校验；不再次查询供应商。",{id:{type:"string"}},["id"])
  tool("get_route_graph","读取本轮全部真实接驳节点和已取得前缀，不查询供应商。",{},[])
- tool("render_ui","替换本次整稿为原生Splash源码并返回实际执行诊断。success只表示无已报告执行错误，不代表内容目标完成。source在View.on_render中执行；实际API与语法可read_skill(native_ui)。",{source:{type:"string"}},["source"])
+ tool("render_ui","提交任意原生Splash源码。source整稿替换；blocks按id追加或替换指定区块，其余区块状态保留。普通区块自然高度，overlay是可显示/隐藏的有限视口。返回各块真实执行诊断；success不代表内容目标完成。",{source:{type:"string"} blocks:{type:"array" items:{type:"object" properties:{id:{type:"string"} source:{type:"string"} overlay:{type:"boolean"} visible:{type:"boolean"} height:{type:"number"}} required:["id" "source"]}}},[])
  ]
  if location_mode()=="demo" {
 tools.push(tool("read_calendar","读取本应用明确标注的模拟日历；返回记录和来源。",{},[]))
@@ -1899,14 +1901,16 @@ fn agent_execute_next(token){
   elif name=="get_route" {let candidate=ui_route(p.id) if candidate==nil {agent_tool_result({success:false error:"路线ID不在本轮候选中"})} else {map_path_catalog(candidate) agent_tool_result({success:true route:interface_route_facts(candidate,route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")))})}}
   elif name=="get_route_graph" {prepare_route_graph() agent_tool_result({success:true graph:route_graph_facts()})}
   elif name=="render_ui" {
-    interface_revision+=1 let revision=interface_revision mount_interface(p.source,token,revision)
-    start_timeout(0.25,||{if current_task(token) && active_tool==call {let diagnostic=ui.generated.diagnostics() interface_error=diagnostic
-    if diagnostic=="" && generated_render_notified {generated_render_complete=true}
-    let render_finished_at=time_now()
-    let result={success:diagnostic=="" diagnostics:diagnostic notified:generated_render_notified viewport:ui_viewport}
-    agent_tool_result(result)
-    start_timeout(0.01,||trace_emit_run("render_result",{diagnostics:result.diagnostics notified:result.notified viewport:result.viewport occurred_at:render_finished_at},call.id,token))
-    start_timeout(0.01,||{if token==run_id {render_content()}})}})
+    interface_revision+=1 let revision=interface_revision
+    let changed=mount_ui_blocks(p,token,revision)
+    if changed==nil {agent_tool_result({success:false error:interface_error}) return}
+    start_timeout(0.25,||{if current_task(token) && active_tool==call {
+      let result=render_ui_result(changed)
+      let finished_at=time_now()
+      agent_tool_result(result)
+      start_timeout(0.01,||trace_emit_run("render_result",{blocks:result.blocks occurred_at:finished_at},call.id,token))
+      start_timeout(0.01,||{if token==run_id {render_content()}})
+    }})
   }
   else {agent_tool_result({success:false error:"未知工具："+name})}
  } {agent_tool_result({success:false error:"工具参数或数据执行错误" status:runtime_status})}
@@ -1914,6 +1918,11 @@ fn agent_execute_next(token){
 
 let runtime_status = ""
 let generated_source = ""
+let ui_blocks=[]
+let inline_blocks=[]
+let overlay_blocks=[]
+let ui_facts_json=""
+let ui_facts_cached_revision=-1
 let generated_area_ready = false
 let generated_active = false
 let generated_render_complete = false
@@ -1925,6 +1934,7 @@ let interface_inflight = false
 let interface_error = ""
 let interface_requests = []
 let ui_viewport = nil
+let ui_overlay_top=0
 // UI状态变化才复制大快照；轮询只读小修订号，避免每100ms重新分配整串。
 let ui_facts_revision=0
 let ui_facts_written_revision=-1
@@ -1937,16 +1947,35 @@ fn request_failed(record,text){
  start_timeout(0.01,||trace_emit_run("transport_error",{step:record.step state:record.state error:text occurred_at:failed_at},nil,token))
  show_status(text)
 }
-fn stop_interface(){
-    interface_revision += 1 interface_inflight = false generated_active = false generated_render_complete = false generated_render_notified = false generated_source = ""
-    invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0
-    try { ui.generated.set_text("") ui.generated.set_visible(false) } {}
-    render_content()
+fn block_inner_height(block){if block.height!=nil {return Fill} if block.document {return Fill} return Fit}
+fn block_height(block){
+ if block.height!=nil {return block.height}
+ if block.overlay || block.document {if ui_viewport!=nil {return ui_viewport.height} return Fill}
+ return Fit
+}
+fn set_block_visibility(block){
+ if block.handle==nil {return true}
+ let visible=block.visible if answer_text!="" && !generated_render_complete {visible=false}
+ block.container.set_visible(visible) return true
+}
+fn block_by_id(id){for block in ui_blocks {if block.id==id {return block}} return nil}
+fn sync_block_state(){
+ generated_active=ui_blocks.len()>0 generated_render_complete=false generated_render_notified=false interface_error=""
+ for block in ui_blocks {
+  if block.complete {generated_render_complete=true}
+  if block.notified {generated_render_notified=true}
+  if block.error!="" {interface_error+=block.id+": "+block.error+"\n"}
+ }
 }
 fn clear_generated(){
-    generated_active = false generated_render_complete = false generated_render_notified = false generated_source = "" ui_render_generation += 1 invalidate_map() map_slots = {} mailbox_seen = "" mailbox_lines = 0
-    try { ui.generated.set_text("") ui.generated.set_visible(false) } {}
+ for block in ui_blocks {try {block.handle.set_text("") block.container.set_visible(false)} {}}
+ ui_blocks=[] inline_blocks=[] overlay_blocks=[] generated_source=""
+ generated_active=false generated_render_complete=false generated_render_notified=false
+ ui_render_generation+=1 invalidate_map() map_slots={} mailbox_seen="" mailbox_lines=0
+ ui_facts_cached_revision=-1 ui_facts_written_revision=-1
+ ui.generated_area.render() ui.block_overlay.render()
 }
+fn stop_interface(){interface_revision+=1 interface_inflight=false clear_generated() render_content()}
 fn invalidate_interface(){ stop_interface() clear_generated() interface_error = "" }
 fn shell_busy(){ return agent_active || phase == "picking" }
 fn shell_action(){ if shell_busy(){cancel_task()} else {query_task()} }
@@ -1978,7 +2007,7 @@ fn interface_route_facts(candidate, check){
         request_bound: candidate.request_bound origin_complete: candidate.origin_complete endpoint_complete: candidate.endpoint_complete endpoint_gap_m: candidate.endpoint_gap_m map_paths:route_get(candidate,"map_paths_cache") segments: segments}
 }
 fn interface_facts(){
-    try {let area = ui.generated.rect() ui_viewport = if area != nil && area.width > 0 && area.height > 0 {area} else {ui.content.rect()}} {}
+    try {let area = ui.content.rect() if area != nil && area.width>0 && area.height>0 {ui_viewport=area ui_overlay_top=area.y-ui.sentence.rect().y+12}} {}
     let routes = [] let source_valid = sources_current() let sources = []
     for candidate in candidates {
         let check = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
@@ -1989,114 +2018,164 @@ fn interface_facts(){
     return {route_graph:route_graph_facts() taxi_quotes:didi_quotes taxi_quote_places:didi_places phase: phase status: runtime_status error: interface_error now: time_now() received_at: received_at arrive_by: arrive_by
         origin_available: position_record != nil destination_available: destination_record != nil limits_available: user_limits != nil
         origin: position_record destination: destination_record limits: user_limits source_label: source_label() sources: sources sources_current: source_valid answer: answer_text
-        comparison: if candidates.len() > 0 { comparison_summary() } else { "" } routes: routes viewed_route_id: viewed_route_id maps_available: user_limits != nil viewport: ui_viewport rendering_environment: {scroll:"viewport表示可见区域，不是内容高度上限；父区域承载运行反馈，子ScrollYView中的View/Fit内容可自然增长并滚动" label_default:"宽度Fill、高度Fit、Flow.Right wrap:true；可显式覆盖原生属性"}
+        comparison: if candidates.len() > 0 { comparison_summary() } else { "" } routes: routes viewed_route_id: viewed_route_id maps_available: user_limits != nil viewport: ui_viewport rendering_environment: {scroll:"viewport表示可见区域，不是内容高度上限；普通区块按Fit自然增长并在父ScrollYView滚动，overlay和整稿source有独立有限视口" label_default:"宽度Fill、高度Fit、Flow.Right wrap:true；可显式覆盖原生属性"}
         places: picker_pois preview_place: picker_preview_poi place_status: picker_status
         semantics: "点路线只查看；未知金额/等待不等于零。"}
 }
 fn generated_context(){
-    return "let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\nlet Label = Label{width: Fill height: Fit flow: Flow.Right{wrap:true} draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nlet mailbox_buffer = \"\"\nfn emit(event){mailbox_buffer += event.to_json() + \"\\n\" ui.mailbox.set_text(mailbox_buffer)}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(){let value = ui.fact_revision.text() if value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} start_timeout(0.1, || refresh())}\nstart_timeout(0.02, || {last_facts = ui.fact_revision.text() ui.body.render() emit({action:\"rendered\"}) start_timeout(0.1, || refresh())})\n"
+    return "let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\nlet Label = Label{width: Fill height: Fit flow: Flow.Right{wrap:true} draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nlet mailbox_buffer = \"\"\nfn emit(event){event.block_id=block_id event.block_revision=block_revision mailbox_buffer += event.to_json() + \"\\n\" ui.mailbox.set_text(mailbox_buffer)}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(){let value = ui.fact_revision.text() if value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} start_timeout(0.1, || refresh())}\nstart_timeout(0.02, || {last_facts = ui.fact_revision.text() ui.body.render() emit({action:\"rendered\"}) start_timeout(0.1, || refresh())})\n"
 }
-fn mount_interface(body, token, revision){
-    if token != run_id || revision != interface_revision { return }
-    clear_generated()
-    trace_last_diagnostic = ""
-    let render_call_id=if active_tool!=nil {active_tool.id} else {nil}
-    let render_source_at=time_now()
-    start_timeout(0.01,||trace_emit_run("render_source",{source:body revision:revision occurred_at:render_source_at},render_call_id,token))
-    interface_run = token interface_inflight = false interface_error = ""
-    let context = generated_context()
-    let source = context + "\nView{width: Fill height: Fill flow: Down\nmailbox := Label{visible:false text:\"\"}\nfact_state := Label{visible:false text:" + interface_facts().to_json().to_json() + "}\nfact_revision := Label{visible:false text:\"" + ui_facts_revision + "\"}\nscroll := ScrollYView{width: Fill height: Fill flow: Down\nbody := View{width: Fill height: Fit flow: Down on_render: || {\nlet facts = snapshot()\n" + body + "\n}}\n}\n}"
-    ui_facts_written_revision=ui_facts_revision
-    generated_active = true
-    ui.generated_area.render()
-    start_timeout(0.05,||{
-        if token != run_id || revision != interface_revision {return}
-        generated_source = source
-        ui.generated.diagnostics()
-        try { ui.generated.set_text(source) } { interface_error = "生成的Splash执行失败；可重新查询生成" }
-    })
-    render_content()
+fn facts_json(){
+ if ui_facts_cached_revision!=ui_facts_revision {ui_facts_json=interface_facts().to_json() ui_facts_cached_revision=ui_facts_revision}
+ return ui_facts_json
 }
-
-
+fn block_source(block,body){
+ let finite=block.overlay || block.document
+ let context="let block_id="+block.id.to_json()+"\nlet block_revision="+block.revision+"\n"+generated_context()
+ let height_text=if finite {"Fill"} else {"Fit"}
+ let head=context+"\nView{width:Fill height:"+height_text+" flow:Down\nmailbox := Label{visible:false text:\"\"}\nfact_state := Label{visible:false text:"+facts_json().to_json()+"}\nfact_revision := Label{visible:false text:"+(""+ui_facts_revision).to_json()+"}\n"
+ if finite {head+="scroll := ScrollYView{width:Fill height:Fill flow:Down clip_x:true clip_y:true\n"}
+ let tail=if finite {"}\n}"} else {"}"}
+ return head+"body := View{width:Fill height:Fit flow:Down on_render:||{let facts=snapshot()\n"+body+"\n}}\n"+tail
+}
+fn render_ui_result(changed){
+ let results=[] let success=true
+ for block in changed {
+  let diagnostic="区块尚未安装"
+  if block.installed {diagnostic=block.handle.diagnostics()}
+  block.error=diagnostic
+  if diagnostic=="" && block.notified {block.complete=true}
+  if diagnostic!="" {success=false}
+  results.push({id:block.id revision:block.revision diagnostics:diagnostic notified:block.notified})
+ }
+ sync_block_state()
+ return {success:success blocks:results diagnostics:interface_error notified:generated_render_notified viewport:ui_viewport}
+}
+fn mount_interface(body,token,revision){return mount_ui_blocks({source:body},token,revision)}
+fn mount_ui_blocks(params,token,revision){
+ if token!=run_id || revision!=interface_revision {return []}
+ let submissions=route_get(params,"blocks") let document=route_get(params,"source")!=nil
+ if document {clear_generated() submissions=[{id:"__document" source:params.source}]}
+ if !submissions.is_array() {interface_error="render_ui需要source或blocks" return nil}
+ let changed=[] interface_run=token interface_inflight=false
+ for input in submissions {let existing=block_by_id(input.id) if existing!=nil && route_get(input,"overlay")!=nil && existing.overlay!=(input.overlay==true) {interface_error="已存在区块的overlay位置不变；请使用新id" return nil}}
+ for input in submissions {
+  let block=block_by_id(input.id)
+  let overlay=route_get(input,"overlay")==true
+  if block==nil {
+   block={id:input.id revision:0 body:"" handle:nil overlay:overlay document:document visible:route_get(input,"visible")!=false height:route_get(input,"height") installed:false notified:false complete:false error:"" mailbox_seen:"" mailbox_lines:0 written_revision:-1}
+   if overlay {block.index=overlay_blocks.len() overlay_blocks.push(block)} else {block.index=inline_blocks.len() inline_blocks.push(block)}
+   ui_blocks.push(block)
+  } else {
+   if route_get(input,"visible")!=nil {block.visible=input.visible}
+   if route_get(input,"height")!=nil {block.height=input.height}
+   try {block.handle.set_text("")} {}
+   let kept={} for key slot in map_slots {if route_get(slot,"block_id")!=block.id {kept[key]=slot}} map_slots=kept
+  }
+  block.revision+=1 block.notified=false block.complete=false block.error="" block.mailbox_seen="" block.mailbox_lines=0 block.installed=false
+  block.source=block_source(block,input.source) block.source_revision=ui_facts_revision changed.push(block)
+ }
+ sync_block_state()
+ // ScriptReapply retains the unmodified child WidgetRefs and their Splash VMs.
+ ui.generated_area.render_style() ui.block_overlay.render_style()
+ let render_call_id=if active_tool!=nil {active_tool.id} else {nil}
+ for block in changed {install_block_later(block,token,block.revision,render_call_id)}
+ render_content()
+ return changed
+}
+fn install_block_later(block,token,revision,call_id){
+ start_timeout(0.05,||{
+  if token!=run_id || block_by_id(block.id)!=block || revision!=block.revision {return}
+  block.container=if block.overlay {ui.block_overlay.child(block.index)} else {ui.generated_area.child(block.index)}
+  block.handle=block.container.child(0)
+  block.handle.diagnostics()
+  block.body=block.source
+  try {block.handle.set_text(block.source) block.container.set_visible(block.visible) block.installed=true block.written_revision=block.source_revision}
+  {block.error="生成区块执行失败"}
+  trace_emit_run("render_source",{block_id:block.id revision:revision source:block.source},call_id,token)
+ })
+}
 fn refresh_generated_facts(){
-    if !generated_active || ui_facts_written_revision==ui_facts_revision { return true }
-    try { ui.generated.fact_state.set_text(interface_facts().to_json()) ui.generated.fact_revision.set_text(""+ui_facts_revision) ui_facts_written_revision=ui_facts_revision }
-    { interface_error = "生成界面更新失败；可重新查询生成" ui.feedback.render() }
-    return true
-}
-fn generated_rendered(){
-    if !generated_active || interface_run!=run_id {return true}
-    generated_render_notified = true
-    // 通知可能晚于render_ui诊断点或终端回复；以当前稿实际诊断补齐成功锁存。
-    let diagnostic=ui.generated.diagnostics()
-    if diagnostic!=interface_error {ui_facts_revision+=1}
-    if diagnostic=="" {generated_render_complete=true interface_error=""}
-    else {interface_error=diagnostic}
-    trace_emit("render_notification",{diagnostics:diagnostic rendered:generated_render_complete revision:interface_revision},nil)
-    render_content()
-    ui_render_generation += 1
-    for widget slot in map_slots { update_map_widget(slot) }
-    return true
-}
-fn generated_error(message){
  if !generated_active {return true}
- let diagnostic=ui.generated.diagnostics() if diagnostic!="" {message=diagnostic}
- if message!=trace_last_diagnostic {trace_last_diagnostic=message trace_emit("render_diagnostic",{diagnostics:message rendered:generated_render_complete},nil)}
- if interface_error!=message {ui_facts_revision+=1}
- interface_error=message render_content()
+ let pending=false for block in ui_blocks {if block.installed && block.written_revision!=ui_facts_revision {pending=true}}
+ if !pending {return true}
+ let value=facts_json()
+ for block in ui_blocks {if block.installed && block.written_revision!=ui_facts_revision {
+  try {block.handle.find("fact_state").set_text(value) block.handle.find("fact_revision").set_text(""+ui_facts_revision) block.written_revision=ui_facts_revision}
+  {block.error="生成区块事实更新失败"}
+ }}
+ ui_facts_written_revision=ui_facts_revision
  return true
 }
+fn generated_rendered(){return block_rendered(block_by_id("__document"))}
+fn block_rendered(block){
+ if block==nil || !generated_active || interface_run!=run_id {return true}
+ block.notified=true let diagnostic=block.handle.diagnostics()
+ if diagnostic=="" {block.complete=true block.error=""} else {block.error=diagnostic}
+ sync_block_state()
+ trace_emit("render_notification",{block_id:block.id diagnostics:diagnostic rendered:block.complete revision:block.revision},nil)
+ render_content()
+ for key slot in map_slots {if route_get(slot,"block_id")==block.id {update_map_widget(slot)}}
+ return true
+}
+fn generated_error(message){return block_error(block_by_id("__document"),message)}
+fn block_error(block,message){
+ if block==nil {return true}
+ let diagnostic=block.handle.diagnostics() if diagnostic!="" {message=diagnostic}
+ if message!=block.error {trace_emit("render_diagnostic",{block_id:block.id diagnostics:message rendered:block.complete},nil)}
+ block.error=message sync_block_state() render_content() return true
+}
+fn block_map_key(block_id,widget){if block_id==nil || block_id=="__document" {return widget} return [block_id widget].to_json()}
+fn map_widget(slot){let block=block_by_id(route_get(slot,"block_id")) if block==nil {return nil} return block.handle.find(slot.widget)}
 fn ui_dispatch_action(action){
+ let block_id=route_get(action,"block_id") if block_id==nil {block_id="__document"}
+ let block=block_by_id(block_id)
+ if block!=nil && route_get(action,"block_revision")!=nil && action.block_revision!=block.revision {return true}
  trace_emit("local_event",{event:action.to_json()},nil)
  let name=route_get(action,"action") let id=route_get(action,"id")
- if name=="rendered" {generated_rendered()}
- elif name=="map" {register_map_paths(action.widget,action.target,route_get(action,"status_widget"),route_get(action,"interactive"),route_get(action,"path_indices"))}
- elif name=="map_camera" {map_camera_changed(action)}
- elif name=="map_fit" {let slot=map_slots[action.widget] if slot!=nil && slot.interactive {let route=map_candidate(slot.target) if route!=nil {fit_map_slot(slot,route)}}}
+ if name=="rendered" {block_rendered(block)}
+ elif name=="map" {register_map_block(action.widget,action.target,route_get(action,"status_widget"),route_get(action,"interactive"),route_get(action,"path_indices"),block_id)}
+ elif name=="map_camera" {action.widget=block_map_key(block_id,action.widget) map_camera_changed(action)}
+ elif name=="map_fit" {let slot=map_slots[block_map_key(block_id,action.widget)] if slot!=nil && slot.interactive {let route=map_candidate(slot.target) if route!=nil {fit_map_slot(slot,route)}}}
+ elif name=="show_block" {let target=block_by_id(action.block) if target!=nil {target.visible=action.visible!=false target.container.set_visible(target.visible) render_content()}}
  elif name=="view_route" {let route=ui_route(id) if route!=nil {view_route(route.id)} else {show_status("路线已不在本次查询中")}}
- elif name=="runtime_error" {generated_error(route_get(action,"message"))}
+ elif name=="runtime_error" {block_error(block,route_get(action,"message"))}
  else {show_status("本地动作未实现："+name)}
  return true
 }
-fn enqueue_generated_line(index, line, offset, token, generation){
-    if index < offset || line.trim() == "" { return true }
-    let action = line.parse_json()
-    start_timeout(0.01, || { if token == run_id && generation == map_generation { ui_dispatch_action(action) } })
-    return true
+fn enqueue_block_line(block,index,line,offset,token,revision){
+ if index<offset || line.trim()=="" {return true}
+ let action=line.parse_json()
+ start_timeout(0.01,||{if token==run_id && block_by_id(block.id)==block && block.revision==revision {ui_dispatch_action(action)}})
+ return true
 }
-fn consume_generated_mailbox(){
-    let mailbox = ui.generated.mailbox.text()
-    if mailbox == mailbox_seen { return true }
-    mailbox_seen = mailbox
-    let lines = mailbox.split("\n") let offset = mailbox_lines mailbox_lines = lines.len() - 1
-    let token = run_id let generation = map_generation
-    for index line in lines { enqueue_generated_line(index, line, offset, token, generation) }
-    return true
+fn consume_block_mailbox(block){
+ let mailbox=block.handle.find("mailbox").text()
+ if mailbox==block.mailbox_seen {return true}
+ block.mailbox_seen=mailbox let lines=mailbox.split("\n") let offset=block.mailbox_lines block.mailbox_lines=lines.len()-1
+ for index line in lines {enqueue_block_line(block,index,line,offset,run_id,block.revision)}
+ return true
 }
+fn consume_generated_mailbox(){let block=block_by_id("__document") if block!=nil {consume_block_mailbox(block)} return true}
 fn poll_generated(){
-    if generated_active {
-        try {
-            let diagnostic = ui.generated.diagnostics()
-            if diagnostic != "" { generated_error(diagnostic) }
-            consume_generated_mailbox()
-        }
-        { interface_error = "生成界面的事件执行失败；可继续生成" ui.feedback.render() }
-    }
-    start_timeout(0.1, || poll_generated())
-    return true
+ for block in ui_blocks {if block.installed {
+  try {let diagnostic=block.handle.diagnostics() if diagnostic!="" {block_error(block,diagnostic)} consume_block_mailbox(block)}
+  {block.error="生成区块事件执行失败" sync_block_state() ui.feedback.render()}
+ }}
+ start_timeout(0.1,||poll_generated()) return true
 }
 fn update_map_widget(slot){
     if !generated_active { return }
     try {
-        ui.generated.find(slot.id).set_visible(slot.interactive == true || slot.bytes != nil)
-        if slot.status_widget.is_string() && slot.status_widget != "" { ui.generated.find(slot.status_widget).set_text(slot.caption + "\n" + slot.status) }
-        if slot.bytes != nil && (slot.loaded_generation != ui_render_generation || slot.loaded_request != slot.request) {
+        map_widget(slot).set_visible(slot.interactive == true || slot.bytes != nil)
+        if slot.status_widget.is_string() && slot.status_widget != "" { block_by_id(slot.block_id).handle.find(slot.status_widget).set_text(slot.caption + "\n" + slot.status) }
+        let generation=if block_by_id(slot.block_id)!=nil {block_by_id(slot.block_id).revision} else {ui_render_generation}
+        if slot.bytes != nil && (slot.loaded_generation != generation || slot.loaded_request != slot.request) {
             if slot.interactive {
-                let installed=ui.generated.find(slot.id).load_map_image(slot.bytes,slot.camera.request,slot.camera.source_width,slot.camera.source_height)
+                let installed=map_widget(slot).load_map_image(slot.bytes,slot.camera.request,slot.camera.source_width,slot.camera.source_height)
                 trace_emit("map_image_submitted",{widget:slot.id request:slot.request native_request:slot.camera.request accepted:installed},nil)
-            } else {ui.generated.find(slot.id).load_image_from_data_async(slot.bytes)}
-            slot.loaded_generation = ui_render_generation slot.loaded_request = slot.request
+            } else {map_widget(slot).load_image_from_data_async(slot.bytes)}
+            slot.loaded_generation=generation slot.loaded_request=slot.request
         }
     } { interface_error = "此图控件加载失败；其它图和行程保留" ui.feedback.render() }
 }
@@ -2113,14 +2192,21 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
             Label{draw_text.text_style: NavRegular width: Fill height: Fit flow: Flow.Right{wrap:true} visible: interface_error != "" || interface_inflight || ((!generated_active || phase == "failed") && runtime_status != "")
                 text: if phase == "failed" && runtime_status != "" { runtime_status } elif interface_error != "" { if generated_render_complete { "界面操作未能完成；已有结果保留" } elif agent_active { "界面正在修正；可终止本次查询" } else { "生成界面未能正常显示，请重新查询" } } elif interface_inflight { "Agent 正在生成界面；可终止" } else { runtime_status } draw_text.color: ink}
         }}
-        generated_area := View{width:Fill height:Fit on_render: || {
-            generated := Splash{width: Fill height: if ui_viewport != nil {ui_viewport.height} else {Fill} visible:generated_active body:generated_source}
+        generated_area := View{width:Fill height:Fit flow:Down on_render: || {
+            for block in inline_blocks {
+                View{width:Fill height:block_height(block) visible:block.visible flow:Down
+                  generated := Splash{width:Fill height:block_inner_height(block) body:block.body}
+                }
+            }
         }}
         answer_area := View{width:Fill height:Fit on_render:||{
             final_answer := Label{width:Fill height:Fit visible:answer_text != "" && !generated_render_complete flow:Flow.Right{wrap:true} draw_text.text_style:NavRegular draw_text.color:ink text:answer_text}
         }}
     }
 }
+block_overlay := View{width:Fill height:Fill flow:Overlay on_render:||{
+ for block in overlay_blocks {View{width:Fill height:block_height(block) margin:Inset{top:ui_overlay_top} visible:block.visible flow:Down clip_x:true clip_y:true Splash{width:Fill height:Fill body:block.body}}}
+}}
 trace_overlay := View{width:1 height:1 flow:Overlay
 trace_identity := Label{visible:trace_enabled width:1 height:1 padding:0 text:trace_identity_json() draw_text +: {color:#x0000 text_style:NavRegular{font_size:0.5}}}
 }

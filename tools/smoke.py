@@ -94,6 +94,78 @@ start_timeout(1,||{
 })
 '''
 
+
+UI_BLOCKS_FIXTURE=r'''
+let blocks_started=false let blocks_checks=[] let blocks_phase=0 let blocks_first=nil let blocks_detail=nil let blocks_old_revision=0
+fn blocks_check(name,passed){blocks_checks.push({name:name passed:passed})}
+fn blocks_mount(params){interface_revision+=1 return mount_ui_blocks(params,run_id,interface_revision)}
+fn load_map_slot(slot,candidate){
+ let bytes=fs.read_bytes(if slot.block_id=="summary" {"part-a.png"} else {"part-b.png"})
+ accept_map_slot(slot,bytes,run_id,slot.request,candidate.id,"合成地图：验证区块独立加载，无外网")
+}
+fn blocks_tick(){
+ let identity=ui.trace_identity.text().parse_json()
+ if trace_state==nil || identity.instance!=trace_state.instance || !fs.exists("sections-go.json") {start_timeout(0.1,||blocks_tick()) return}
+ if !blocks_started {
+  blocks_started=true run_id+=1 received_at=time_now() arrive_by=received_at+2400 constraints={budget_cents:5000} user_limits={minutes:40 budget_cents:5000} phase="proposal"
+  candidates=[route_candidate("route-a","public_transit",1200,500,received_at,received_at,"114.01,22.01","114.01,22.01",true,[{polyline:"114,22;114.01,22.01"}]) route_candidate("route-b","taxi",900,1800,received_at,received_at,"114.02,22.02","114.02,22.02",true,[{polyline:"114,22;114.02,22.02"}])]
+  viewed_route_id="route-a"
+  blocks_mount({blocks:[{id:"list" source:"start_timeout(0.1,||ui.kept.set_text(\"TOP LEVEL RAN\")) View{width:Fill height:Fit flow:Down entry := TextInput{text:\"INITIAL\"} kept := Label{text:\"OLD\"} for i in 5 {Label{text:\"候选列表第\"+i+\"行\"}} open := Button{text:\"查看方案\" on_click:||{emit({action:\"view_route\" id:\"route-b\"}) emit({action:\"show_block\" block:\"details\" visible:true})}} for i in 16 {Label{text:\"列表后续第\"+i+\"行\"}}}"}]})
+  start_timeout(0.4,||{
+   blocks_first=block_by_id("list") blocks_first.handle.find("entry").set_text("LOCAL INPUT") blocks_first.handle.find("kept").set_text("LOCAL STATE")
+   blocks_mount({blocks:[{id:"summary" source:"emit({action:\"map\" widget:\"same_map\" target:\"route-a\" status_widget:\"note\"}) View{width:Fill height:Fit flow:Down Label{text:\"总结区块／独立蓝色地图\"} same_map := Image{width:Fill height:120} note := Label{text:\"\"}}"} {id:"details" overlay:true visible:false source:"on_facts_changed=fn(current){ui.selected.set_text(\"当前方案：\"+current.viewed_route_id)} emit({action:\"map\" widget:\"same_map\" target:\"viewed\" status_widget:\"note\"}) View{width:Fill height:Fit flow:Down show_bg:true draw_bg +: {color:#xf7f7f7} back := Button{text:\"返回列表\" on_click:||{emit({action:\"show_block\" block:\"details\" visible:false})}} selected := Label{text:\"当前方案：\"+facts.viewed_route_id} same_map := Image{width:Fill height:120} note := Label{text:\"\"} for i in 24 {Label{text:\"详情第\"+i+\"段：分段／费用／用时／限制，合成验证\"}}}"}]})
+   start_timeout(0.5,||{
+    blocks_detail=block_by_id("details")
+    blocks_check("追加区块保留输入、本地状态且未重跑顶层",blocks_first.handle.find("entry").text()=="LOCAL INPUT" && blocks_first.handle.find("kept").text()=="LOCAL STATE")
+    blocks_check("普通总结为自然高度而非满视口",block_by_id("summary").handle.rect().height<ui_viewport.height)
+    blocks_check("各块独立成功且隐藏overlay不显示",blocks_first.complete && block_by_id("summary").complete && blocks_detail.complete && !blocks_detail.container.visible())
+    blocks_mount({blocks:[{id:"summary" source:"emit({action:\"map\" widget:\"same_map\" target:\"route-a\" status_widget:\"note\"}) View{width:Fill height:Fit flow:Down Label{text:\"替换总结，列表保持\"} same_map := Image{width:Fill height:120} note := Label{text:\"\"}}"}]})
+    start_timeout(0.4,||{
+     blocks_check("替换只重建指定块，详情与列表VM保留",blocks_first==block_by_id("list") && blocks_detail==block_by_id("details") && blocks_first.revision==1 && block_by_id("summary").revision==2)
+     blocks_phase=1 fs.write("blocks-ready.json","{}")
+    })
+   })
+  })
+ }
+ if blocks_phase==1 && fs.exists("blocks-opened.json") {
+  blocks_phase=2
+  blocks_check("真实按钮跨块打开详情并更新事实",blocks_detail.container.visible() && viewed_route_id=="route-b" && blocks_detail.handle.find("selected").text()=="当前方案：route-b")
+  let one=map_slots[block_map_key("summary","same_map")] let two=map_slots[block_map_key("details","same_map")]
+  blocks_check("同名地图按块独立目标与字节加载",one!=nil && two!=nil && one!=two && one.target_id=="route-a" && two.target_id=="route-b" && one.state=="ready" && two.state=="ready")
+  fs.write("blocks-open-checked.json","{}")
+ }
+ if blocks_phase==2 && fs.exists("blocks-returned.json") {
+  blocks_phase=3
+  if fs.exists("blocks-geometry-only.json") {fs.write("harness-smoke.json",{checks:[{name:"overlay返回保留输入和本地状态" passed:!blocks_detail.container.visible() && blocks_first.handle.find("entry").text()=="LOCAL INPUT" && blocks_first.handle.find("kept").text()=="LOCAL STATE"}]}.to_json()) return}
+  blocks_check("返回仅隐藏详情，列表输入和脚本状态保留",!blocks_detail.container.visible() && blocks_first.handle.find("entry").text()=="LOCAL INPUT" && blocks_first.handle.find("kept").text()=="LOCAL STATE")
+  let invalid=blocks_mount({blocks:[{id:"details" overlay:false source:"Label{text:\"not installed\"}"}]})
+  blocks_check("位置变更输入错误不提交成功空结果",invalid==nil && block_by_id("details")==blocks_detail)
+  blocks_mount({blocks:[{id:"summary" source:"View{draw_bg:{color:#xff0000} Label{text:\"bad\"}}"}]})
+  start_timeout(0.4,||{
+   blocks_check("单块真实执行诊断不隐藏其他成功块",!render_ui_result([block_by_id("summary")]).success && render_ui_result([block_by_id("summary")]).blocks[0].diagnostics!="" && blocks_first.complete && generated_render_complete && blocks_first.handle.find("kept").text()=="LOCAL STATE")
+   blocks_old_revision=block_by_id("summary").revision
+   blocks_mount({blocks:[{id:"summary" source:"Label{text:\"只修复总结区块\"}"}]})
+   start_timeout(0.4,||{
+    ui_dispatch_action({action:"runtime_error" block_id:"summary" block_revision:blocks_old_revision message:"OLD EVENT"})
+    blocks_check("修正失败块成功且旧revision事件不污染",render_ui_result([block_by_id("summary")]).success && block_by_id("summary").complete && block_by_id("summary").error=="" && blocks_first.handle.find("entry").text()=="LOCAL INPUT")
+    fs.write("blocks-repaired.json","{}")
+   })
+  })
+ }
+ if blocks_phase==3 && fs.exists("blocks-finish.json") {
+  blocks_phase=4 clear_generated()
+  blocks_check("新查询清空全部块与地图绑定",ui_blocks.len()==0 && inline_blocks.len()==0 && overlay_blocks.len()==0 && map_slots.to_json()=="{}" && !generated_active)
+  interface_revision+=1 mount_interface("Label{text:\"旧source整稿适配\"}",run_id,interface_revision)
+  start_timeout(0.4,||{
+   blocks_check("旧source同引擎作为唯一文档",ui_blocks.len()==1 && block_by_id("__document").complete)
+   fs.write("harness-smoke.json",{checks:blocks_checks}.to_json())
+  })
+ }
+ start_timeout(0.1,||blocks_tick())
+}
+start_timeout(0.3,||blocks_tick())
+'''
+
 MAP_SECTIONS_FIXTURE=r'''
 let sections_started=false let sections_checks=[] let sections_loaded={} let sections_fit=[]
 fn fit_map_slot(slot,candidate){sections_fit.push(slot.id) fs.write("sections-fit.json",sections_fit.to_json()) product_fit_map_slot(slot,candidate)}
@@ -465,6 +537,7 @@ def main():
  if '--trace' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+TRACE_FIXTURE
  if '--mixed-routing' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn amap_request(','fn product_amap_request(',1)+'\n'+MIXED_FIXTURE
  if '--loop-settle' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('fn map_geometry_uncached(','fn product_map_geometry_uncached(',1).replace('fn trace_emit_run(','fn product_trace_emit_run(',1).replace('fn refresh_generated_facts(','fn product_refresh_generated_facts(',1)+'\n'+LOOP_SETTLE_FIXTURE
+ if '--ui-blocks' in sys.argv:source=original.replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+UI_BLOCKS_FIXTURE
  if '--map-sections' in sys.argv:source=original.replace('fn fit_map_slot(','fn product_fit_map_slot(',1).replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_SECTIONS_FIXTURE
  if '--map-details' in sys.argv:source=original.replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_FIXTURE
  if '--terminal-content' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1)+'\n'+TERMINAL_FIXTURE
@@ -507,8 +580,8 @@ def main():
   manifest=json.loads((mount/'manifest.json').read_text());manifest['id']='os.agentic26-navigation';(mount/'manifest.json').write_text(json.dumps(manifest));(mount/'main.splash').write_text(source)
   subprocess.run([str(ROOT.parent/'.octosense-agentic26/OctoSense-App-Hub/target/release/hub'),'stamp',str(mount)],stdout=subprocess.DEVNULL,check=True)
   a.init_demo();jail=a.jail_path();a.materialize_skills(ROOT/'bundle',jail);(jail/'private-config.json').write_text('{"location_mode":"demo"}');(jail/'trip.json').write_text('historical fixture ignored');(jail/'agent-run.json').write_text('historical audit ignored')
-  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
-  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
+  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
+  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   launch('native');report=None
   if '--loop-settle' in sys.argv:
@@ -527,7 +600,7 @@ def main():
     paths=[';'.join(f'{110+part*.1+point*.00001:.5f},{21+part*.1+point*.00001:.5f}' for point in range(219)) for part in range(3)]
     source_geometry='public synthetic three disconnected paths with219points each; no private artifact read'
    a.write_private(jail/'settle-geometry.json',json.dumps({'paths':paths,'endpoint':paths[-1].split(';')[-1],'source_geometry':source_geometry}).encode())
-  if '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
+  if '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
    import zlib,struct
    def png(color):
     def chunk(t,d):return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
@@ -542,6 +615,41 @@ def main():
    for y in range(320,570,25):q('m',k='move',x=200,y=y,wait=1)
    q('m',k='up',x=200,y=570,wait=1);q('t',t='Navigation',wait=1);q('k',c='enter',wait=1);time.sleep(1)
    (jail/('loop-settle-go.json' if '--loop-settle' in sys.argv else 'sections-go.json')).write_text('{}')
+  if '--ui-blocks' in sys.argv:
+   def wait_file(name):
+    for _ in range(100):
+     if (jail/name).exists():return
+     time.sleep(.1)
+    raise AssertionError(name+' missing; '+str(w/'native.log'))
+   def click_text(text,contains=False):
+    rows=json.loads(q('snap'))['s']
+    row=next(v for v in rows if v['ty']=='Button' and (text in v.get('t','') if contains else v.get('t')==text) and v['r'][3]>0)
+    r=row['r'];q('click',x=r[0]+r[2]/2,y=r[1]+r[3]/2,wait=1)
+   wait_file('blocks-ready.json')
+   if '--ui-block-geometry' in sys.argv:(jail/'blocks-geometry-only.json').write_text('{}')
+   q('m',k='scroll',x=220,y=600,dy=300,precise=1,wait=1);time.sleep(.3)
+   before=json.loads(q('snap'))['s'];(w/'blocks-list.png').write_bytes(q('g',raw=1))
+   kept={v.get('t'):v['r'] for v in before if v.get('t','').startswith('查看方案') and v['r'][3]>0}
+   click_text('查看方案',True);time.sleep(.5);(jail/'blocks-opened.json').write_text('{}');wait_file('blocks-open-checked.json')
+   opened=json.loads(q('snap'))['s']
+   shell=next(v for v in opened if v.get('i')=='sentence');control=next(v for v in opened if v['ty']=='Button' and v.get('t')=='查询')
+   back=next(v for v in opened if v.get('t')=='返回列表')
+   assert shell['r'][3]>0 and control['r'][3]>0 and back['r'][1]>=control['r'][1]+control['r'][3],(shell,control,back)
+   (w/'blocks-detail-snap.json').write_text(json.dumps(opened,ensure_ascii=False))
+   (w/'blocks-detail.png').write_bytes(q('g',raw=1))
+   q('m',k='scroll',x=220,y=600,dy=2000,precise=1,wait=1);time.sleep(.3)
+   assert any('详情第23段' in v.get('t','') for v in json.loads(q('snap'))['s'])
+   bottom=json.loads(q('snap'))['s'];bottom_shell=next(v for v in bottom if v.get('i')=='sentence');bottom_control=next(v for v in bottom if v['ty']=='Button' and v.get('t')=='查询')
+   assert bottom_shell['r']==shell['r'] and bottom_control['r']==control['r'],(shell,control,bottom_shell,bottom_control)
+   (w/'blocks-detail-bottom-snap.json').write_text(json.dumps(bottom,ensure_ascii=False))
+   (w/'blocks-detail-bottom.png').write_bytes(q('g',raw=1))
+   q('m',k='scroll',x=220,y=300,dy=-2000,precise=1,wait=1);time.sleep(.3)
+   click_text('返回列表');time.sleep(.3)
+   after=json.loads(q('snap'))['s'];returned={v.get('t'):v['r'] for v in after if v.get('t','').startswith('查看方案') and v['r'][3]>0}
+   assert kept==returned,(kept,returned)
+   (w/'blocks-returned.png').write_bytes(q('g',raw=1));(jail/'blocks-returned.json').write_text('{}')
+   if '--ui-block-geometry' not in sys.argv:
+    wait_file('blocks-repaired.json');(w/'blocks-repaired.png').write_bytes(q('g',raw=1));(jail/'blocks-finish.json').write_text('{}')
   if '--performance' in sys.argv:
    time.sleep(3)
    q('k',c='Space',cmd=1,wait=1)
@@ -685,11 +793,16 @@ def main():
    time.sleep(.1)
   assert report,'宿主未完成工具会话；查看 '+str(w/'native.log')
   assert all(row['passed'] for row in report['checks']),report
-  if recovery or '--loop-settle' in sys.argv or '--map-sections' in sys.argv or '--map-details' in sys.argv or '--terminal-content' in sys.argv or '--mixed-routing' in sys.argv or '--performance' in sys.argv:
-   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True,mode='Android' if '--terminal-content' in sys.argv or '--performance' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv else 'desktop')
+  if recovery or '--loop-settle' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--map-details' in sys.argv or '--terminal-content' in sys.argv or '--mixed-routing' in sys.argv or '--performance' in sys.argv:
+   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True,mode='Android' if '--terminal-content' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv else 'desktop')
    if '--loop-settle' in sys.argv:
     (w/'loop-settle-android.png').write_bytes(q('g',raw=1))
     report.update(no_external_services=True,expected_injected_errors=['diagnostic side entry unavailable','facts side entry unavailable'])
+   if '--ui-blocks' in sys.argv:report.update(no_external_services=True,synthetic_image_bytes=True,list_scroll_preserved=True,synthetic_model=False,model_called=False,tool_result_boundary=True)
+   if '--ui-block-geometry' in sys.argv:
+    report['checks'] += [{'name':'打开overlay位于查询按钮下且输入可见','passed':True},{'name':'详情滚到底后输入查询rect保持不变','passed':True},{'name':'返回原列表实际可见按钮rect保持不变','passed':True}]
+    report['geometry']={'sentence':shell['r'],'query':control['r'],'back':back['r'],'bottom_sentence':bottom_shell['r'],'bottom_query':bottom_control['r']}
+    report['tool_result_boundary']=False
    if '--map-sections' in sys.argv:
     (w/'map-sections-android.png').write_bytes(q('g',raw=1))
     report.update(no_external_services=True,synthetic_image_bytes=True)

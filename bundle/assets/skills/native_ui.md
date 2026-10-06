@@ -1,6 +1,6 @@
 # Navigation 原生 Splash API
 
-render_ui 的 source 替换本次整稿，在已经存在的 View.on_render 闭包中执行；不是向旧稿追加节点。可以包含脚本语句和原生控件表达式；这里是 Makepad Splash，不是 JavaScript。不支持 XML/JSX 标签（例如 <View>、</View>）；原生控件直接使用 View{...} 表达式。显示文字是带引号的字符串（例如 text:"最早到达"），不能把中文标题当作未定义变量或把 source 当作隐含变量。空值是 nil；函数写 fn(x){...} 或 || {...}；字符串与数字可用 + 连接。
+render_ui 可用 source 替换整稿，也可用 blocks 提交一个或多个命名区块：`{blocks:[{id:"summary",source:"Label{text:\"本次结果\"}"}]}`。后续相同 id 只替换该块，新 id 追加；未更新块的输入、滚动、脚本和地图状态保留。source 是同一引擎的单文档替换，会清除此前所有块。每块源码在其独立 View.on_render 闭包中执行。可以包含脚本语句和原生控件表达式；这里是 Makepad Splash，不是 JavaScript。不支持 XML/JSX 标签（例如 <View>、</View>）；原生控件直接使用 View{...} 表达式。显示文字是带引号的字符串（例如 text:"最早到达"），不能把中文标题当作未定义变量或把 source 当作隐含变量。空值是 nil；函数写 fn(x){...} 或 || {...}；字符串与数字可用 + 连接。
 
 每次顶部查询开始一个新任务；不存在澄清问答、跨查询继续或结果保存。
 
@@ -8,7 +8,7 @@ render_ui 的 source 替换本次整稿，在已经存在的 View.on_render 闭�
 
 snapshot() 返回当前真实任务事实，包括 viewport、limits、origin、destination、sources、routes、viewed_route_id、原 arrive_by。emit(object) 把用户动作写到父应用。NavRegular 是 Navigation 无衬线字体，Label、Button、ButtonFlat、TextInput 已默认使用它。Label 的应用局部默认值是 width:Fill height:Fit flow:Flow.Right{wrap:true}，文字按可用宽度自然换行；可覆盖原生属性。
 
-生成内容置于有限高度的子 Splash 内，子 ScrollYView 包含 View/Fit，按内容自然高度提供滚动；父区域承载运行反馈。Fit 是内容自然尺寸，Fill 是填父级剩余尺寸，不能在无确定高度的 Fit 父级里假定 Fill 会产生页面高度。控件写 View{width:Fill height:Fit flow:Down ...}；flow 可用 Down、Right、Overlay。子控件不放 children 数组，直接写在父控件的花括号里。控件命名写 title := Label{...}；这个名称不是脚本变量，事件中使用 ui.body.find("title") 取得真实句柄。句柄支持 set_text(text)，TextInput 支持 text()，Image 支持 load_image_from_data_async(bytes)。不要对句柄赋 on_click 属性；事件闭包在构造控件时指定。
+普通 blocks 区块默认 Fit 自然高度，由父 ScrollYView 连续滚动；不是每块占满视口。区块可选 height 指定确需的原生高度。`overlay:true` 区块放在生成视口上方，有限高度、独立 ScrollYView；可选 visible:false 初始隐藏。现有块的普通／overlay位置保持不变。整稿 source 仍置于有限高度子 Splash 与 ScrollYView 内。Fit 是内容自然尺寸，Fill 是填父级剩余尺寸，不能在无确定高度的 Fit 父级里假定 Fill 会产生页面高度。控件写 View{width:Fill height:Fit flow:Down ...}；flow 可用 Down、Right、Overlay。子控件不放 children 数组，直接写在父控件的花括号里。控件命名写 title := Label{...}；这个名称不是脚本变量，事件中使用 ui.body.find("title") 取得真实句柄。句柄支持 set_text(text)，TextInput 支持 text()，Image 支持 load_image_from_data_async(bytes)。不要对句柄赋 on_click 属性；事件闭包在构造控件时指定。
 
 有类型的原生成员需要实际类型构造或已有成员扩展，普通对象不能替代它。背景可写 show_bg:true draw_bg +: {color:#xf7f7f7} 或 draw_bg.color:#xf7f7f7。文字可写 draw_text +: {text_style:NavRegular{font_size:14} color:#x162e35}。padding/margin 可用数字或 Inset{top:4 right:4 bottom:4 left:4}；align 用 Align{x:0.5 y:0.5}。这对应锁定 Makepad theme_desktop_dark/button 的原生写法。
 
@@ -97,3 +97,9 @@ render_ui 返回本稿真实 diagnostics；success 只表示执行时没有已�
 地图事件可选 `path_indices`，从该目录选择完整折线，例如 `emit({action:"map",widget:"part_map",target:id,path_indices:[0,1,2],status_widget:"part_note",interactive:true})`。未提供时仍请求完整路线；不会自动截前四条、拆图或跨缺口连接。多于四条时，可以根据目录分步嵌入多张独立命名地图，每张选择至多四条，张数、分组、打开步骤和布局由生成稿决定。展示完整路线时，各图的索引选择合起来应覆盖全部实际折线，缺失几何仍说明真实缺失。索引随当前路线目录变化，不猜测索引，也不把某些分段称作完整路线。
 
 每个命名 AutoNaviMapView 保留自己的相机和加载状态，`on_camera_changed` 仍使用该控件名发出六参 `map_camera` 事件。选择了 path_indices 的图会 fit 所选几何范围；图上的 A/B 是本图所选几何首末点，状态说明“本图分段端点，非全行程起终点”。原行程起终点、完整费用与限制仍在路线事实中。`status_widget` 可显示分图范围、来源、加载或供应商错误。
+
+区块之间可用 `emit({action:"show_block",block:"details",visible:true})` 显示已提交的详情 overlay，返回按钮发 visible:false。overlay 显示时暂停下层内容区的绘制与交互；关闭后恢复原内容滚动位置。隐藏不销毁该区块或其它列表块。每块 snapshot()/on_facts_changed 接收同一份当前任务事实；父应用每次事实修订只序列化一次，并更新落后区块。emit 自动附当前 block_id 与区块 revision，旧稿事件不会操作替换后的新稿。
+
+地图 widget/status_widget 名字局限在发事件的区块内，不同块可以使用相同名字。map、map_camera、map_fit 事件仍按上文使用；替换一个块仅撤掉它的地图绑定，其它块相机保留。跨块先显示详情块，再以 view_route 更新当前查看路线；详情块可在 on_facts_changed 中更新自己的内容并发 map 事件，或直接绑定事实中的路线 ID。没有自动创建业务详情页面。
+
+render_ui 的 blocks 回执逐块返回 id、revision、diagnostics、notified；失败块可以单独提交修正版，其它块保留。success 只表示本次提交没有已报告执行错误，不保证内容目标完成。区块没有删除／重排序接口；新查询清空全部区块。
