@@ -46,14 +46,14 @@ make agent-dev
 私有数据在 `.local-state/agent/`：官方宿主的 `octos/profiles/_main.json` 保留单个 M3 provider，
 兼容 `model.complete` 探针；当前应用通过 stock `net.http_request` 直接调用 M3 和高德。
 仅这个应用的 jail 内 `private-config.json` 提供 `amap_api_key`、`minimax_api_key`、
-`minimax_base_url`、`minimax_model` 与 `location_mode` 运行时字段。
+`minimax_base_url`、`minimax_model`、`location_mode` 与可选 `didi_mcp_key` 运行时字段。
 目录权限为 0700、这两个文件为 0600；两份配置不进入应用包、Git 或启动参数。
 模型配置固定一个 MiniMax-M3 provider，fallbacks 为空；其它模型配置会被拒绝。
 M3 地址只允许已实测的 `api.minimax.cn` HTTPS 主机、默认或 443 端口和 `/v1` 路径，
 不接受 URL 账号、查询参数或片段；启动器将尾斜杠和显式 443 规范为上述 Base URL。
 应用请求固定 `/v1/chat/completions`，用 Authorization header 传 key，并关闭 thinking；
 应用清单仍须声明这个 HTTPS 主机，应用本身也须核对私有配置中的模型和地址。
-两家 key 对应用运行时可见，费用、时效及路线是否满足用户条件由应用计算。
+高德、M3和可选滴滴 key 对应用运行时可见，费用、时效及路线是否满足用户条件由应用计算。`DIDI_MCP_KEY` 来自滴滴正式个人MCP账号；启动器写入私有配置并覆盖日志／导出凭据检查，缺省不阻断高德查询。应用仅调用滴滴地点搜索和询价，没有订单接口。
 本轮撤掉应用自行添加的输入／输出、工具步数、自动阶段和纠正次数上限，直接生成 Splash 界面；宿主和服务端的实际能力及错误以运行结果为准。
 当前应用按独立查询运行，不保存或恢复Trip、用户历史与模型会话，不进行问题澄清。正常live不依赖模拟来源初始化；demo文件只在显式演示模式使用。启动器配置、已打包技能及宿主调试记录不作为业务恢复入口。
 应用必须捕获网络派发失败并使用通用错误，不能把 key、含 key 的 URL、原始网络错误、

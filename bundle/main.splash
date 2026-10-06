@@ -149,11 +149,11 @@ fn route_candidates(transitData, drivingData, queryTs, deadlineTs, budgetCents, 
             let price = nil
             if paths.len() == 1 { price = route_cents(route_get(drivingRoute, "taxi_cost")) }
             let candidate = route_candidate("taxi-" + index, "taxi", route_seconds(route_get(cost, "duration")),
-                price, queryTs, nowTs, nil, route_get(drivingRoute, "destination"), false, route_get(path, "steps"))
+                price, queryTs, nowTs, route_leg_endpoint(route_get(path,"steps"),false), route_get(drivingRoute, "destination"), false, route_get(path, "steps"))
             candidate.waiting_basis = "driving_only"
             candidate.warnings = "全程出租车估价；duration仅行驶，候车未知，尚未核实步行登车及终点入口。"
             candidate.reason = route_reason(candidate, nowTs, deadlineTs, budgetCents)
-            candidate.feasible = false
+            candidate.feasible = candidate.reason == "估计满足约束"
             candidates.push(candidate)
         }
     }
@@ -938,7 +938,7 @@ fn set_constraints(p){
     return true
 }
 fn amap_request(path, params, token, done){
-    if path != "/v3/place/text" && path != "/v5/direction/transit/integrated" && path != "/v5/direction/driving" && path != "/v3/assistant/coordinate/convert" && path != "/v3/geocode/regeo" { fail_task("地图工具路径无效") return }
+    if path != "/v3/place/text" && path != "/v5/direction/transit/integrated" && path != "/v5/direction/driving" && path != "/v5/direction/walking" && path != "/v3/assistant/coordinate/convert" && path != "/v3/geocode/regeo" { fail_task("地图工具路径无效") return }
     let config = read_text("private-config.json")
     if config == nil { fail_task("本机尚未配置地图服务") return }
     let private = config.parse_json()
@@ -1045,12 +1045,13 @@ fn add_candidates(data, driving, at, departure_at, tool){
     let request_bound = echoed_origin_gap != nil && echoed_origin_gap <= 25 && echoed_destination_gap != nil && echoed_destination_gap <= 25
     for candidate in normalized {
         candidate.id = "" + step_count + ":" + candidate.id
+        register_route_stations(candidate.segments)
         candidate.planned_departure_at = departure_at
         candidate.departure_ts = departure_at
         candidate.requested_origin = requested_origin
         candidate.requested_destination = requested_destination
         candidate.request_bound = request_bound
-        candidate.actual_origin = route_start(candidate.segments)
+        candidate.actual_origin = route_leg_endpoint(candidate.segments,true)
         candidate.origin_gap_m = route_endpoint_gap(candidate.actual_origin, requested_origin)
         candidate.origin_complete = candidate.origin_gap_m != nil && candidate.origin_gap_m <= 25
         candidate.endpoint_gap_m = route_endpoint_gap(candidate.actual_endpoint, requested_destination)
@@ -1071,6 +1072,276 @@ fn minute_boundary(epoch){
     if remaining_seconds > 0 { return epoch + 60 - remaining_seconds }
     return epoch
 }
+// 每条边是一笔完整供应商查询，不截摊原公交票价或全程出租车估价。
+fn route_leg_endpoint(segments, first){
+    if !segments.is_array() || segments.len()==0 {return nil}
+    let segment=if first {segments[0]} else {segments[segments.len()-1]}
+    let walking=route_get(segment,"walking")
+    let steps=route_get(walking,"steps")
+    if !steps.is_array() {steps=[segment]}
+    if steps.len()>0 {
+        let step=if first {steps[0]} else {steps[steps.len()-1]}
+        let line=route_get(step,"polyline") if line.is_object(){line=route_get(line,"polyline")}
+        if line.is_string() && line!="" {let points=line.split(";") return if first {points[0]} else {points[points.len()-1]}}
+    }
+    let lines=route_get(route_get(segment,"bus"),"buslines")
+    if lines.is_array() && lines.len()>0 {let line=if first {lines[0]} else {lines[lines.len()-1]} return route_get(route_get(line,if first {"departure_stop"} else {"arrival_stop"}),"location")}
+    let taxi=route_get(segment,"taxi")
+    return route_get(taxi,if first {"startpoint"} else {"endpoint"})
+}
+fn route_prefix_origin(node, at){
+    return {id:"origin" node_ref:node.ref actual_endpoint:coord_text(node) legs:[] segments:[] departure_ts:at earliest_arrival_ts:at known_cost_cents:0 price_cents:0 cost_complete:true duration_complete:true waiting_included:true request_bound:true origin_complete:true endpoint_complete:true source_ts:nil duration_seconds:0 connection_verified:true}
+}
+fn route_prefix_extend(prefix, leg, id, deadline, budget){
+    let gap=route_endpoint_gap(prefix.actual_endpoint,leg.actual_origin)
+    if gap==nil || gap>25 || !leg.request_bound || !leg.origin_complete || !leg.endpoint_complete {return {success:false reason:"供应商路段起终点或前后接驳未核实" connection_gap_m:gap leg:leg}}
+    let legs=[] let segments=[]
+    for item in prefix.legs {legs.push(item)} legs.push(leg)
+    for item in prefix.segments {segments.push(item)} for item in leg.segments {segments.push(item)}
+    let known=prefix.known_cost_cents if leg.price_cents!=nil {known+=leg.price_cents}
+    let complete=prefix.cost_complete && leg.price_cents!=nil
+    let duration_complete=prefix.duration_complete && leg.duration_seconds!=nil
+    let arrival=leg.departure_ts if leg.duration_seconds!=nil {arrival+=leg.duration_seconds}
+    let duration=nil if duration_complete {duration=arrival-prefix.departure_ts}
+    let source=leg.source_ts if prefix.source_ts!=nil && prefix.source_ts<source {source=prefix.source_ts}
+    let waiting=prefix.waiting_included && leg.waiting_included
+    let budget_status=if known>budget {"over_budget"} elif complete {"within_estimate"} else {"unknown"}
+    let deadline_status=if arrival>deadline {"over_deadline"} elif !duration_complete || !waiting {"unknown"} else {"within_estimate"}
+    return {success:true prefix:{id:id node_ref:leg.to_ref actual_endpoint:leg.actual_endpoint legs:legs segments:segments departure_ts:prefix.departure_ts earliest_arrival_ts:arrival known_cost_cents:known price_cents:if complete {known} else {nil} cost_complete:complete duration_complete:duration_complete duration_seconds:duration waiting_included:waiting request_bound:prefix.request_bound && leg.request_bound origin_complete:prefix.origin_complete endpoint_complete:leg.endpoint_complete connection_verified:true source_ts:source budget_status:budget_status deadline_status:deadline_status waiting_slack_seconds:deadline-arrival scenario:if waiting && duration_complete {"供应商时刻与耗时估计"} else {"最早到达场景；缺失候车/耗时尚未计入，不能保证后续公交班次"}}}
+}
+let route_nodes={}
+let route_prefixes={}
+let route_extension_count=0
+fn route_node(ref){return route_nodes[ref]}
+fn register_route_node(ref,name,point,source,city){
+    let p=route_point(point) if p==nil {return nil}
+    let node=route_nodes[ref]
+    if node==nil {node={ref:ref name:name longitude:p.lon latitude:p.lat coordinate_system:"GCJ-02" source:source city_metadata:city} route_nodes[ref]=node}
+    return node
+}
+fn register_route_pois(pois){
+    for poi in pois {register_route_node("poi:"+poi.id,poi.name,coord_text(poi),poi.source,route_get(poi,"city_metadata"))}
+}
+fn register_route_stations(segments){
+    if !segments.is_array(){return}
+    for segment in segments {
+        let lines=route_get(route_get(segment,"bus"),"buslines")
+        if lines.is_array(){for line in lines {
+            let stops=[route_get(line,"departure_stop")]
+            let via=route_get(line,"via_stops") if via.is_array(){for stop in via {stops.push(stop)}}
+            stops.push(route_get(line,"arrival_stop"))
+            for stop in stops {let id=route_get(stop,"id") if id.is_string() && id!="" {register_route_node("stop:"+id,route_get(stop,"name"),route_get(stop,"location"),"amap-transit-stop",nil)}}
+        }}
+    }
+}
+fn prepare_route_graph(){
+    if position_record==nil || destination_record==nil || constraints==nil {return false}
+    let origin=register_route_node("origin",position_record.name,coord_text(position_record),position_record.source,{city:position_record.city citycode:position_record.citycode adcode:position_record.adcode currency:position_record.currency})
+    register_route_node("destination",destination_record.name,coord_text(destination_record),destination_record.source,{city:destination_record.city citycode:destination_record.citycode adcode:destination_record.adcode currency:destination_record.currency})
+    register_route_pois(poi_records)
+    for candidate in candidates {register_route_stations(candidate.segments)}
+    if route_prefixes["origin"]==nil {route_prefixes["origin"]=route_prefix_origin(origin,time_now())}
+    return true
+}
+fn route_prefix_facts(prefix){
+    let legs=[]
+    for leg in prefix.legs {legs.push({id:leg.id from_ref:leg.from_ref to_ref:leg.to_ref mode:leg.mode departure_ts:leg.departure_ts duration_seconds:leg.duration_seconds price_cents:leg.price_cents price_basis:leg.price_basis waiting_included:leg.waiting_included source_ts:leg.source_ts requested_origin:leg.requested_origin requested_destination:leg.requested_destination warnings:leg.warnings quote_ref:route_get(leg,"quote_ref") place_match_basis:route_get(leg,"place_match_basis") provider_connection_status:route_get(leg,"provider_connection_status")})}
+    return {id:prefix.id node_ref:prefix.node_ref completion_status:if prefix.node_ref=="destination" {"reached_requested_destination"} else {"incomplete"} requested_destination_ref:"destination" remaining_endpoint_gap_m:if route_nodes["destination"]!=nil {route_endpoint_gap(prefix.actual_endpoint,coord_text(route_nodes["destination"]))} else {nil} full_journey_price_cents:if prefix.node_ref=="destination" {prefix.price_cents} else {nil} incomplete_reason:if prefix.node_ref!="destination" {"仅到真实中间/路径终点；后续连接尚未取得，不能把当前小计当到目的地总价"} else {nil} departure_ts:prefix.departure_ts earliest_arrival_ts:prefix.earliest_arrival_ts known_cost_cents:prefix.known_cost_cents price_cents:prefix.price_cents duration_seconds:prefix.duration_seconds waiting_included:prefix.waiting_included budget_status:route_get(prefix,"budget_status") deadline_status:route_get(prefix,"deadline_status") waiting_slack_seconds:route_get(prefix,"waiting_slack_seconds") scenario:route_get(prefix,"scenario") legs:legs}
+}
+fn route_graph_facts(){
+    let nodes=[] let prefixes=[]
+    for ref node in route_nodes {nodes.push(node)}
+    for id prefix in route_prefixes {prefixes.push(route_prefix_facts(prefix))}
+    return {nodes:nodes prefixes:prefixes coverage:"本次已取得POI/公交停靠站和已查询完整边；Agent选择继续扩展，不代表穷尽现实路线"}
+}
+fn verify_route_node_city(node,token,done){
+    if node.city_metadata!=nil {done() return}
+    amap_request("/v3/geocode/regeo","&location="+coord_text(node)+"&extensions=base&radius=0&output=JSON",token,fn(data){
+        let a=route_get(route_get(data,"regeocode"),"addressComponent")
+        node.city_metadata=amap_city(route_get(a,"city"),route_get(a,"citycode"),route_get(a,"adcode"),route_get(a,"province"))
+        if node.city_metadata==nil {fail_task("接驳站城市资料缺失，不能查询公交") return}
+        done()
+    })
+}
+fn transit_leg_params(from,to,strategy,departure){
+    let china=local_time(departure+28800)
+    let hh=""+china.hour let mm=""+china.minute let month=""+china.month let day=""+china.day
+    if china.hour<10 {hh="0"+hh} if china.minute<10 {mm="0"+mm} if china.month<10 {month="0"+month} if china.day<10 {day="0"+day}
+    return "&origin="+coord_text(from)+"&destination="+coord_text(to)+"&city1="+from.city_metadata.citycode.url_encode()+"&city2="+to.city_metadata.citycode.url_encode()+"&ad1="+from.city_metadata.adcode.url_encode()+"&ad2="+to.city_metadata.adcode.url_encode()+"&strategy="+strategy+"&show_fields=cost,polyline&date="+china.year+"-"+month+"-"+day+"&time="+hh+":"+mm
+}
+fn extension_legs(data,mode,from,to,at,departure){
+    let result=[] let route=route_get(data,"route")
+    let options=if mode=="transit" {route_get(route,"transits")} else {route_get(route,"paths")}
+    if !options.is_array(){return result}
+    let origin_gap=route_endpoint_gap(route_get(route,"origin"),coord_text(from))
+    let destination_gap=route_endpoint_gap(route_get(route,"destination"),coord_text(to))
+    let bound=origin_gap!=nil && origin_gap<=25 && destination_gap!=nil && destination_gap<=25
+    for index option in options {
+        let cost=route_get(option,"cost") let segments=route_get(option,if mode=="transit" {"segments"} else {"steps"})
+        if !segments.is_array(){segments=[]}
+        let price=nil let basis="unknown"
+        if mode=="walk" {price=0 basis="步行无交通票价"}
+        elif mode=="taxi" && options.len()==1 {price=route_cents(route_get(route,"taxi_cost")) basis="amap-route.taxi_cost；一次完整出租车行程估算，非滴滴实时报价"}
+        elif mode=="transit" {
+            let has_taxi=false for segment in segments {if route_get(segment,"taxi").is_object(){has_taxi=true}}
+            if !has_taxi {price=route_cents(route_get(cost,"transit_fee")) basis="amap-option.cost.transit_fee；本次整段公交报价"}
+        }
+        let actual_origin=route_leg_endpoint(segments,true) let actual_end=route_leg_endpoint(segments,false)
+        let start_gap=route_endpoint_gap(actual_origin,coord_text(from)) let end_gap=route_endpoint_gap(actual_end,coord_text(to))
+        let leg_id="leg-"+route_extension_count+"-"+index
+        let actual_to_ref=to.ref let pickup_ref=nil
+        if actual_origin!=nil {pickup_ref="pickup:"+leg_id register_route_node(pickup_ref,"供应商路径起点（"+from.name+"）",actual_origin,"amap-route-geometry",nil)}
+        if actual_end!=nil && (end_gap==nil || end_gap>25) {actual_to_ref="arrival:"+leg_id register_route_node(actual_to_ref,"供应商路径终点（"+to.name+"）",actual_end,"amap-route-geometry",nil)}
+        result.push({id:leg_id pickup_ref:pickup_ref requested_to_ref:to.ref requested_endpoint_gap_m:end_gap from_ref:from.ref to_ref:actual_to_ref mode:mode departure_ts:departure source_ts:at requested_origin:coord_text(from) requested_destination:coord_text(to) request_bound:bound actual_origin:actual_origin actual_endpoint:actual_end origin_complete:start_gap!=nil && start_gap<=25 endpoint_complete:actual_end!=nil && (actual_to_ref!=to.ref || end_gap!=nil && end_gap<=25) duration_seconds:route_seconds(route_get(cost,"duration")) price_cents:price price_basis:basis waiting_included:mode!="taxi" segments:segments warnings:if mode=="taxi" {"仅当前交通行驶估计，候车和上下车步行未知；未来出发交通未预测"} else {"按最早场景查询，前序未知等待可能错过本段公交；站点坐标不保证平台/入口衔接"}})
+        register_route_stations(segments)
+    }
+    return result
+}
+fn register_mixed_candidate(next,to,mode){
+    let candidate=route_candidate("mixed-"+next.id,if next.legs.len()>1 {"mixed"} elif mode=="taxi" {"taxi"} elif mode=="walk" {"walking"} else {"public_transit"},next.duration_seconds,next.price_cents,next.source_ts,next.departure_ts,next.actual_endpoint,coord_text(to),next.waiting_included,next.segments)
+    candidate.requested_origin=coord_text(route_nodes["origin"]) candidate.requested_destination=coord_text(to) candidate.request_bound=next.request_bound candidate.origin_complete=next.origin_complete
+    candidate.known_cost_cents=next.known_cost_cents candidate.budget_status=next.budget_status candidate.deadline_status=next.deadline_status candidate.waiting_slack_seconds=next.waiting_slack_seconds candidate.legs=next.legs candidate.prefix_id=next.id
+    candidate.warnings="逐段完整报价相加；"+next.scenario+"；未知候车不算零，不保证实际费用/准时到达。"
+    let check=route_recheck(candidate,time_now(),arrive_by,constraints.budget_cents) candidate.reason=check.reason candidate.feasible=check.passed
+    candidates.push(candidate) return candidate
+}
+
+fn accept_route_extension(prefix,from,to,mode,data,at,departure,token){
+    if !current_task(token){return}
+    let legs=extension_legs(data,mode,from,to,at,departure)
+    let added=[] let rejected=[] let completed=[]
+    for leg in legs {
+        let joined=route_prefix_extend(prefix,leg,"prefix-"+route_extension_count+"-"+added.len(),arrive_by,constraints.budget_cents)
+        if !joined.success {rejected.push({leg_id:leg.id reason:joined.reason connection_gap_m:joined.connection_gap_m pickup_ref:leg.pickup_ref actual_to_ref:leg.to_ref requested_to_ref:leg.requested_to_ref requested_endpoint_gap_m:leg.requested_endpoint_gap_m})}
+        else {
+            let next=joined.prefix route_prefixes[next.id]=next added.push(route_prefix_facts(next))
+            if next.node_ref=="destination" {
+                completed.push(register_mixed_candidate(next,to,mode).id)
+            }
+        }
+    }
+    trace_emit("route_extension",{from_ref:from.ref to_ref:to.ref mode:mode requested_departure:departure prefixes:added rejected:rejected completed:completed},if active_tool!=nil {active_tool.id} else {nil})
+    agent_tool_result({success:true prefixes:added completed_candidate_ids:completed rejected:rejected graph:route_graph_facts() facts:interface_facts()})
+}
+fn extend_route(p,token){
+    if !prepare_route_graph(){fail_task("接驳查询缺少本次起点、目的地或时间预算") return}
+    let prefix=route_prefixes[p.prefix_id] let to=route_node(p.to_ref)
+    if prefix==nil || to==nil {agent_tool_result({success:false error:"prefix_id/to_ref不属于本轮真实图" graph:route_graph_facts()}) return}
+    let from=route_node(prefix.node_ref) let mode=p.mode
+    if mode!="walk" && mode!="taxi" && mode!="transit" {agent_tool_result({success:false error:"支持walk/taxi/transit完整路段"}) return}
+    if from.ref==to.ref {agent_tool_result({success:false error:"起终节点相同，没有新增路段"}) return}
+    let strategy=route_get(p,"strategy") if strategy==nil {strategy=0}
+    if mode=="transit" {let found=false for value in transit_strategies(){if value==strategy {found=true}} if !found {agent_tool_result({success:false error:"该公交策略需要其它专用输入"}) return}}
+    route_extension_count+=1
+    let departure=route_later(time_now(),prefix.earliest_arrival_ts) if mode=="transit" {departure=minute_boundary(departure)}
+    let at=time_now()
+    let query=fn(){
+        if !current_task(token){return}
+        let params="&origin="+coord_text(from)+"&destination="+coord_text(to)+"&show_fields=cost,polyline"
+        let path=if mode=="walk" {"/v5/direction/walking"} elif mode=="taxi" {"/v5/direction/driving"} else {"/v5/direction/transit/integrated"}
+        if mode=="taxi" {params+="&strategy=0"} elif mode=="transit" {params=transit_leg_params(from,to,strategy,departure)}
+        trace_emit("route_leg_query",{from_ref:from.ref to_ref:to.ref mode:mode departure_at:departure scenario:route_get(prefix,"scenario") path:path params:params},if active_tool!=nil {active_tool.id} else {nil})
+        amap_request(path,params,token,fn(data){start_timeout(0.01,||accept_route_extension(prefix,from,to,mode,data,at,departure,token))})
+    }
+    if mode=="transit" {verify_route_node_city(from,token,fn(){verify_route_node_city(to,token,query)})} else {query()}
+}
+
+let didi_places={}
+let didi_quotes={}
+let didi_record_count=0
+fn didi_request(name,arguments,token,done){
+    let config=read_text("private-config.json") let key=nil
+    if config!=nil {key=route_get(config.parse_json(),"didi_mcp_key")}
+    if !key.is_string() || key.trim()=="" {agent_tool_result({success:false error:"滴滴估价服务未配置；其它路线查询仍可继续"}) return}
+    let body={jsonrpc:"2.0" id:token method:"tools/call" params:{name:name arguments:arguments}}.to_json()
+    trace_emit("didi_request",{name:name body:body},if active_tool!=nil {active_tool.id} else {nil})
+    net.http_request(net.HttpRequest{url:"https://mcp.didichuxing.com/mcp-servers?key="+key.url_encode() method:net.HttpMethod.POST headers:{"Content-Type":["application/json; charset=utf-8"] "Accept":["application/json, text/event-stream"]} body:body.to_bytes()}) do net.HttpEvents{
+        on_response:|res|{
+            if !current_task(token){return}
+            try {
+                if res.status_code!=200 {agent_tool_result({success:false error:"滴滴询价请求失败" http_status:res.status_code}) return}
+                let raw=res.body.to_string() trace_emit_run("didi_response",{status:res.status_code body:raw},if active_tool!=nil {active_tool.id} else {nil},token)
+                let data=raw.parse_json()
+                if route_get(data,"error")!=nil {agent_tool_result({success:false error:"滴滴工具返回错误" code:route_get(data.error,"code")}) return}
+                let result=route_get(data,"result")
+                if result==nil || route_get(result,"isError")==true {agent_tool_result({success:false error:"滴滴未返回有效工具结果"}) return}
+                done(result)
+            } {agent_tool_result({success:false error:"滴滴响应格式无法解析"})}
+        }
+        on_error:|err|{if current_task(token){agent_tool_result({success:false error:"滴滴询价网络请求失败"})}}
+    }
+}
+fn search_didi_places(p,token){
+    didi_request("maps_textsearch",{keywords:p.query city:p.city},token,fn(result){
+        let content=route_get(result,"content") let records=[]
+        if content.is_array() && content.len()>0 {
+            let items=content[0].text.parse_json()
+            if items.is_array(){for item in items {
+                let location=route_get(item,"location")
+                if location.is_object() && route_get(location,"lng").is_number() && route_get(location,"lat").is_number() {
+                    didi_record_count+=1 let ref="didi-place:"+didi_record_count
+                    let record={ref:ref name:route_get(item,"display_name") address:route_get(item,"address_all") city:route_get(item,"city") longitude:location.lng latitude:location.lat coordinate_system:"provider-unspecified" source:"didi-maps_textsearch" queried_at:time_now()}
+                    didi_places[ref]=record records.push(record)
+                }
+            }}
+        }
+        agent_tool_result({success:true places:records coordinate_warning:"滴滴未声明坐标系；这些点不能冒充高德端点，报价关联须另核连接"})
+    })
+}
+fn quote_didi(p,token){
+    let from=didi_places[p.from_ref] let to=didi_places[p.to_ref]
+    if from==nil || to==nil {agent_tool_result({success:false error:"起终点必须来自本轮滴滴地点查询ref"}) return}
+    let at=time_now()
+    didi_request("taxi_estimate",{from_lng:""+from.longitude from_lat:""+from.latitude from_name:from.name to_lng:""+to.longitude to_lat:""+to.latitude to_name:to.name},token,fn(result){
+        let structured=route_get(result,"structuredContent") let items=route_get(structured,"items") let quotes=[]
+        if items.is_array(){for item in items {
+            didi_record_count+=1 let ref="didi-quote:"+didi_record_count let display=route_get(item,"priceText")
+            let quote={ref:ref product_name:route_get(item,"productName") product_category:route_get(item,"productCategory") price_text:display price_cents:route_cents(display) discounted_price_text:route_get(item,"priceDiscounted") currency:"CNY" source:"didi-taxi_estimate" quoted_at:at from:from to:to provider_from:route_get(structured,"from") provider_to:route_get(structured,"to") distance_km:route_get(structured,"distanceKm") eta:route_get(structured,"eta") basis:"当前时点估价；不保证未来接驳上车价格；优惠价不默认适用；未下单"}
+            didi_quotes[ref]=quote quotes.push(quote)
+        }}
+        agent_tool_result({success:true quotes:quotes route_attachment:"可attach_quote以明确地点语义对应作为费用估计；不同供应商上下车连接仍未知，不能改写高德几何"})
+    })
+}
+
+fn route_prefix_quote(prefix,origin,quote,leg_id,basis,id,deadline,budget){
+    let found=false let next=route_prefix_origin(origin,prefix.departure_ts)
+        for original in prefix.legs {
+        let leg=original
+        if original.id==leg_id {
+            if original.mode!="taxi" {return {success:false error:"报价只能替换明确出租车leg，不能覆盖公交/步行费用"}}
+            found=true leg=original.to_json().parse_json()
+            leg.price_cents=quote.price_cents leg.price_basis="didi-taxi_estimate；指定车型当前报价估计，替换原高德估价，不叠加"
+            leg.quote_ref=quote.ref leg.quote=quote leg.place_match_basis=basis leg.place_match_status="semantic-association-assumed" leg.provider_connection_status="unknown" leg.waiting_included=false
+            leg.warnings="保留高德路线几何与耗时；滴滴报价上下车点独立，连接未认证；当前价不保证未来接驳价"
+        }
+        let joined=route_prefix_extend(next,leg,id,deadline,budget)
+        if !joined.success {return {success:false error:joined.reason}}
+        next=joined.prefix
+    }
+    if !found {return {success:false error:"leg_id不在指定prefix中"}}
+    return {success:true prefix:next}
+}
+
+fn attach_quote(p,token){
+    let prefix=route_prefixes[p.prefix_id] let quote=didi_quotes[p.quote_ref]
+    if prefix==nil || quote==nil {agent_tool_result({success:false error:"prefix/quote必须属于本轮实际记录"}) return}
+    if quote.price_cents==nil {agent_tool_result({success:false error:"报价文本无法精确解析为费用；保留原显示，不能当零" quote:quote}) return}
+    if !p.place_basis.is_string() || p.place_basis.trim()=="" {agent_tool_result({success:false error:"需要起终点名称、城市、地址/入口对应依据；这是语义关联假设，不是坐标认证"}) return}
+    for leg in prefix.legs {if leg.id==p.leg_id {
+        let from_node=route_nodes[leg.from_ref] let to_node=route_nodes[leg.to_ref]
+        let from_city=route_get(route_get(from_node,"city_metadata"),"city") let to_city=route_get(route_get(to_node,"city_metadata"),"city")
+        if from_city!=nil && quote.from.city!=nil && from_city!=quote.from.city || to_city!=nil && quote.to.city!=nil && to_city!=quote.to.city {agent_tool_result({success:false error:"报价与路线节点实际城市不同；不能关联到此leg"}) return}
+    }}
+    route_extension_count+=1 let id="quoted-prefix-"+route_extension_count
+    let linked=route_prefix_quote(prefix,route_nodes["origin"],quote,p.leg_id,p.place_basis,id,arrive_by,constraints.budget_cents)
+    if !linked.success {agent_tool_result(linked) return}
+    let next=linked.prefix
+    route_prefixes[id]=next
+    let completed=[]
+    if next.node_ref=="destination" {completed.push(register_mixed_candidate(next,route_nodes["destination"],"taxi").id)}
+    agent_tool_result({success:true prefix:route_prefix_facts(next) quote:quote place_match_basis:p.place_basis connection_status:"unknown；没有将高德内部连接升级为滴滴上下车连接" completed_candidate_ids:completed facts:interface_facts()})
+}
+
 fn transit_strategies(){ return [0 1 2 3 4 5 7 8] }
 fn query_transit(p, token){
     if constraints == nil || position_record == nil || destination_record == nil { fail_task("交通查询缺少起终点") return }
@@ -1109,7 +1380,7 @@ fn query_driving(token){
     if position_record.currency != "CNY" || destination_record.currency != "CNY" || !position_record.citycode.is_string() || !destination_record.citycode.is_string() { fail_task("交通起终点城市或计价依据尚未核实") return }
     driving_done = true
     let at = time_now()
-    let params = "&origin=" + coord_text(position_record) + "&destination=" + coord_text(destination_record) + "&show_fields=cost,polyline&strategy=32"
+    let params = "&origin=" + coord_text(position_record) + "&destination=" + coord_text(destination_record) + "&show_fields=cost,polyline&strategy=0"
     amap_request("/v5/direction/driving", params, token, fn(data){
         add_candidates(nil, data, at, at, "query_driving")
         driving_completed = true
@@ -1121,7 +1392,7 @@ fn present_results(reason){
  for candidate in candidates { let check = route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")) candidate.feasible=check.passed candidate.reason=check.reason }
  phase = "proposal" show_status("已计算当前候选；已查范围不代表所有可能路线")
  refresh_generated_facts()
- if active_tool != nil { agent_tool_result({success:true comparison:comparison_summary() queried_transit_count:transit_count queried_driving:driving_done facts:interface_facts()}) }
+ if active_tool != nil { agent_tool_result({success:true comparison:comparison_summary() mixed_attempts:route_graph_facts().prefixes queried_transit_count:transit_count queried_driving:driving_done facts:interface_facts()}) }
 }
 fn read_source_tool(name, token, done){
     if (name == "read_calendar" || name == "read_notes") && location_mode() != "demo" { fail_task("当前真实模式未接通日历和笔记来源") return }
@@ -1220,7 +1491,7 @@ fn trace_initialize(){
     if !ordinal.is_number() || ordinal<1 || ordinal%1!=0 {trace_initialization_error="实例标识计数缺失或无效；开发记录不完整" trace_marker() return}
     try {fs.write(counter_path,{next:ordinal+1}.to_json())} {trace_initialization_error="实例标识写入失败；开发记录不完整" trace_marker() return}
     let keys=[]
-    for name in ["minimax_api_key" "amap_api_key"] {let key=route_get(config,name) if key.is_string() && key!="" {keys.push(key) keys.push(key.url_encode())}}
+    for name in ["minimax_api_key" "amap_api_key" "didi_mcp_key"] {let key=route_get(config,name) if key.is_string() && key!="" {keys.push(key) keys.push(key.url_encode())}}
     trace_state={session:session instance:"vm-"+ordinal directory:"dev-trace/"+session+"/vm-"+ordinal seq:0 written_seq:0 run:run_id incomplete:false keys:keys}
     try {fs.write(trace_state.directory+"/status.json",trace_status(trace_state).to_json())} {trace_state.incomplete=true}
     trace_emit("instance_started",{metadata:route_get(config,"development_trace_metadata")},nil)
@@ -1321,6 +1592,7 @@ fn start_task(){
     if task_timer != nil { stop_timer(task_timer) }
     let token = run_id
     received_at = time_now() arrive_by = 0 loop_started_at = received_at automatic_seconds = 0 step_count = 0 protocol_retry_count = 0
+    route_nodes={} route_prefixes={} route_extension_count=0 didi_places={} didi_quotes={} didi_record_count=0
     pending_user_poi = nil condition_open = false invalidate_map() picker_request += 1 picker_open = false viewed_route_id = "" expanded_routes = false
     request_text = text user_limits = explicit_limits(text) observations = [] model_requests = [] decisions = [] source_snapshots = [] source_records = [] calendar_events = [] note_records = []
     position_record = nil constraints = nil destination_record = nil poi_records = [] candidates = [] chosen = nil used_tools = []
@@ -1449,6 +1721,10 @@ fn agent_tools(){let tools = [
  tool("search_places","用真实高德搜索公开地点，返回完整POI和城市；不采用目标。",{query:{type:"string"}},["query"])
  tool("adopt_destination","采用已有poi_id为本任务目标。basis说明来自用户选择或明确推断；不伪造航站楼。",{poi_id:{type:"string"} basis:{type:"string"}},["poi_id" "basis"])
  tool("query_transit","查询实际起终点公交；策略0推荐/1经济/2少换乘/3少步行/4舒适/5无地铁/7地铁优先/8快。",{strategy:{type:"number"}},["strategy"])
+ tool("extend_route","从本轮prefix延长一整段到真实图节点，确定性累加时间/票价；origin为初始prefix，to_ref来自graph.nodes。walk/taxi/transit，strategy公交可选。未知候车的后续公交按最早场景查询。",{prefix_id:{type:"string"} to_ref:{type:"string"} mode:{type:"string"} strategy:{type:"number"}},["prefix_id" "to_ref" "mode"])
+ tool("search_didi_places","搜索滴滴供应商真实地点，city完整城市名；报价坐标只用本工具ref。",{query:{type:"string"} city:{type:"string"}},["query" "city"])
+ tool("attach_quote","将本轮指定车型报价作为明确taxi leg费用估计替换，代码重算prefix总价。place_basis记录两端名称/城/地址入口对应假设；不认证不同供应商几何连接。",{prefix_id:{type:"string"} leg_id:{type:"string"} quote_ref:{type:"string"} place_basis:{type:"string"}},["prefix_id" "leg_id" "quote_ref" "place_basis"])
+ tool("quote_didi","用本轮滴滴地点ref询价，多车型当前估价；不下单，不自动认作高德leg价格。",{from_ref:{type:"string"} to_ref:{type:"string"}},["from_ref" "to_ref"])
  tool("query_driving","查询实际起终点驾车与估价，保留未知候车/费用。",{},[])
  tool("compare_routes","确定性重新计算所有当前候选的时间、费用与原截止是否成立，返回已查范围；不自动选方案/结束。",{},[])
  tool("render_ui","替换本次整稿为原生Splash源码并返回实际执行诊断。success只表示无已报告执行错误，不代表内容目标完成。source在View.on_render中执行；实际API与语法可read_skill(native_ui)。",{source:{type:"string"}},["source"])
@@ -1518,7 +1794,7 @@ fn agent_execute_next(token){
   elif name=="set_constraints" {if set_constraints(p){finish_tool_from_state(token)} else {agent_tool_result({success:false error:constraint_error facts:interface_facts()})}}
   elif name=="search_places" {
     let at=time_now() let city="" if position_record!=nil {city="&city="+position_record.citycode.url_encode()}
-    amap_request("/v3/place/text","&citylimit=false&extensions=all&children=1"+city+"&keywords="+p.query.url_encode(),token,fn(data){poi_records=parse_pois(data,at,false) picker_pois=poi_records observe("search_places",poi_records) agent_tool_result({success:true places:poi_records})})
+    amap_request("/v3/place/text","&citylimit=false&extensions=all&children=1"+city+"&keywords="+p.query.url_encode(),token,fn(data){poi_records=parse_pois(data,at,false) register_route_pois(poi_records) picker_pois=poi_records observe("search_places",poi_records) agent_tool_result({success:true places:poi_records})})
   }
   elif name=="adopt_destination" {
     let poi=nil for item in poi_records {if item.id==p.poi_id {poi=item}}
@@ -1528,6 +1804,10 @@ fn agent_execute_next(token){
   }
   elif name=="query_transit" {query_transit(p,token)}
   elif name=="query_driving" {query_driving(token)}
+  elif name=="extend_route" {extend_route(p,token)}
+  elif name=="search_didi_places" {search_didi_places(p,token)}
+  elif name=="quote_didi" {quote_didi(p,token)}
+  elif name=="attach_quote" {attach_quote(p,token)}
   elif name=="compare_routes" {present_results("")}
   elif name=="render_ui" {
     interface_revision+=1 let revision=interface_revision mount_interface(p.source,token,revision)
@@ -1590,6 +1870,7 @@ fn interface_route_facts(candidate, check){
         }
     }
     return {id: candidate.id kind: candidate.kind kind_label: kind_text(candidate.kind) price_cents: candidate.price_cents currency: candidate.currency price_label: money_text(candidate.price_cents)
+        known_cost_cents:route_get(candidate,"known_cost_cents") budget_status:route_get(candidate,"budget_status") deadline_status:route_get(candidate,"deadline_status") waiting_slack_seconds:route_get(candidate,"waiting_slack_seconds") legs:if route_get(candidate,"prefix_id")!=nil {route_prefix_facts(route_prefixes[candidate.prefix_id]).legs} else {[]}
         duration_seconds: candidate.duration_seconds duration_label: duration_text(candidate.duration_seconds) departure_ts: candidate.departure_ts estimated_arrival_ts: check.estimated_arrival_ts
         passed: check.passed reason: check.reason reasons: route_reasons(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
         source: candidate.source source_ts: candidate.source_ts expires_at: candidate.expires_at estimated: candidate.estimated warnings: candidate.warnings
@@ -1604,7 +1885,8 @@ fn interface_facts(){
         routes.push(interface_route_facts(candidate, check))
     }
     for record in source_records { sources.push({id: route_get(record, "id") kind: route_get(record, "kind") source: route_get(record, "source") mock: route_get(record, "mock") source_time: route_get(record, "source_time") read_at: route_get(record, "read_at")}) }
-    return {phase: phase status: runtime_status error: interface_error now: time_now() received_at: received_at arrive_by: arrive_by
+    if position_record!=nil && destination_record!=nil && constraints!=nil {prepare_route_graph()}
+    return {route_graph:route_graph_facts() taxi_quotes:didi_quotes taxi_quote_places:didi_places phase: phase status: runtime_status error: interface_error now: time_now() received_at: received_at arrive_by: arrive_by
         origin_available: position_record != nil destination_available: destination_record != nil limits_available: user_limits != nil
         origin: position_record destination: destination_record limits: user_limits source_label: source_label() sources: sources sources_current: source_valid answer: answer_text
         comparison: if candidates.len() > 0 { comparison_summary() } else { "" } routes: routes viewed_route_id: viewed_route_id maps_available: user_limits != nil viewport: ui_viewport rendering_environment: {scroll:"viewport表示可见区域，不是内容高度上限；父区域承载运行反馈，子ScrollYView中的View/Fit内容可自然增长并滚动" label_default:"宽度Fill、高度Fit、Flow.Right wrap:true；可显式覆盖原生属性"}

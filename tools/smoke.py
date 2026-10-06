@@ -160,6 +160,57 @@ fn trace_fixture_poll(){
 start_timeout(0.2,||trace_fixture_poll())
 '''
 
+MIXED_FIXTURE=r'''
+let mixed_done=false
+fn agent_pump(token){
+ if mixed_done {return} mixed_done=true agent_active=false phase="waiting"
+ let complete=candidates[candidates.len()-1]
+ let first=route_prefixes["prefix-1-0"] let second=route_prefixes["prefix-2-0"] let final=route_prefixes["prefix-3-0"]
+ let leg=final.legs[2]
+ let priced=route_prefix_quote(final,route_nodes["origin"],{ref:"quote:test" price_cents:900},final.legs[0].id,"合成同地点估价关联；不同坐标不认证","quoted",arrive_by,5000).prefix
+ let unknown={id:"unknown" to_ref:leg.to_ref actual_origin:leg.actual_origin actual_endpoint:leg.actual_endpoint request_bound:true origin_complete:true endpoint_complete:true price_cents:nil duration_seconds:leg.duration_seconds departure_ts:leg.departure_ts source_ts:leg.source_ts waiting_included:false segments:leg.segments}
+ let partial=route_prefix_extend(second,unknown,"unknown",arrive_by,5000).prefix
+ let broken={id:"broken" to_ref:leg.to_ref actual_origin:"115,24" actual_endpoint:leg.actual_endpoint request_bound:true origin_complete:true endpoint_complete:true price_cents:1200 duration_seconds:300 departure_ts:leg.departure_ts source_ts:leg.source_ts waiting_included:false segments:leg.segments}
+ let disconnected=route_prefix_extend(second,broken,"broken",arrive_by,5000)
+ let budget=route_prefix_extend(second,leg,"over",arrive_by,2000).prefix
+ let late=route_prefix_extend(second,leg,"late",time_now()-1,5000).prefix
+ fs.write("harness-smoke.json",{checks:[
+ {name:"公交前后局部打车组成三完整leg" passed:final.legs.len()==3 && final.legs[0].mode=="taxi" && final.legs[1].mode=="transit" && final.legs[2].mode=="taxi"}
+ {name:"每笔完整估价仅相加一次" passed:complete.price_cents==3000 && first.price_cents==1200 && second.price_cents==1800 && final.known_cost_cents==3000}
+ {name:"出租车候车未知与价格可比较分离" passed:final.budget_status=="within_estimate" && final.deadline_status=="unknown" && final.waiting_slack_seconds>0 && !complete.feasible}
+ {name:"未知报价不是零且保留已知小计" passed:partial.price_cents==nil && partial.known_cost_cents==1800 && partial.budget_status=="unknown"}
+ {name:"断开实际几何拒绝拼接" passed:!disconnected.success}
+ {name:"超预算与过期限可独立证明" passed:budget.budget_status=="over_budget" && late.deadline_status=="over_deadline"}
+ {name:"原prefix不被后续扩展重算/重复收费" passed:second.legs.len()==2 && second.price_cents==1800}
+ {name:"OD出租车真实polyline末端与报价保留" passed:route_candidates(nil,mixed_driving("114,22","114.03,22"),time_now(),arrive_by,5000,time_now())[0].endpoint_complete}
+ {name:"供应商报价替换一leg且派生总价不叠加/不改原prefix" passed:priced.price_cents==2700 && final.price_cents==3000 && priced.legs[0].price_cents==900 && priced.legs[0].provider_connection_status=="unknown" && route_prefix_facts(second).completion_status=="incomplete" && route_prefix_facts(second).full_journey_price_cents==nil}
+ {name:"已知站点与公交时刻进入真实工具参数" passed:mixed_params.search("&date=")>=0 && mixed_params.search("&time=")>=0 && route_nodes["stop:a"]!=nil}
+ ]}.to_json())
+ render_content()
+}
+let mixed_params=""
+fn mixed_driving(from,to){return {status:"1" route:{origin:from destination:to taxi_cost:"12" paths:[{cost:{duration:"300"} steps:[{polyline:from+";"+to}]}]}}}
+fn amap_request(path,params,token,done){
+ let from=params.split("&origin=")[1].split("&")[0] let to=params.split("&destination=")[1].split("&")[0]
+ let data=mixed_driving(from,to)
+ if path=="/v5/direction/transit/integrated" {mixed_params=params data={status:"1" route:{origin:from destination:to transits:[{cost:{duration:"900" transit_fee:"6"} segments:[{walking:{steps:[{polyline:from+";"+to}]}}]}]}}}
+ start_timeout(0.01,||done(data))
+}
+start_timeout(1,||{
+ run_id+=1 received_at=time_now() arrive_by=received_at+2400 user_limits={minutes:40 budget_cents:5000} constraints={budget_cents:5000}
+ let city={city:"fixture" citycode:"0755" adcode:"440306" currency:"CNY"}
+ position_record={name:"fixture origin" source:"mock" mock:true coordinate_system:"GCJ-02" longitude:114 latitude:22 city:"fixture" citycode:"0755" adcode:"440306" currency:"CNY" sampled_at_unix:received_at}
+ destination_record={name:"fixture destination" source:"mock" longitude:114.03 latitude:22 city:"fixture" citycode:"0755" adcode:"440306" currency:"CNY"}
+ register_route_node("stop:a","fixture station A","114.01,22","mock",city)
+ register_route_node("stop:b","fixture station B","114.02,22","mock",city)
+ agent_active=true phase="running" agent_calls=[
+ {id:"mixed-taxi-a" function:{name:"extend_route" arguments:{prefix_id:"origin" to_ref:"stop:a" mode:"taxi"}.to_json()}}
+ {id:"mixed-transit" function:{name:"extend_route" arguments:{prefix_id:"prefix-1-0" to_ref:"stop:b" mode:"transit" strategy:0}.to_json()}}
+ {id:"mixed-taxi-b" function:{name:"extend_route" arguments:{prefix_id:"prefix-2-0" to_ref:"destination" mode:"taxi"}.to_json()}}
+ ] agent_call_index=0 agent_execute_next(run_id)
+})
+'''
+
 def main():
  sp=importlib.util.spec_from_file_location('agent',ROOT/'tools/agent.py');a=importlib.util.module_from_spec(sp);sp.loader.exec_module(a)
  (ROOT/'build/smoke').mkdir(exist_ok=True,parents=True);w=Path(tempfile.mkdtemp(prefix='navigation-harness-',dir=ROOT/'build/smoke'))
@@ -167,6 +218,7 @@ def main():
  for p in [a.STATE,a.HOME_DIR,a.CORE]:p.mkdir(parents=True,exist_ok=True)
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
  if '--trace' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+TRACE_FIXTURE
+ if '--mixed-routing' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn amap_request(','fn product_amap_request(',1)+'\n'+MIXED_FIXTURE
  if '--map-details' in sys.argv:source=original.replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_FIXTURE
  if '--terminal-content' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1)+'\n'+TERMINAL_FIXTURE
  if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
@@ -311,7 +363,7 @@ def main():
    time.sleep(.1)
   assert report,'宿主未完成工具会话；查看 '+str(w/'native.log')
   assert all(row['passed'] for row in report['checks']),report
-  if recovery or '--map-details' in sys.argv or '--terminal-content' in sys.argv:
+  if recovery or '--map-details' in sys.argv or '--terminal-content' in sys.argv or '--mixed-routing' in sys.argv:
    report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True,mode='Android' if '--terminal-content' in sys.argv else 'desktop')
    (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print('PASS: '+str(len(report['checks']))+'项定向原生检查；'+str(w/'report.json'));return
   time.sleep(3)

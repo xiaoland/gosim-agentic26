@@ -87,3 +87,11 @@ Apple 平台事件明确使用 WGS84，并携带系统采样时间与精度；�
 [xiaoland/svc](https://github.com/xiaoland/svc) 本次采用版本为 Corpus 15.0.0，commit `4fe4c66ac4deb35209069c00b1bbdc1b22aae3af`。仅采用 `corpus/specs/` 的知识归属和 `corpus/task-packet/` 的任务控制语义，固定入口见 [知识导航](index.md)；未安装完整 CLI，也未引入其它模块。上游模板按需参考，项目说明与实际任务包由本仓库维护。
 
 `../factory26/AGENTS.md` 是本轮用户指定的本地参考，读取于 2026-10-01。只借鉴知识回流、非简单任务的 packet、授权追溯和有界协作原则；其专属实验规则、模型与预算配置、自主提交授权和测试禁令不转移到本仓库。
+
+## 打车询价与主动混合路线
+
+2026-10-06核对[高德路径规划2.0](https://lbs.amap.com/api/webservice/guide/api/newroute)：驾车route.taxi_cost是元单位出租车估算，strategy=0只返回单路线；不是滴滴车型报价。使用公开深圳端点及当前key的实际响应核验多路径有route级估价、单路径同价，发现应用在多路径分支主动丢弃价格。实际证据和修复入口归[混合路线任务](../tasks/mixed-routing/packet.md)，不能从文档字段存在断言所有地点／请求均会有价。
+
+[滴滴官方开发文档](https://mcp.didichuxing.com/api)提供正式MCP、个人账号激活key、地点查询及taxi_estimate。询价参数坐标来自maps_textsearch，价格来自structuredContent.items[].priceText（元）；生产与sandbox分开，后者Mock不能作实时报价。坐标系在该文档未声明，不能假定高德点可直接替代。当前只计划询价，不接创建／取消订单。接入验证需正式独立key，不能以高德key替代。
+
+[腾讯出行MCP接入指南](https://tms-web-1g1czzwka2fd06f2-1301126013.ap-shanghai.app.tcloudbase.com/api/18-doc-mcp-guide.html)提供独立应用KEY及询价工具，是备选调查结果，尚未实现或验证腾讯报价。优先接滴滴，避免两套提供方适配在截止前重复建设。

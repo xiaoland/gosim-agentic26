@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 import uuid
-from urllib.parse import urlsplit
+from urllib.parse import quote, quote_plus, urlsplit
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -121,7 +121,8 @@ def env_values(required=True):
 
 
 def secrets(values):
-    return [values[name].encode() for name in ('MINIMAX_API_KEY', 'AMAP_API_KEY') if values.get(name)]
+    raw = [values[name] for name in ('MINIMAX_API_KEY', 'AMAP_API_KEY', 'DIDI_MCP_KEY') if values.get(name)]
+    return [item.encode() for value in raw for item in {value, quote(value, safe=''), quote_plus(value)}]
 
 
 def no_secrets(data, values, label):
@@ -131,7 +132,7 @@ def no_secrets(data, values, label):
 def host_env(hidden=False):
     env = dict(os.environ)
     for name in ('MAKEPAD_HOME', 'MAKEPAD_WM_ROOT', 'MAKEPAD_WM_THEME', 'MAKEPAD_REMOTE', 'MAKEPAD_HIDE_WINDOWS',
-                 'OCTOS_APP_CORE_BIN', 'OCTOSENSE_HUB', 'OCTOSENSE_HUB_ANCHOR', 'MINIMAX_API_KEY', 'AMAP_API_KEY',
+                 'OCTOS_APP_CORE_BIN', 'OCTOSENSE_HUB', 'OCTOSENSE_HUB_ANCHOR', 'MINIMAX_API_KEY', 'AMAP_API_KEY', 'DIDI_MCP_KEY',
                  'FAKE_GPS_FILE', 'FAKE_GPS_MS'):
         env.pop(name, None)
     env.update(OCTOSENSE_HOME=str(HOME_DIR), OCTOSENSE_APP_DATA=str(HOME_DIR / 'apps'),
@@ -419,6 +420,7 @@ def configure(values, jail, location_mode="live", trace=False):
         write_private(jail / 'dev-trace' / trace_session / 'instance-counter.json', json_bytes({'next': 1}))
     write_private(jail / 'private-config.json', json_bytes({
         'amap_api_key': values['AMAP_API_KEY'], 'minimax_api_key': values['MINIMAX_API_KEY'],
+        'didi_mcp_key': values.get('DIDI_MCP_KEY', ''),
         'minimax_base_url': values['MINIMAX_BASE_URL'], 'minimax_model': LOCK['model'],
         'location_mode': location_mode,
         'development_trace': trace, 'development_trace_session': trace_session,
@@ -656,7 +658,8 @@ def read_trace(session_id=None, instance=None):
     directory = jail / 'dev-trace' / session_id / instance
     require(directory.is_dir() and not directory.is_symlink(), '指定的开发 trace 实例目录不存在。')
     values = env_values(required=False)
-    configured = {'MINIMAX_API_KEY': config.get('minimax_api_key', ''), 'AMAP_API_KEY': config.get('amap_api_key', '')}
+    configured = {'MINIMAX_API_KEY': config.get('minimax_api_key', ''), 'AMAP_API_KEY': config.get('amap_api_key', ''),
+                  'DIDI_MCP_KEY': config.get('didi_mcp_key', '')}
     status_path = directory / 'status.json'
     require(status_path.is_file() and not status_path.is_symlink(), 'trace 状态尚未写入；不采用旧事件作为当前证据。')
     status_data = status_path.read_bytes()
@@ -731,7 +734,8 @@ def trace_output(action, session_id=None, instance=None, destination=None):
             no_secrets(host_log, env_values(required=False), 'trace 宿主日志')
             config = json.loads((jail_path() / 'private-config.json').read_bytes())
             no_secrets(host_log, {'MINIMAX_API_KEY': config.get('minimax_api_key', ''),
-                                  'AMAP_API_KEY': config.get('amap_api_key', '')}, 'trace 宿主日志')
+                                  'AMAP_API_KEY': config.get('amap_api_key', ''),
+                                  'DIDI_MCP_KEY': config.get('didi_mcp_key', '')}, 'trace 宿主日志')
             status['host_log'].update(included=True, export_file=destination.with_suffix('.host.log').name)
         write_private(destination, payload)
         if host_log is not None:
