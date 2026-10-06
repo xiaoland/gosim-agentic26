@@ -4,14 +4,14 @@
 
 set_constraints 关联实际 event_id/note_id 及逐字原文 citations；minutes/budget_cents 沿用用户明确数字条件。search_places 搜索真实高德地点但不采用；adopt_destination 使用返回的 poi_id，不编造坐标或航站楼。没有用户明确指定机场时，采用的地点是推断，需要说清依据。
 
-query_transit/query_driving 取得实际起终点交通。query_driving 用单路径策略取得该完整行程的高德出租车估价，单位元转整数分；这是供应商估算，不是滴滴实时多车型报价，也不含已核实的候车。compare_routes 计算当前全部候选时间、费用与原截止是否成立；只说明已查范围，不证明已查遍所有路线。费用、候车、接驳未知不等于零。路线ID、真实分段、费用与来源均在 facts.routes 中。用户原始分钟数自 received_at 起算，工具和交互耗时都算在内。
+query_transit/query_driving 取得实际起终点交通。query_driving 用单路径策略取得该完整行程的高德出租车估价，单位元转整数分；这是供应商估算，不是滴滴实时多车型报价，也不含已核实的候车。compare_routes 计算当前全部候选时间、费用与原截止是否成立；只说明已查范围，不证明已查遍所有路线。费用、候车、接驳未知不等于零。交通查询返回本次新增路线摘要；get_route({id}) 可按本轮实际ID取得完整分段、费用、来源和当前校验，get_route_graph() 可取得全部接驳节点与前缀。原生 snapshot().routes 保留全部候选详情。用户原始分钟数自 received_at 起算，工具和交互耗时都算在内。
 
 当前不保存 Trip 或查询结果，不提供问答澄清。工具缺少数据或失败会返回实际错误；可继续取得可得事实，或生成本次结果/具体缺失的界面。查看只改变本次查看对象，不代表已开始导航。每次顶部查询重新建立输入、起算时间和内轮工具历史；没有固定执行顺序。
 
-compare_routes 的 facts.routes 每项 passed 是工具按当前时间与资料计算的结论；passed=false 不能称为已符合。reason（及有提供时的 reasons）说明未成立的具体条件，包括目的地末段未核实。已知耗时或价格在数值范围内，不等于未知末段、费用或候车已得到核实；呈现这些真实缺失与估计来源。
+compare_routes 返回的 routes 每项 passed 是工具按当前时间与资料计算的结论；passed=false 不能称为已符合。reason（及有提供时的 reasons）说明未成立的具体条件，包括目的地末段未核实。已知耗时或价格在数值范围内，不等于未知末段、费用或候车已得到核实；呈现这些真实缺失与估计来源。
 
 
-extend_route(prefix_id,to_ref,mode,strategy) 查询一条完整新路段并延长已取得的前缀。初始 prefix_id 为 origin；to_ref 来自 facts.route_graph.nodes（destination 是本次目标，poi:…／stop:… 来自实际地点／公交站结果），mode 为 walk、taxi 或 transit，strategy 是可选公交策略。每次返回新的 prefix，原前缀不变；可以继续连接不同方式，不需要按固定方式或首末位置换乘。公交到站与经停站从实际响应入图；search_places 的真实地点也可作为接驳点。已查询图不等于所有现实站点和路线。
+extend_route(prefix_id,to_ref,mode,strategy) 查询一条完整新路段并延长已取得的前缀。初始 prefix_id 为 origin；to_ref 来自工具返回的 new_nodes 或 get_route_graph().graph.nodes（destination 是本次目标，poi:…／stop:… 来自实际地点／公交站结果），mode 为 walk、taxi 或 transit，strategy 是可选公交策略。每次返回新的 prefix，原前缀不变；可以继续连接不同方式，不需要按固定方式或首末位置换乘。公交到站与经停站从实际响应入图；search_places 的真实地点也可作为接驳点。已查询图不等于所有现实站点和路线。
 
 每个 leg 的费用来自这次完整行程报价，不能按原公交路线的站数或出租车全程距离分摊。出租车完整 leg 估价各自相加，不重复加高速费，也不把旧公共交通总价再次加入。候选保留腿段、真实几何首末点、查询与预计出发时间、报价来源。供应商道路首末点不等于请求 POI 时，图会提供实际 pickup／arrival 节点；缺失连接不能直接当已到站或已到目标，可用实际步行查询补连接。请求回显坐标不是路径已连接的证据。
 

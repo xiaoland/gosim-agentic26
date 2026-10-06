@@ -1,6 +1,6 @@
 # Navigation 原生 Splash API
 
-render_ui 的 source 替换本次整稿，在已经存在的 View.on_render 闭包中执行；不是向旧稿追加节点。可以包含脚本语句和原生控件表达式；这里是 Makepad Splash，不是 JavaScript。空值是 nil；函数写 fn(x){...} 或 || {...}；字符串与数字可用 + 连接。
+render_ui 的 source 替换本次整稿，在已经存在的 View.on_render 闭包中执行；不是向旧稿追加节点。可以包含脚本语句和原生控件表达式；这里是 Makepad Splash，不是 JavaScript。不支持 XML/JSX 标签（例如 <View>、</View>）；原生控件直接使用 View{...} 表达式。显示文字是带引号的字符串（例如 text:"最早到达"），不能把中文标题当作未定义变量或把 source 当作隐含变量。空值是 nil；函数写 fn(x){...} 或 || {...}；字符串与数字可用 + 连接。
 
 每次顶部查询开始一个新任务；不存在澄清问答、跨查询继续或结果保存。
 

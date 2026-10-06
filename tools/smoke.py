@@ -260,6 +260,100 @@ fn late_tick(){
 start_timeout(0.2,||late_tick())
 '''
 
+PERFORMANCE_FIXTURE=r'''
+let performance_started=false let performance_finished=false let performance_writes=0 let performance_checks=[]
+let performance_old_messages=[] let performance_new_body_bytes=0 let performance_old_body_bytes=0
+let performance_origins=false let performance_snapshot_bytes=0
+let performance_detail=false let performance_graph=false let performance_render=false let performance_calls=0 let performance_round=0
+fn performance_set_facts(text){performance_writes+=1 ui.generated.fact_state.set_text(text)}
+fn performance_call(id,name,args){return {id:id type:"function" function:{name:name arguments:args.to_json()}}}
+fn agent_tool_result(result){
+ if active_tool!=nil {
+  let name=active_tool.function.name
+  let legacy=result
+  if name=="query_driving" {let origin=false let destination=false for node in result.new_nodes {if node.ref=="origin" {origin=true} if node.ref=="destination" {destination=true}} performance_origins=origin && destination legacy={success:true facts:performance_legacy_facts() records:[]}}
+  elif name=="compare_routes" {legacy={success:true comparison:comparison_summary() mixed_attempts:route_graph_facts().prefixes queried_transit_count:transit_count queried_driving:driving_done facts:performance_legacy_facts()}}
+  elif name=="render_ui" {legacy={success:result.success diagnostics:result.diagnostics viewport:result.viewport facts:performance_legacy_facts()} performance_render=result.success}
+  elif name=="get_route" {performance_detail=result.success && result.route.segments.len()>0 && result.route.price_cents==1200}
+  elif name=="get_route_graph" {performance_graph=result.success && result.graph.nodes.len()>=75}
+  performance_old_messages.push({role:"tool" tool_call_id:active_tool.id content:legacy.to_json()})
+  performance_calls+=1
+ }
+ product_agent_tool_result(result)
+}
+fn amap_request(path,params,token,done){
+ let data={status:"1" route:{origin:"114,22" destination:"114.03,22" taxi_cost:"12" paths:[{cost:{duration:"300"} steps:[{polyline:"114,22;114.03,22"}]}]}}
+ start_timeout(0.01,||done(data))
+}
+fn agent_pump(token){
+ if !performance_started {return}
+ agent_active=false phase="waiting" answer_text="" render_content()
+ let body={model:"MiniMax-M3" messages:agent_messages tools:agent_tools()}
+ let oldbody={model:"MiniMax-M3" messages:performance_old_messages tools:agent_tools()}
+ performance_new_body_bytes=body.to_json().to_bytes().len() performance_old_body_bytes=oldbody.to_json().to_bytes().len()
+ performance_checks.push({name:"同业务记录工具消息减少且保持按需详情" passed:performance_new_body_bytes<performance_old_body_bytes && performance_calls==5 && performance_detail && performance_graph && performance_render})
+ performance_checks.push({name:"增量交通结果保留实际起终点图节点" passed:performance_origins})
+ performance_snapshot_bytes=ui.generated.fact_state.text().to_bytes().len()
+ performance_checks.push({name:"所有候选和原生地图几何仍可取得" passed:candidates.len()==7 && map_geometry(candidates[0]).paths.len()==20 && ui.generated.fact_state.text().parse_json().routes.len()==7})
+ start_timeout(0.3,||performance_refresh())
+}
+fn performance_refresh(){
+ let before=performance_writes
+ for i in 100 {refresh_generated_facts()}
+ performance_checks.push({name:"无状态变化重复刷新不写完整facts" passed:performance_writes==before})
+ ui_facts_revision+=1 refresh_generated_facts()
+ performance_checks.push({name:"实际状态修订仍更新完整snapshot" passed:performance_writes==before+1 && ui.generated.fact_revision.text()==""+ui_facts_revision})
+ start_timeout(0.1,||performance_repeat())
+}
+fn performance_repeat(){
+ performance_round+=1 ui_facts_revision+=1 refresh_generated_facts()
+ for i in 20 {render_content() refresh_generated_facts()}
+ if performance_round<30 {start_timeout(0.05,||performance_repeat()) return}
+ performance_checks.push({name:"30轮完整snapshot刷新保留真实详情与空诊断" passed:ui.generated.diagnostics()=="" && ui.generated.fact_state.text().parse_json().routes.len()==7 && generated_render_complete})
+ start_timeout(0.2,||{
+  let oldrun=run_id
+  picker_pois=[{id:"old-place" name:"old fixture"}] picker_preview_poi=picker_pois[0] picker_status="old status"
+  ui.sentence.set_text("40分钟内到机场，预算50元")
+  start_task()
+  start_timeout(0.05,||{
+   performance_checks.push({name:"独立新查询没有旧地点/旧工具或稿参数" passed:run_id>oldrun && picker_pois.len()==0 && picker_preview_poi==nil && picker_status=="" && agent_calls.len()==0 && active_tool==nil && agent_call_index==0})
+   fs.write("harness-smoke.json",{checks:performance_checks old_body_bytes:performance_old_body_bytes new_body_bytes:performance_new_body_bytes rounds:performance_round fact_writes:performance_writes snapshot_bytes:performance_snapshot_bytes}.to_json())
+  })
+ })
+}
+fn agent_begin(){
+ if performance_started && performance_finished {agent_active=false phase="waiting" return}
+}
+fn performance_seed(){
+ performance_started=true run_id+=1 agent_active=true phase="running" received_at=time_now() arrive_by=received_at+2400
+ user_limits={minutes:40 budget_cents:5000} constraints={budget_cents:5000}
+ position_record={name:"synthetic origin" source:"fixture" mock:true coordinate_system:"GCJ-02" longitude:114 latitude:22 city:"深圳市" citycode:"0755" adcode:"440306" currency:"CNY" sampled_at_unix:received_at}
+ destination_record={name:"synthetic destination" source:"fixture" longitude:114.03 latitude:22 city:"深圳市" citycode:"0755" adcode:"440306" currency:"CNY"}
+ route_nodes={} route_prefixes={} candidates=[] source_records=[] source_snapshots=[]
+ for i in 75 {register_route_node("fixture-node-"+i,"公开合成站点"+i,"114,22","fixture",nil)}
+ for i in 6 {
+  let segments=[]
+  for j in 20 {segments.push({road:"合成完整路段：换乘入口、票价来源和候车未知需要保留；"+j distance:"1000" duration:"300" polyline:"114,22;114.03,22"})}
+  let candidate=route_candidate("perf-"+i,"taxi",300,1200,received_at,received_at,"114.03,22","114.03,22",false,segments)
+  candidate.request_bound=true candidate.origin_complete=true
+  candidates.push(candidate)
+ }
+ agent_messages=[{role:"system" content:"synthetic same-record performance comparison"} {role:"user" content:({request:"公开合成查询" facts:{position:position_record destination:destination_record}}).to_json()}]
+ performance_old_messages=[agent_messages[0] agent_messages[1]]
+ agent_calls=[performance_call("perf-drive","query_driving",{}) performance_call("perf-compare","compare_routes",{}) performance_call("perf-detail","get_route",{id:"perf-0"}) performance_call("perf-graph","get_route_graph",{}) performance_call("perf-render","render_ui",{source:"result := Label{text:\"Performance result: complete local details\"} Button{text:\"Open detail\" on_click:||emit({action:\"view_route\" id:\"perf-0\"})}"})]
+ let assistant={role:"assistant" content:nil tool_calls:agent_calls}
+ agent_messages.push(assistant) performance_old_messages.push(assistant) agent_call_index=0
+ agent_execute_next(run_id)
+ performance_finished=true
+}
+fn performance_tick(){
+ let identity=nil try {identity=ui.trace_identity.text().parse_json()} {}
+ if trace_state!=nil && identity!=nil && identity.instance==trace_state.instance && fs.exists("performance-go.json") && !performance_started {performance_seed()}
+ if !performance_started {start_timeout(0.1,||performance_tick())}
+}
+start_timeout(1,||performance_tick())
+'''
+
 def main():
  sp=importlib.util.spec_from_file_location('agent',ROOT/'tools/agent.py');a=importlib.util.module_from_spec(sp);sp.loader.exec_module(a)
  (ROOT/'build/smoke').mkdir(exist_ok=True,parents=True);w=Path(tempfile.mkdtemp(prefix='navigation-harness-',dir=ROOT/'build/smoke'))
@@ -270,7 +364,15 @@ def main():
  if '--mixed-routing' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn amap_request(','fn product_amap_request(',1)+'\n'+MIXED_FIXTURE
  if '--map-details' in sys.argv:source=original.replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_FIXTURE
  if '--terminal-content' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1)+'\n'+TERMINAL_FIXTURE
- if '--late-render' in sys.argv:source=original.replace('start_timeout(0.02, || {last_facts','start_timeout(0.75, || {last_facts',1).replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+LATE_FIXTURE
+ if '--late-render' in sys.argv:
+  context=original[original.index('fn generated_context(){'):original.index('fn mount_interface(')]
+  assert context.count('start_timeout(0.02, || {')==1, '初次generated context timer必须唯一'
+  delayed=context.replace('start_timeout(0.02, || {','start_timeout(0.75, || {',1)
+  source=original.replace(context,delayed,1).replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+LATE_FIXTURE
+ if '--performance' in sys.argv:
+  legacy=subprocess.check_output(['git','show','015a81b:bundle/main.splash'],cwd=ROOT).decode()
+  legacy=legacy[legacy.index('fn interface_facts(){'):legacy.index('fn generated_context(){')].replace('fn interface_facts(){','fn performance_legacy_facts(){',1)
+  source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1).replace('fn agent_begin(','fn product_agent_begin(',1).replace('fn amap_request(','fn product_amap_request(',1).replace('ui.generated.fact_state.set_text(', 'performance_set_facts(')+'\n'+legacy+'\n'+PERFORMANCE_FIXTURE
  if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
  env=a.host_env(True);process=None;port=None
  def q(route,**args):return urlopen(f'http://127.0.0.1:{port}/'+route+('?' + urlencode(args) if args else ''),timeout=15).read()
@@ -301,10 +403,19 @@ def main():
   manifest=json.loads((mount/'manifest.json').read_text());manifest['id']='os.agentic26-navigation';(mount/'manifest.json').write_text(json.dumps(manifest));(mount/'main.splash').write_text(source)
   subprocess.run([str(ROOT.parent/'.octosense-agentic26/OctoSense-App-Hub/target/release/hub'),'stamp',str(mount)],stdout=subprocess.DEVNULL,check=True)
   a.init_demo();jail=a.jail_path();a.materialize_skills(ROOT/'bundle',jail);(jail/'private-config.json').write_text('{"location_mode":"demo"}');(jail/'trip.json').write_text('historical fixture ignored');(jail/'agent-run.json').write_text('historical audit ignored')
-  if '--trace' in sys.argv or '--late-render' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
-  if '--trace' in sys.argv or '--late-render' in sys.argv:
+  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
+  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv:
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   launch('native');report=None
+  if '--performance' in sys.argv:
+   time.sleep(3)
+   q('k',c='Space',cmd=1,wait=1)
+   for ch in 'android':q('k',c='Key'+ch.upper(),wait=1)
+   q('k',c='enter',wait=1);time.sleep(1)
+   q('m',k='down',x=200,y=300,wait=1)
+   for y in range(320,570,25):q('m',k='move',x=200,y=y,wait=1)
+   q('m',k='up',x=200,y=570,wait=1);q('t',t='Navigation',wait=1);q('k',c='enter',wait=1);time.sleep(1)
+   (jail/'performance-go.json').write_text('{}')
   if '--trace' in sys.argv:
    time.sleep(2)
    q('k',c='Space',cmd=1,wait=1)
@@ -439,8 +550,12 @@ def main():
    time.sleep(.1)
   assert report,'宿主未完成工具会话；查看 '+str(w/'native.log')
   assert all(row['passed'] for row in report['checks']),report
-  if recovery or '--map-details' in sys.argv or '--terminal-content' in sys.argv or '--mixed-routing' in sys.argv:
-   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True,mode='Android' if '--terminal-content' in sys.argv else 'desktop')
+  if recovery or '--map-details' in sys.argv or '--terminal-content' in sys.argv or '--mixed-routing' in sys.argv or '--performance' in sys.argv:
+   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True,mode='Android' if '--terminal-content' in sys.argv or '--performance' in sys.argv else 'desktop')
+   if '--performance' in sys.argv:
+    native_errors=[line for line in (w/'native.log').read_text().splitlines() if '[E]' in line or 'heap allocation limit exceeded' in line or 'script time budget exceeded' in line]
+    assert not native_errors, '性能fixture原生错误，详见私有native.log'
+    report.update(native_errors=0,scope='Same synthetic business records with legacy full-snapshot tool results vs actual new branch results; real native snapshot/30 update rounds. Bytes measured, tokens not measured. No external service requests.')
    (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print('PASS: '+str(len(report['checks']))+'项定向原生检查；'+str(w/'report.json'));return
   time.sleep(3)
   q('k',c='Space',cmd=1,wait=1)
