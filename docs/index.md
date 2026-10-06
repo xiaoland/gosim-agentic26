@@ -19,6 +19,14 @@
 
 ## 当前任务
 
+[最新OctoSense与完整验收](../tasks/runtime-upgrade/packet.md)保存赛事最新工具链、宿主硬预算调查、详情交付修正及App Hub提交兼容的接续入口。
+
+[统一Route身份与报价派生](../tasks/route-identity/packet.md)保存已有路线直接附价、完整与未完成路线统一读取及在线验收的实施边界。
+
+[技能规范化与复用](../tasks/skill-standardization/packet.md)保存上游技能固定、渐进读取与隔离验证边界。
+
+[查询、几何引用与区块工具](../tasks/tool-contracts/packet.md)保存统一交通查询、简化响应、自动几何引用及独立渲染入口的实现与验收。
+
 [README项目介绍](../tasks/competition-readme/packet.md)保存项目背景、设计思路和技术特点的叙事整理与源码同步边界。
 
 [Agent增量DSL区块](../tasks/ui-blocks/packet.md)保存render_ui单／多区块提交与本轮局部更新的实现入口。

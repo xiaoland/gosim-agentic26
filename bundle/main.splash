@@ -82,7 +82,10 @@ fn route_endpoint_gap(actual, destination){
 }
 
 fn route_reasons(candidate, nowTs, deadlineTs, budgetCents){
+    if render_probe!=nil && render_probe.active {render_probe.reasons+=1}
     let reasons = []
+    if route_get(candidate,"completion_status")=="incomplete" {reasons.push("路线仅到实际中间终点，后续连接尚未取得")}
+    if route_get(candidate,"provider_connection_status")=="unknown" {reasons.push("滴滴上下车与路线连接未知")}
     if !nowTs.is_number() || !deadlineTs.is_number() || !budgetCents.is_number() { return ["约束格式无效"] }
     if !(nowTs >= 0 && nowTs <= 9007199254740991 && deadlineTs >= 0 && deadlineTs <= 9007199254740991 && budgetCents >= 0 && budgetCents <= 9007199254740991 && budgetCents % 1 == 0) { return ["约束格式无效"] }
     if candidate.price_cents == nil { reasons.push("费用未知，无法核实预算") }
@@ -135,6 +138,8 @@ fn route_candidates(transitData, drivingData, queryTs, deadlineTs, budgetCents, 
                 route_seconds(route_get(cost, "duration")), route_cents(route_get(cost, "transit_fee")),
                 queryTs, nowTs, route_terminal(segments), route_get(transitRoute, "destination"), true, segments)
             if kind == "mixed" { candidate.warnings = "供应商含等车总估计；出租车等待未单独核实，不保证实际费用或准时抵达。" }
+            candidate.distance_m = route_seconds(route_get(option,"distance"))
+            candidate.price_basis = "amap-option.cost.transit_fee；供应商完整公共交通方案总价"
             candidate.reason = route_reason(candidate, nowTs, deadlineTs, budgetCents)
             candidate.feasible = candidate.reason == "估计满足约束"
             candidates.push(candidate)
@@ -150,6 +155,8 @@ fn route_candidates(transitData, drivingData, queryTs, deadlineTs, budgetCents, 
             if paths.len() == 1 { price = route_cents(route_get(drivingRoute, "taxi_cost")) }
             let candidate = route_candidate("taxi-" + index, "taxi", route_seconds(route_get(cost, "duration")),
                 price, queryTs, nowTs, route_leg_endpoint(route_get(path,"steps"),false), route_get(drivingRoute, "destination"), false, route_get(path, "steps"))
+            candidate.distance_m = route_seconds(route_get(path,"distance"))
+            candidate.price_basis = "amap-route.taxi_cost；单路径出租车估价，非滴滴成交价"
             candidate.waiting_basis = "driving_only"
             candidate.warnings = "全程出租车估价；duration仅行驶，候车未知，尚未核实步行登车及终点入口。"
             candidate.reason = route_reason(candidate, nowTs, deadlineTs, budgetCents)
@@ -215,6 +222,7 @@ let user_limits = nil
 let poi_records = []
 let destination_record = nil
 let candidates = []
+let candidate_sequence = 0
 let chosen = nil
 let used_tools = []
 let transit_count = 0
@@ -260,6 +268,8 @@ fn map_polyline(value){
 // 候选几何创建后不再改写；报价和查看状态变化不使折线失效。
 fn map_geometry(candidate){
     if candidate==nil {return {paths:[] omitted:0}}
+    let owner=route_get(candidate,"geometry_owner_id")
+    if owner!=nil {return map_geometry(ui_route(owner))}
     let cached=route_get(candidate,"map_geometry_cache")
     if cached!=nil {return cached}
     let geometry=map_geometry_uncached(candidate)
@@ -302,16 +312,26 @@ fn map_geometry_uncached(candidate){
 }
 fn text_join(values, separator){ let text = "" for value in values { if text != "" { text += separator } text += value } return text }
 // 索引对应最终相接合并后的真实折线，不能拿原segments下标代替。
+fn map_geometry_owner(candidate){
+ let owner=route_get(candidate,"geometry_owner_id")
+ if owner!=nil {return map_geometry_owner(ui_route(owner))}
+ return candidate
+}
+fn route_map_metadata(candidate){
+ let owner=map_geometry_owner(candidate) let catalog=route_get(owner,"map_paths_cache")
+ return {catalog_status:if catalog==nil {"not_loaded"} else {"ready"} path_count:if catalog==nil {nil} else {catalog.len()} max_paths_per_image:4}
+}
 fn map_path_catalog(candidate){
- let cached=route_get(candidate,"map_paths_cache")
+ let owner=map_geometry_owner(candidate) let cached=route_get(owner,"map_paths_cache")
  if cached!=nil {return cached}
  let result=[]
- for index line in map_geometry(candidate).paths {let points=line.split(";") result.push({index:index point_count:points.len() start:points[0] end:points[points.len()-1]})}
- candidate.map_paths_cache=result ui_facts_revision+=1
+ for index line in map_geometry(owner).paths {let points=line.split(";") result.push({index:index point_count:points.len() start:points[0] end:points[points.len()-1]})}
+ owner.map_paths_cache=result ui_facts_revision+=1
  return result
 }
 fn selected_map_geometry(candidate, indices){
  let geometry=map_geometry(candidate)
+ map_path_catalog(candidate)
  if indices==nil {return {paths:geometry.paths omitted:geometry.omitted total:geometry.paths.len() selected:false error:nil}}
  if !indices.is_array() {return {paths:[] omitted:geometry.omitted total:geometry.paths.len() selected:true error:"path_indices需要实际折线索引数组"}}
  let paths=[]
@@ -376,7 +396,7 @@ fn load_interface_map(){
             slot.request += 1 slot.generation = map_generation slot.target_id = candidate.id slot.bytes = nil
             slot.caption = if slot.target == "viewed" { "跟随查看：" } else { "绑定目标：" }
             if slot.path_indices!=nil {slot.caption += "所选折线 " + slot.path_indices.to_json() + "；"}
-            slot.caption += if slot.target == "destination" { destination_record.name } elif slot.target == "preview" { picker_preview_poi.name } else { kind_text(candidate.kind) + " · " + duration_text(candidate.duration_seconds) + " · " + money_text(candidate.price_cents) }
+            slot.caption += if slot.target == "destination" { destination_record.name } elif slot.target == "preview" { picker_preview_poi.name } else { route_kind_label(candidate) + " · " + duration_text(candidate.duration_seconds) + " · " + money_text(candidate.price_cents) }
             slot.state = "loading" slot.status = "地图加载中"
             trace_map("map_loading",slot)
             let current = slot let route = candidate
@@ -459,7 +479,7 @@ fn accept_map_slot(slot, bytes, token, request, target_id, detail){
 
 
 fn view_route(id){
-    for candidate in candidates { if candidate.id == id { viewed_route_id = id ui_facts_revision+=1 load_interface_map() render_content() return } }
+    for candidate in candidates { if candidate.id == id { map_path_catalog(candidate) viewed_route_id = id ui_facts_revision+=1 load_interface_map() render_content() return } }
 }
 
 fn open_destination_picker(){
@@ -545,7 +565,7 @@ fn destination_label(){
 fn candidate_text(candidate){
     let selected = "查看"
     if candidate.id == viewed_route_id { selected = "当前查看" }
-    return selected + " · " + kind_text(candidate.kind) + " · " + money_text(candidate.price_cents) + " · " + duration_text(candidate.duration_seconds)
+    return selected + " · " + route_kind_label(candidate) + " · " + money_text(candidate.price_cents) + " · " + duration_text(candidate.duration_seconds)
 }
 fn candidate_details(candidate){
     let check = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
@@ -583,7 +603,7 @@ fn render_content(){
     ui.feedback.render() ui.control.render() ui.answer_area.render()
     if !generated_area_ready {ui.generated_area.render() generated_area_ready = true}
     ui.generated_area.set_visible(generated_active && (answer_text == "" || generated_render_complete))
-    let overlay_open=false for block in overlay_blocks {if block.visible && block.installed {overlay_open=true}}
+    let overlay_open=false for block in overlay_blocks {if block_actual_visible(block) && block.installed {overlay_open=true}}
     ui.content.set_visible(!overlay_open)
     for block in ui_blocks {set_block_visibility(block)}
     start_timeout(0.01, || {refresh_generated_facts() return true})
@@ -606,6 +626,11 @@ fn mark_tool_used(name){
 
 fn current_task(token){ return token == run_id && agent_active }
 fn read_text(path){
+ let started=time_now() let value=read_text_unmeasured(path)
+ if render_probe!=nil && render_probe.active {render_probe.reads+=1 render_probe.read_seconds+=time_now()-started}
+ return value
+}
+fn read_text_unmeasured(path){
     if !fs.exists(path) { return nil }
     let text = fs.read(path)
     if !text.is_string() { return nil }
@@ -1075,6 +1100,9 @@ fn select_destination(p, reason){
 }
 
 fn coord_text(position){ return "" + position.longitude + "," + position.latitude }
+fn assign_candidate_ref(candidate){
+ candidate_sequence+=1 candidate.id="route_"+run_id+"_"+candidate_sequence candidate.geometry_ref="polyline_"+run_id+"_"+candidate_sequence
+}
 fn add_candidates(data, driving, at, departure_at, tool){
     let normalized = route_candidates(data, driving, at, arrive_by, constraints.budget_cents, route_later(time_now(), departure_at))
     let response_route = route_get(data, "route")
@@ -1085,7 +1113,7 @@ fn add_candidates(data, driving, at, departure_at, tool){
     let echoed_destination_gap = route_endpoint_gap(route_get(response_route, "destination"), requested_destination)
     let request_bound = echoed_origin_gap != nil && echoed_origin_gap <= 25 && echoed_destination_gap != nil && echoed_destination_gap <= 25
     for candidate in normalized {
-        candidate.id = "" + step_count + ":" + candidate.id
+        assign_candidate_ref(candidate)
         register_route_stations(candidate.segments)
         candidate.planned_departure_at = departure_at
         candidate.departure_ts = departure_at
@@ -1100,6 +1128,7 @@ fn add_candidates(data, driving, at, departure_at, tool){
         let checked = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
         candidate.reason = checked.reason candidate.feasible = checked.passed
         candidates.push(candidate)
+        normalize_queried_route(candidate)
     }
     let summarized = []
     // 旧候选已在前次查询观察中；本次只记录新增候选，避免多策略重复放大模型输入。
@@ -1130,6 +1159,21 @@ fn route_leg_endpoint(segments, first){
     let taxi=route_get(segment,"taxi")
     return route_get(taxi,if first {"startpoint"} else {"endpoint"})
 }
+// 一次供应商完整方案是一条可收费leg；steps只展示，不拆摊公交票价。
+fn normalize_queried_route(candidate){
+    prepare_route_graph()
+    let to_ref=if candidate.actual_endpoint!=nil {"destination"} else {nil}
+    if !candidate.endpoint_complete && candidate.actual_endpoint!=nil {to_ref="arrival:"+candidate.id register_route_node(to_ref,"供应商路径终点",candidate.actual_endpoint,"amap-route-geometry",nil)}
+    let leg={id:"leg:"+candidate.id from_ref:"origin" to_ref:to_ref requested_to_ref:"destination" mode:if candidate.kind=="taxi" {"taxi"} else {"transit"} departure_ts:candidate.departure_ts duration_seconds:candidate.duration_seconds price_cents:candidate.price_cents price_basis:candidate.price_basis waiting_included:candidate.waiting_included source_ts:candidate.source_ts requested_origin:candidate.requested_origin requested_destination:candidate.requested_destination actual_origin:candidate.actual_origin actual_endpoint:candidate.actual_endpoint request_bound:candidate.request_bound origin_complete:candidate.origin_complete endpoint_complete:candidate.actual_endpoint!=nil segments:candidate.segments warnings:candidate.warnings}
+    candidate.legs=[leg] candidate.node_ref=to_ref candidate.completion_status=if candidate.actual_endpoint==nil {"unknown"} elif candidate.endpoint_complete {"reached_requested_destination"} else {"incomplete"}
+    candidate.known_cost_cents=if candidate.price_cents!=nil {candidate.price_cents} else {0}
+    candidate.cost_complete=candidate.price_cents!=nil candidate.duration_complete=candidate.duration_seconds!=nil
+    candidate.connection_verified=candidate.origin_complete && candidate.endpoint_complete
+    candidate.earliest_arrival_ts=if candidate.duration_seconds!=nil {candidate.departure_ts+candidate.duration_seconds} else {candidate.departure_ts}
+}
+fn route_as_prefix(candidate){
+    return {id:candidate.id node_ref:candidate.node_ref actual_endpoint:candidate.actual_endpoint legs:candidate.legs segments:candidate.segments departure_ts:candidate.departure_ts earliest_arrival_ts:candidate.earliest_arrival_ts known_cost_cents:candidate.known_cost_cents price_cents:candidate.price_cents cost_complete:candidate.cost_complete duration_complete:candidate.duration_complete duration_seconds:candidate.duration_seconds waiting_included:candidate.waiting_included request_bound:candidate.request_bound origin_complete:candidate.origin_complete endpoint_complete:candidate.endpoint_complete connection_verified:route_get(candidate,"connection_verified") source_ts:candidate.source_ts provider_connection_status:route_get(candidate,"provider_connection_status")}
+}
 fn route_prefix_origin(node, at){
     return {id:"origin" node_ref:node.ref actual_endpoint:coord_text(node) legs:[] segments:[] departure_ts:at earliest_arrival_ts:at known_cost_cents:0 price_cents:0 cost_complete:true duration_complete:true waiting_included:true request_bound:true origin_complete:true endpoint_complete:true source_ts:nil duration_seconds:0 connection_verified:true}
 }
@@ -1148,7 +1192,7 @@ fn route_prefix_extend(prefix, leg, id, deadline, budget){
     let waiting=prefix.waiting_included && leg.waiting_included
     let budget_status=if known>budget {"over_budget"} elif complete {"within_estimate"} else {"unknown"}
     let deadline_status=if arrival>deadline {"over_deadline"} elif !duration_complete || !waiting {"unknown"} else {"within_estimate"}
-    return {success:true prefix:{id:id node_ref:leg.to_ref actual_endpoint:leg.actual_endpoint legs:legs segments:segments departure_ts:prefix.departure_ts earliest_arrival_ts:arrival known_cost_cents:known price_cents:if complete {known} else {nil} cost_complete:complete duration_complete:duration_complete duration_seconds:duration waiting_included:waiting request_bound:prefix.request_bound && leg.request_bound origin_complete:prefix.origin_complete endpoint_complete:leg.endpoint_complete connection_verified:true source_ts:source budget_status:budget_status deadline_status:deadline_status waiting_slack_seconds:deadline-arrival scenario:if waiting && duration_complete {"供应商时刻与耗时估计"} else {"最早到达场景；缺失候车/耗时尚未计入，不能保证后续公交班次"}}}
+    return {success:true prefix:{id:id node_ref:leg.to_ref actual_endpoint:leg.actual_endpoint legs:legs segments:segments departure_ts:prefix.departure_ts earliest_arrival_ts:arrival known_cost_cents:known price_cents:if complete {known} else {nil} cost_complete:complete duration_complete:duration_complete duration_seconds:duration waiting_included:waiting request_bound:prefix.request_bound && leg.request_bound origin_complete:prefix.origin_complete endpoint_complete:leg.endpoint_complete connection_verified:true provider_connection_status:if route_get(prefix,"provider_connection_status")=="unknown" || route_get(leg,"provider_connection_status")=="unknown" {"unknown"} else {nil} source_ts:source budget_status:budget_status deadline_status:deadline_status waiting_slack_seconds:deadline-arrival scenario:if waiting && duration_complete {"供应商时刻与耗时估计"} else {"最早到达场景；缺失候车/耗时尚未计入，不能保证后续公交班次"}}}
 }
 let route_nodes={}
 let route_prefixes={}
@@ -1190,10 +1234,10 @@ fn route_prefix_facts(prefix){
     return {id:prefix.id node_ref:prefix.node_ref completion_status:if prefix.node_ref=="destination" {"reached_requested_destination"} else {"incomplete"} requested_destination_ref:"destination" remaining_endpoint_gap_m:if route_nodes["destination"]!=nil {route_endpoint_gap(prefix.actual_endpoint,coord_text(route_nodes["destination"]))} else {nil} full_journey_price_cents:if prefix.node_ref=="destination" {prefix.price_cents} else {nil} incomplete_reason:if prefix.node_ref!="destination" {"仅到真实中间/路径终点；后续连接尚未取得，不能把当前小计当到目的地总价"} else {nil} departure_ts:prefix.departure_ts earliest_arrival_ts:prefix.earliest_arrival_ts known_cost_cents:prefix.known_cost_cents price_cents:prefix.price_cents duration_seconds:prefix.duration_seconds waiting_included:prefix.waiting_included budget_status:route_get(prefix,"budget_status") deadline_status:route_get(prefix,"deadline_status") waiting_slack_seconds:route_get(prefix,"waiting_slack_seconds") scenario:route_get(prefix,"scenario") legs:legs}
 }
 fn route_graph_facts(){
-    let nodes=[] let prefixes=[]
+    let nodes=[] let routes=[]
     for ref node in route_nodes {nodes.push(node)}
-    for id prefix in route_prefixes {prefixes.push(route_prefix_facts(prefix))}
-    return {nodes:nodes prefixes:prefixes coverage:"本次已取得POI/公交停靠站和已查询完整边；Agent选择继续扩展，不代表穷尽现实路线"}
+    for candidate in candidates {routes.push(query_route_summary(candidate))}
+    return {nodes:nodes routes:routes initial_route_id:"origin" coverage:"本次已取得POI/公交停靠站和已查询完整边；Agent选择继续扩展，不代表穷尽现实路线"}
 }
 fn verify_route_node_city(node,token,done){
     if node.city_metadata!=nil {done() return}
@@ -1241,34 +1285,44 @@ fn extension_legs(data,mode,from,to,at,departure){
 fn register_mixed_candidate(next,to,mode){
     let candidate=route_candidate("mixed-"+next.id,if next.legs.len()>1 {"mixed"} elif mode=="taxi" {"taxi"} elif mode=="walk" {"walking"} else {"public_transit"},next.duration_seconds,next.price_cents,next.source_ts,next.departure_ts,next.actual_endpoint,coord_text(to),next.waiting_included,next.segments)
     candidate.requested_origin=coord_text(route_nodes["origin"]) candidate.requested_destination=coord_text(to) candidate.request_bound=next.request_bound candidate.origin_complete=next.origin_complete
+    candidate.node_ref=next.node_ref candidate.completion_status=if next.node_ref=="destination" {"reached_requested_destination"} else {"incomplete"}
+    candidate.cost_complete=next.cost_complete candidate.duration_complete=next.duration_complete candidate.earliest_arrival_ts=next.earliest_arrival_ts candidate.connection_verified=next.connection_verified candidate.provider_connection_status=route_get(next,"provider_connection_status")
+    candidate.price_basis="逐段完整供应商报价相加"
     candidate.known_cost_cents=next.known_cost_cents candidate.budget_status=next.budget_status candidate.deadline_status=next.deadline_status candidate.waiting_slack_seconds=next.waiting_slack_seconds candidate.legs=next.legs candidate.prefix_id=next.id
     candidate.warnings="逐段完整报价相加；"+next.scenario+"；未知候车不算零，不保证实际费用/准时到达。"
     let check=route_recheck(candidate,time_now(),arrive_by,constraints.budget_cents) candidate.reason=check.reason candidate.feasible=check.passed
+    assign_candidate_ref(candidate)
+    next.route_id=candidate.id
     candidates.push(candidate) return candidate
 }
 
 fn accept_route_extension(prefix,from,to,mode,data,at,departure,token){
     if !current_task(token){return}
     let legs=extension_legs(data,mode,from,to,at,departure)
-    let added=[] let rejected=[] let completed=[]
+    let added=[] let routes=[] let rejected=[] let completed=[]
     for leg in legs {
         let joined=route_prefix_extend(prefix,leg,"prefix-"+route_extension_count+"-"+added.len(),arrive_by,constraints.budget_cents)
         if !joined.success {rejected.push({leg_id:leg.id reason:joined.reason connection_gap_m:joined.connection_gap_m pickup_ref:leg.pickup_ref actual_to_ref:leg.to_ref requested_to_ref:leg.requested_to_ref requested_endpoint_gap_m:leg.requested_endpoint_gap_m})}
         else {
             let next=joined.prefix route_prefixes[next.id]=next added.push(route_prefix_facts(next))
-            if next.node_ref=="destination" {
-                completed.push(register_mixed_candidate(next,to,mode).id)
-            }
+            let candidate=register_mixed_candidate(next,route_nodes["destination"],mode)
+            routes.push(query_route_summary(candidate))
+            if next.node_ref=="destination" {completed.push(candidate.id)}
         }
     }
     trace_emit("route_extension",{from_ref:from.ref to_ref:to.ref mode:mode requested_departure:departure prefixes:added rejected:rejected completed:completed},if active_tool!=nil {active_tool.id} else {nil})
-    agent_tool_result({success:true prefixes:added completed_candidate_ids:completed rejected:rejected new_nodes:tool_new_nodes()})
+    agent_tool_result({success:true routes:routes completed_candidate_ids:completed rejected:rejected new_nodes:tool_new_nodes()})
 }
 fn extend_route(p,token){
     if !prepare_route_graph(){fail_task("接驳查询缺少本次起点、目的地或时间预算") return}
-    let prefix=route_prefixes[p.prefix_id] let to=route_node(p.to_ref)
-    if prefix==nil || to==nil {agent_tool_result({success:false error:"prefix_id/to_ref不属于本轮真实图；可get_route_graph读取当前节点与前缀"}) return}
+    let id=route_get(p,"route_id") let prefix=nil
+    if id=="origin" {prefix=route_prefixes["origin"]}
+    elif id!=nil {let candidate=ui_route(id) if candidate!=nil {prefix=route_as_prefix(candidate)}}
+    else {prefix=route_prefixes[route_get(p,"prefix_id")]}
+    let to=route_node(p.to_ref)
+    if prefix==nil || to==nil {agent_tool_result({success:false error:"route_id/to_ref不属于本轮真实图；可get_route_graph读取当前节点与前缀"}) return}
     let from=route_node(prefix.node_ref) let mode=p.mode
+    if from==nil || prefix.actual_endpoint==nil {agent_tool_result({success:false error:"Route实际终点未知，不能据请求终点继续扩展"}) return}
     if mode!="walk" && mode!="taxi" && mode!="transit" {agent_tool_result({success:false error:"支持walk/taxi/transit完整路段"}) return}
     if from.ref==to.ref {agent_tool_result({success:false error:"起终节点相同，没有新增路段"}) return}
     let strategy=route_get(p,"strategy") if strategy==nil {strategy=0}
@@ -1296,7 +1350,7 @@ fn didi_request(name,arguments,token,done){
     if !key.is_string() || key.trim()=="" {agent_tool_result({success:false error:"滴滴估价服务未配置；其它路线查询仍可继续"}) return}
     let body={jsonrpc:"2.0" id:token method:"tools/call" params:{name:name arguments:arguments}}.to_json()
     trace_emit("didi_request",{name:name body:body},if active_tool!=nil {active_tool.id} else {nil})
-    net.http_request(net.HttpRequest{url:"https://mcp.didichuxing.com/mcp-servers?key="+key.url_encode() method:net.HttpMethod.POST headers:{"Content-Type":["application/json; charset=utf-8"] "Accept":["application/json, text/event-stream"]} body:body.to_bytes()}) do net.HttpEvents{
+    net.http_request(net.HttpRequest{url:"https://mcp.didichuxing.com/mcp-servers?key="+key.url_encode() method:net.HttpMethod.POST headers:{"Content-Type":["application/json; charset=utf-8"] "Accept":["application/json"]} body:body.to_bytes()}) do net.HttpEvents{
         on_response:|res|{
             if !current_task(token){return}
             try {
@@ -1344,45 +1398,56 @@ fn quote_didi(p,token){
     })
 }
 
-fn route_prefix_quote(prefix,origin,quote,leg_id,basis,id,deadline,budget){
-    let found=false let next=route_prefix_origin(origin,prefix.departure_ts)
-        for original in prefix.legs {
+// 派生只替换指定leg的估价；共享的供应商几何不改，原Route保持不变。
+fn route_quote_variant(candidate,quote,leg_id,basis){
+    let next={} for key value in candidate {next[key]=value}
+    let legs=[] let found=false let known=0 let complete=true let waiting=true
+    for original in candidate.legs {
         let leg=original
         if original.id==leg_id {
-            if original.mode!="taxi" {return {success:false error:"报价只能替换明确出租车leg，不能覆盖公交/步行费用"}}
-            found=true leg=original.to_json().parse_json()
-            leg.price_cents=quote.price_cents leg.price_basis="didi-taxi_estimate；指定车型当前报价估计，替换原高德估价，不叠加"
-            leg.quote_ref=quote.ref leg.quote=quote leg.place_match_basis=basis leg.place_match_status="semantic-association-assumed" leg.provider_connection_status="unknown" leg.waiting_included=false
-            leg.warnings="保留高德路线几何与耗时；滴滴报价上下车点独立，连接未认证；当前价不保证未来接驳价"
+            if original.mode!="taxi" {return {success:false error:"报价只能替换明确taxi leg，不能覆盖公交/步行费用"}}
+            found=true leg={} for key value in original {leg[key]=value}
+            leg.price_cents=quote.price_cents leg.price_basis="didi-taxi_estimate；指定车型当前估价替换原价，不叠加"
+            leg.quote_ref=quote.ref leg.place_match_basis=basis leg.provider_connection_status="unknown" leg.waiting_included=false
+            leg.warnings="保留高德几何与耗时；滴滴上下车连接未知；当前价不保证未来接驳价"
         }
-        let joined=route_prefix_extend(next,leg,id,deadline,budget)
-        if !joined.success {return {success:false error:joined.reason}}
-        next=joined.prefix
+        if leg.price_cents==nil {complete=false} else {known+=leg.price_cents}
+        waiting=waiting && leg.waiting_included legs.push(leg)
     }
-    if !found {return {success:false error:"leg_id不在指定prefix中"}}
-    return {success:true prefix:next}
+    if !found {return {success:false error:"leg_id不在指定Route中"}}
+    assign_candidate_ref(next)
+    next.legs=legs next.known_cost_cents=known next.cost_complete=complete next.price_cents=if complete {known} else {nil}
+    next.price_basis="逐leg采用当前关联估价；指定滴滴价替换原价" next.waiting_included=waiting next.waiting_basis="driving_only"
+    next.derived_from_route_id=candidate.id next.geometry_owner_id=candidate.id next.prefix_id=nil
+    next.provider_connection_status="unknown" next.connection_verified=false
+    next.warnings=candidate.warnings+"；滴滴价为语义关联估计，上下车连接未知，未下单。"
+    next.budget_status=if known>constraints.budget_cents {"over_budget"} elif complete {"within_estimate"} else {"unknown"}
+    next.deadline_status=if next.earliest_arrival_ts>arrive_by {"over_deadline"} else {"unknown"}
+    let checked=route_recheck(next,time_now(),arrive_by,constraints.budget_cents) next.reason=checked.reason next.feasible=checked.passed
+    candidates.push(next)
+    return {success:true candidate:next}
 }
-
 fn attach_quote(p,token){
-    let prefix=route_prefixes[p.prefix_id] let quote=didi_quotes[p.quote_ref]
-    if prefix==nil || quote==nil {agent_tool_result({success:false error:"prefix/quote必须属于本轮实际记录"}) return}
-    if quote.price_cents==nil {agent_tool_result({success:false error:"报价文本无法精确解析为费用；保留原显示，不能当零" quote:quote}) return}
-    if !p.place_basis.is_string() || p.place_basis.trim()=="" {agent_tool_result({success:false error:"需要起终点名称、城市、地址/入口对应依据；这是语义关联假设，不是坐标认证"}) return}
-    for leg in prefix.legs {if leg.id==p.leg_id {
+    let candidate=ui_route(p.route_id) let quote=didi_quotes[p.quote_ref]
+    if candidate==nil || quote==nil {agent_tool_result({success:false error:"route_id/quote_ref必须属于本轮实际记录"}) return}
+    if quote.price_cents==nil {agent_tool_result({success:false error:"报价文本无法精确解析为费用，不能当零" quote:quote}) return}
+    if !p.place_basis.is_string() || p.place_basis.trim()=="" {agent_tool_result({success:false error:"需要两端名称、城市、地址/入口对应依据；语义关联不是坐标认证"}) return}
+    for leg in candidate.legs {if leg.id==p.leg_id {
         let from_node=route_nodes[leg.from_ref] let to_node=route_nodes[leg.to_ref]
         let from_city=route_get(route_get(from_node,"city_metadata"),"city") let to_city=route_get(route_get(to_node,"city_metadata"),"city")
-        if from_city!=nil && quote.from.city!=nil && from_city!=quote.from.city || to_city!=nil && quote.to.city!=nil && to_city!=quote.to.city {agent_tool_result({success:false error:"报价与路线节点实际城市不同；不能关联到此leg"}) return}
+        if from_city!=nil && quote.from.city!=nil && from_city!=quote.from.city || to_city!=nil && quote.to.city!=nil && to_city!=quote.to.city {agent_tool_result({success:false error:"报价与路线节点实际城市不同，不能关联此leg"}) return}
     }}
-    route_extension_count+=1 let id="quoted-prefix-"+route_extension_count
-    let linked=route_prefix_quote(prefix,route_nodes["origin"],quote,p.leg_id,p.place_basis,id,arrive_by,constraints.budget_cents)
-    if !linked.success {agent_tool_result(linked) return}
-    let next=linked.prefix
-    route_prefixes[id]=next
-    let completed=[]
-    if next.node_ref=="destination" {completed.push(register_mixed_candidate(next,route_nodes["destination"],"taxi").id)}
-    agent_tool_result({success:true prefix:route_prefix_facts(next) quote:quote place_match_basis:p.place_basis connection_status:"unknown；没有将高德内部连接升级为滴滴上下车连接" completed_candidate_ids:completed})
+    let result=route_quote_variant(candidate,quote,p.leg_id,p.place_basis)
+    if !result.success {agent_tool_result(result) return}
+    let next=result.candidate
+    agent_tool_result({success:true route:query_route_summary(next) derived_from_route_id:candidate.id quote_ref:quote.ref original_route_unchanged:true connection_status:"unknown；没有认证滴滴上下车连接"})
 }
 
+fn query_route(p,token){
+ if p.mode=="transit" {let strategy=route_get(p,"strategy") if strategy==nil {strategy=0} query_transit({strategy:strategy},token)}
+ elif p.mode=="taxi" {query_driving(token)}
+ else {agent_tool_result({success:false error:"mode支持transit或taxi"})}
+}
 fn transit_strategies(){ return [0 1 2 3 4 5 7 8] }
 fn query_transit(p, token){
     if constraints == nil || position_record == nil || destination_record == nil { fail_task("交通查询缺少起终点") return }
@@ -1433,7 +1498,7 @@ fn present_results(reason){
  for candidate in candidates { let check = route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")) candidate.feasible=check.passed candidate.reason=check.reason }
  phase = "proposal" show_status("已计算当前候选；已查范围不代表所有可能路线")
  refresh_generated_facts()
- if active_tool != nil { agent_tool_result({success:true comparison:comparison_summary() routes:model_route_summaries() mixed_attempts:route_graph_facts().prefixes queried_transit_count:transit_count queried_driving:driving_done}) }
+ if active_tool != nil { agent_tool_result({success:true comparison:comparison_summary() routes:model_route_summaries() queried_transit_count:transit_count queried_driving:driving_done}) }
 }
 fn read_source_tool(name, token, done){
     if (name == "read_calendar" || name == "read_notes") && location_mode() != "demo" { fail_task("当前真实模式未接通日历和笔记来源") return }
@@ -1470,6 +1535,36 @@ fn model_protocol(data){
 }
 // 开发记录不进入业务上下文；每个实际入口先固定数据，再在独立入口写文件。
 let trace_state = nil
+
+// Development-only first-render evidence: record in memory, export in independent entries.
+// Captured objects are references after the attempt, not a frozen pre-render heap.
+let render_probe=nil
+fn render_probe_mark(stage){if render_probe!=nil && render_probe.active {render_probe.stage=stage render_probe.marks.push({stage:stage at:time_now()})}}
+fn render_probe_begin(call,entry_at){
+ if trace_state==nil || render_probe!=nil {return}
+ let refs=[] let caches=[]
+ for candidate in candidates {refs.push(candidate) caches.push({id:candidate.id steps_cached:route_get(candidate,"steps_cache")!=nil geometry_cached:route_get(candidate,"map_geometry_cache")!=nil catalog_cached:route_get(candidate,"map_paths_cache")!=nil})}
+ render_probe={active:true run:run_id call_id:call.id entry_at:entry_at stage:"tool_entry" marks:[] candidates:refs cache_before:caches facts_revision:ui_facts_revision cached_revision:ui_facts_cached_revision reads:0 read_seconds:0 reasons:0 current_route:nil dump_complete:false dump_error:false
+  context:{origin:position_record destination:destination_record constraints:constraints limits:user_limits received_at:received_at arrive_by:arrive_by source_snapshots:source_snapshots source_records:source_records route_nodes:route_nodes route_prefixes:route_prefixes taxi_quotes:didi_quotes taxi_places:didi_places}}
+ let saved=render_probe let directory=trace_state.directory let prefix="first-render-"+run_id
+ start_timeout(0.8,||render_probe_export(saved,directory,prefix))
+ render_probe_mark("tool_entry")
+}
+fn render_probe_report(saved){return {run:saved.run call_id:saved.call_id entry_at:saved.entry_at stage:saved.stage marks:saved.marks current_route:saved.current_route reads:saved.reads read_seconds:saved.read_seconds reasons:saved.reasons route_count:saved.candidates.len() cache_before:saved.cache_before facts_revision:saved.facts_revision cached_revision:saved.cached_revision dump_complete:saved.dump_complete dump_error:saved.dump_error heap_basis:"references exported after render attempt; original geometry retained privately" native_budget_age:"not_observed"}}
+fn render_probe_export(saved,directory,prefix){
+ saved.active=false
+ try {fs.write(directory+"/"+prefix+"-stage.json",render_probe_report(saved).to_json())} {saved.dump_error=true}
+ start_timeout(0.1,||{
+  try {fs.write(directory+"/"+prefix+"-context.json",saved.context.to_json())} {saved.dump_error=true}
+  start_timeout(0.1,||render_probe_export_route(saved,directory,prefix,0))
+ })
+}
+fn render_probe_export_route(saved,directory,prefix,index){
+ if index>=saved.candidates.len() {saved.dump_complete=!saved.dump_error try {fs.write(directory+"/"+prefix+"-stage.json",render_probe_report(saved).to_json())} {} return}
+ try {fs.write(directory+"/"+prefix+"-route-"+index+".json",saved.candidates[index].to_json())} {saved.dump_error=true}
+ start_timeout(0.1,||render_probe_export_route(saved,directory,prefix,index+1))
+}
+
 let trace_initialized = false
 let trace_last_diagnostic = ""
 let trace_initialization_error = ""
@@ -1509,7 +1604,7 @@ fn trace_emit_run(event, data, call_id, run){
     start_timeout(0.01,||{
         try {
             let line=trace_scrub(envelope,state.keys)+"\n"
-            let bytes=line.to_bytes().len()
+            let bytes=line.len()
             // 单文件1MiB是实际宿主存储限制；不截断事件或修改宿主配额。
             if bytes>1048576 {state.incomplete=true}
             else {
@@ -1634,6 +1729,8 @@ fn minimax_request(task, input, schema, token, record, done){
 
 
 fn start_task(){
+    render_probe=nil
+    agent_tool_schema=nil
     invalidate_interface()
     let text = ui.sentence.text().trim()
     if text == "" { show_status("请用一句话说明行程、时限与预算") return }
@@ -1645,7 +1742,7 @@ fn start_task(){
     route_nodes={} route_prefixes={} route_extension_count=0 didi_places={} didi_quotes={} didi_record_count=0
     pending_user_poi = nil condition_open = false invalidate_map() picker_request += 1 picker_open = false picker_pois = [] picker_preview_poi = nil picker_status = "" viewed_route_id = "" expanded_routes = false
     request_text = text user_limits = explicit_limits(text) observations = [] model_requests = [] decisions = [] source_snapshots = [] source_records = [] calendar_events = [] note_records = []
-    position_record = nil constraints = nil destination_record = nil poi_records = [] candidates = [] chosen = nil used_tools = []
+    position_record = nil constraints = nil destination_record = nil poi_records = [] candidates = [] candidate_sequence = 0 chosen = nil used_tools = []
     transit_count = 0 transit_completed = 0 driving_done = false driving_completed = false progress_text = "" answer_text = "" phase = "running"
     if user_limits != nil {arrive_by=received_at+user_limits.minutes*60}
     agent_messages=[] agent_calls=[] agent_call_index=0 active_tool=nil tool_node_refs=[] tool_candidate_start=0 agent_active=true
@@ -1681,6 +1778,19 @@ fn kind_text(kind){
     if kind == "mixed" { return "打车 + 公共交通" }
     if kind == "taxi" { return "全程打车估价" }
     return "" + kind
+}
+fn route_kind_label(candidate){
+    let legs=route_get(candidate,"legs")
+    if !legs.is_array() || legs.len()==0 {return kind_text(candidate.kind)}
+    let labels=[] let seen={}
+    for leg in legs {
+        let mode=route_get(leg,"mode")
+        let label=if mode=="transit" {"公共交通"} elif mode=="taxi" {"打车"} elif mode=="walk" {"步行"} else {""+mode}
+        if seen[label]!=true {seen[label]=true labels.push(label)}
+    }
+    let text=""
+    for label in labels {if text!="" {text+="＋"} text+=label}
+    return text
 }
 fn beijing_clock(epoch){
     let v = local_time(epoch + 28800)
@@ -1729,6 +1839,7 @@ fn route_description(candidate){
 fn comparison_summary(){
     let fastest = nil let cheapest = nil let unknown_prices = 0
     for candidate in candidates {
+        if route_cost_facts(candidate).coverage!="requested_journey" {continue}
         if candidate.duration_seconds != nil { if fastest == nil || candidate.duration_seconds < fastest.duration_seconds { fastest = candidate } }
         if candidate.price_cents == nil { unknown_prices += 1 }
         elif cheapest == nil || candidate.price_cents < cheapest.price_cents { cheapest = candidate }
@@ -1766,32 +1877,76 @@ let agent_active = false
 let agent_calls = []
 let agent_call_index = 0
 let active_tool = nil
+let agent_tool_schema = nil
 fn tool(name,description,properties,required){return {type:"function" function:{name:name description:description parameters:{type:"object" properties:properties required:required}}}}
-fn agent_tools(){let tools = [
- tool("read_skill","按需读取实际语言/API材料。可用native_ui、navigation_data。",{name:{type:"string"}},["name"])
- tool("read_location",if location_mode()=="demo" {"读取显式模拟出发位置并核实城市。"} else {"读取当前设备定位并核实城市。"},{},[])
+fn is_render_tool(name){return name=="render_ui" || name=="render_summary" || name=="render_explanation" || name=="render_routes" || name=="render_suggestions" || name=="render_route_detail"}
+fn render_block_tool(name,description){
+ let source_description="任意Makepad Splash DSL。"
+ if name=="render_route_detail" {source_description="独立详情区块的Splash DSL：父容器初始隐藏，打开父容器时源码内容应正常可见，根不再visible:false。多个候选共用同ID详情时，初始按facts.viewed_route_id、on_facts_changed按传入current.viewed_route_id查同一Route，用该Route的kind_label、price_label、duration_label、reason、segments更新文案和地图target；view_route只改变父事实，不替生成稿更换内容。每候选使用独立静态详情也合法，但须使用不同区块ID，列表按钮打开对应区块。地图按目标Route的map_metadata/map_paths目录选择path_indices；目录未读不表示最多四条，可用get_route取得当前目录。每图最多4条独立paths，可自选多个独立命名地图或本地分段翻页，使所有分图或页面的索引合起来覆盖全部真实折线；布局、张数、分页和分组由你选择，不猜索引或沿用extend前目录。首次打开所选路线后，从本详情区块向自己的命名地图emit map绑定(target为路线id或geometry_ref)；on_camera_changed的map_camera仅处理已绑定地图的后续相机变化。打开用show_block(实际目标区块ID)，关闭/返回用hide_self()，不重建列表。"}
+ let default_id=name.strip_prefix("render_")
+ return tool(name,description+"；source是任意Splash DSL，不是模板。省略id时实际区块ID为"+default_id+"；show_block(target_id)必须使用要打开的实际ID，hide_self()无参数关闭发起块。id可覆盖默认块名，重复id仅更新此块，其余状态保留；overlay/height可选。",{source:{type:"string" description:source_description} id:{type:"string" description:"实际区块ID；省略时为"+default_id+"，打开按钮调用show_block(此实际ID)；详情返回调用hide_self()，不用猜来源ID。"} overlay:{type:"boolean"} height:{type:"number"}},["source"])
+}
+fn render_tool_params(name,p){
+ if name=="render_ui" {return p}
+ let id=route_get(p,"id") if id==nil {id=name.strip_prefix("render_")}
+ let block={id:id source:p.source}
+ let existing=block_by_id(id)
+ if route_get(p,"overlay")!=nil {block.overlay=p.overlay} elif existing==nil {block.overlay=name=="render_route_detail"}
+ if existing==nil && name=="render_route_detail" {block.visible=false}
+ if route_get(p,"height")!=nil {block.height=p.height}
+ return {blocks:[block]}
+}
+fn agent_tools(){
+ if agent_tool_schema!=nil {return agent_tool_schema}
+ let mode=location_mode()
+ let tools = [
+ tool("read_skill","读取技能目录中的技能。省略path读取SKILL.md；path可读取该技能返回的files中的引用资料。",{name:{type:"string"} path:{type:"string"}},["name"])
+ tool("read_location",if mode=="demo" {"读取显式模拟出发位置并核实城市。"} else {"读取当前设备定位并核实城市。"},{},[])
  tool("search_places","用真实高德搜索公开地点，返回完整POI和城市；不采用目标。",{query:{type:"string"}},["query"])
  tool("adopt_destination","采用已有poi_id为本任务目标。basis说明来自用户选择或明确推断；不伪造航站楼。",{poi_id:{type:"string"} basis:{type:"string"}},["poi_id" "basis"])
- tool("query_transit","查询实际起终点公交；策略0推荐/1经济/2少换乘/3少步行/4舒适/5无地铁/7地铁优先/8快。",{strategy:{type:"number"}},["strategy"])
- tool("extend_route","从本轮prefix延长一整段到真实图节点，确定性累加时间/票价；origin为初始prefix，to_ref来自graph.nodes。walk/taxi/transit，strategy公交可选。未知候车的后续公交按最早场景查询。",{prefix_id:{type:"string"} to_ref:{type:"string"} mode:{type:"string"} strategy:{type:"number"}},["prefix_id" "to_ref" "mode"])
+ tool("query_route","查询实际起终点。mode为transit或taxi；transit策略默认0推荐，可1经济/2少换乘/3少步行/4舒适/5无地铁/7地铁优先/8快；taxi用单路径高德驾车路线出租车估价，候车未知。只覆盖本次已查范围，返回新增Route、实际legs、completion_status与assessment；new_nodes是供应商真实中转节点，其ref可直接用于extend_route.to_ref，geometry_ref供地图引用。直达公共交通超期或末段未完成，不证明到中转节点后换打车也不成立；用时数值在期限内不等于已核实准时。",{mode:{type:"string" enum:["transit" "taxi"]} strategy:{type:"number"}},["mode"])
+ tool("extend_route","从本轮route_id延长一整段到真实图节点，返回新Route，原Route不变；route_id=origin可从实际出发点查询到中转站；to_ref用query_route.new_nodes或get_route_graph.nodes的真实ref，新Route.id可继续以另一mode接驳。未到目标也能get/view/map；walk/taxi/transit每段采用完整供应商方案，不拆摊原公交票价。后续公交按最早场景查询，未知候车不保证班次。",{route_id:{type:"string"} to_ref:{type:"string"} mode:{type:"string"} strategy:{type:"number"}},["route_id" "to_ref" "mode"])
  tool("search_didi_places","搜索滴滴供应商真实地点，city完整城市名；报价坐标只用本工具ref。",{query:{type:"string"} city:{type:"string"}},["query" "city"])
- tool("attach_quote","将本轮指定车型报价作为明确taxi leg费用估计替换，代码重算prefix总价。place_basis记录两端名称/城/地址入口对应假设；不认证不同供应商几何连接。",{prefix_id:{type:"string"} leg_id:{type:"string"} quote_ref:{type:"string"} place_basis:{type:"string"}},["prefix_id" "leg_id" "quote_ref" "place_basis"])
+ tool("attach_quote","以route_id和leg_id将指定车型当前报价替换明确taxi leg费用，返回新Route及新id；原Route不变，展示/地图须选择返回的新id。重算小计，全程金额与完成状态独立；不认证滴滴上下车连接。place_basis保两端名称/城/地址入口对应依据。",{route_id:{type:"string"} leg_id:{type:"string"} quote_ref:{type:"string"} place_basis:{type:"string"}},["route_id" "leg_id" "quote_ref" "place_basis"])
  tool("quote_didi","用本轮滴滴地点ref询价，多车型当前估价；不下单，不自动认作高德leg价格。",{from_ref:{type:"string"} to_ref:{type:"string"}},["from_ref" "to_ref"])
- tool("query_driving","查询实际起终点驾车与估价，保留未知候车/费用。",{},[])
- tool("compare_routes","确定性重新计算所有当前候选的时间、费用与原截止是否成立，返回已查范围；不自动选方案/结束。",{},[])
- tool("get_route","按实际候选ID取得完整分段、费用、来源与当前校验；不再次查询供应商。",{id:{type:"string"}},["id"])
- tool("get_route_graph","读取本轮全部真实接驳节点和已取得前缀，不查询供应商。",{},[])
+ tool("compare_routes","确定性重算当前Route的时间、费用、原截止与assessment理由，只比较已查范围。根据用户目标与缺口探索真实接驳及可用供应商报价；未查的报价/连接不证明最优，passed=false不能称可行或稳妥；不自动选方案/结束。",{},[])
+ tool("get_route","按本轮Route ID读取完整或未完成路线的legs、费用范围、来源、当前校验和该ID真实map_paths目录；首次按需解析并缓存几何，不再查询供应商。map_metadata.catalog_status=not_loaded/path_count=nil不表示最多四条；每张高德图最多4条独立paths，按当前目标目录选择。extend后的新几何不能沿用旧目录；报价派生几何不变可复用同源目录。",{id:{type:"string"}},["id"])
+ tool("get_route_graph","读取本轮全部真实接驳节点和统一Route对象，不查询供应商。",{},[])
+ render_block_tool("render_summary","呈现本次总结论")
+ render_block_tool("render_explanation","呈现结论的简要解释")
+ render_block_tool("render_routes","呈现已评估方案列表，用户可点击打开对应候选详情；不成立的候选也可查看")
+ render_block_tool("render_suggestions","呈现改进建议")
+ render_block_tool("render_route_detail","呈现对应已评估候选的分段、费用、耗时、限制和实际地图，即使不满足条件仍有详情价值；已有块更新保持当前页面状态，可用不同id保留多个详情")
  tool("render_ui","提交任意原生Splash源码。source整稿替换；blocks按id追加或替换指定区块，其余区块状态保留。普通区块自然高度，overlay是可显示/隐藏的有限视口。返回各块真实执行诊断；success不代表内容目标完成。",{source:{type:"string"} blocks:{type:"array" items:{type:"object" properties:{id:{type:"string"} source:{type:"string"} overlay:{type:"boolean"} visible:{type:"boolean"} height:{type:"number"}} required:["id" "source"]}}},[])
  ]
- if location_mode()=="demo" {
+ if mode=="demo" {
 tools.push(tool("read_calendar","读取本应用明确标注的模拟日历；返回记录和来源。",{},[]))
 tools.push(tool("read_notes","读取本应用模拟机票笔记；返回记录和来源。",{},[]))
 tools.push(tool("set_constraints","按实际日历/笔记原文形成行程约束；用户原分钟数和预算不变。",{event_id:{type:"string"} note_id:{type:"string"} minutes:{type:"number"} budget_cents:{type:"number"} currency:{type:"string"} destination_query:{type:"string"} citations:{type:"array" items:{type:"object" properties:{source_id:{type:"string"} quote:{type:"string"}}}}},["event_id" "note_id" "minutes" "budget_cents" "currency" "destination_query" "citations"]))
  }
+ agent_tool_schema=tools
  return tools
 }
+fn agent_skill_catalog(){return read_text("skills/catalog.json").parse_json()}
+fn agent_skill_metadata(){
+ let result=[] for skill in agent_skill_catalog() {result.push({name:skill.name description:skill.description})} return result
+}
+fn read_agent_skill(p){
+ let name=p.name.replace("_","-")
+ let resource=route_get(p,"path")
+ let path=if resource==nil {"SKILL.md"} else {resource}
+ for skill in agent_skill_catalog() {if skill.name==name {
+  for file in skill.files {if file==path {
+   let text=read_text("skills/"+name+"/"+path)
+   if text==nil {return {success:false error:"技能资源无法读取" name:name path:path}}
+   return {success:true name:name path:path content:text files:skill.files}
+  }}
+  return {success:false error:"技能中没有该资源" name:name path:path files:skill.files}
+ }}
+ return {success:false error:"技能不在目录中" name:name catalog:agent_skill_metadata()}
+}
 fn agent_begin(){
- agent_messages=[{role:"system" content:"你是Navigation出行Agent。每次输入是独立查询；自己选择工具和按需技能，取得可得事实，用render_ui呈现本次结果或具体缺失。当前不进行问答澄清、不保存查询结果；时间费用由工具计算，明示实际来源。面向用户用自然语言呈现本次出行结果或具体缺失，让用户查看已评估的不同方案的分段、费用、用时、限制及是否满足条件的依据；无可行方案时也呈现逐方案不满足条件的原因。详情包含所选方案的实际地图；地图不可用时说明实际原因。不把工具名、内部ID、Unix时间戳当作用户需要处理的信息；本次已完成的结果不要保留正在处理标题。可用技能native_ui和navigation_data。"} {role:"user" content:({request:request_text facts:model_task_context()}).to_json()}]
+ agent_messages=[{role:"system" content:"你是Navigation出行Agent。围绕本次时间、预算和偏好探索步行、公共交通与打车接驳；工具选择和顺序由你决定，时间费用由工具计算。标题与结论取同一Route当前assessment：预算、截止与连接独立判断，unknown不是符合，passed=false不等于每项超限；已查段小计不是全程价格，期限从received_at起算。每次输入是独立查询，不澄清或保存结果。向用户呈现已评估方案及实际依据，包括不成立方案的分段、费用、耗时、限制和地图；未取得的数据或服务失败如实说明。结果面向用户，不使用内部ID/时间戳或已结束的正在处理标题。技能目录（正文及引用资料通过read_skill按需读取）：\n"+agent_skill_metadata().to_json()} {role:"user" content:({request:request_text facts:model_task_context()}).to_json()}]
  agent_active=true agent_pump(run_id)
 }
 
@@ -1830,7 +1985,7 @@ fn agent_tool_result(result){
  // 先提交完整回执，再释放当前工具并派发续轮；诊断/显示不能夹断这一步。
  agent_messages.push({role:"tool" tool_call_id:call.id content:content})
  decisions.push({tool:call.function.name call_id:call.id returned_at:returned_at})
- if call.function.name!="read_skill" && call.function.name!="get_route" && call.function.name!="get_route_graph" && call.function.name!="render_ui" {ui_facts_revision+=1}
+ if call.function.name!="read_skill" && call.function.name!="get_route" && call.function.name!="get_route_graph" && !is_render_tool(call.function.name) {ui_facts_revision+=1}
  agent_call_index+=1 active_tool=nil
  start_timeout(0.01,||agent_execute_next(token))
  agent_result_effects(call,content,token,returned_at)
@@ -1847,14 +2002,34 @@ fn tool_new_nodes(){
  for ref node in route_nodes {let found=false for existing in tool_node_refs {if ref==existing {found=true}} if !found {added.push(node)}}
  return added
 }
-fn model_route_summary(candidate){
- let check=route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents"))
- return {id:candidate.id kind:candidate.kind duration_seconds:candidate.duration_seconds price_cents:candidate.price_cents currency:candidate.currency passed:check.passed reason:check.reason reasons:route_reasons(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")) estimated_arrival_ts:check.estimated_arrival_ts warnings:candidate.warnings source:candidate.source source_ts:candidate.source_ts expires_at:candidate.expires_at estimated:candidate.estimated waiting_included:candidate.waiting_included waiting_basis:candidate.waiting_basis taxi_wait_verified:candidate.taxi_wait_verified request_bound:candidate.request_bound endpoint_complete:candidate.endpoint_complete origin_complete:candidate.origin_complete known_cost_cents:route_get(candidate,"known_cost_cents") budget_status:route_get(candidate,"budget_status") deadline_status:route_get(candidate,"deadline_status")}
+// 路段展示资料随Route几何保持不变；只重算当前assessment，不重复解析供应商步骤。
+fn route_summary_steps(candidate){
+    let cached=route_get(candidate,"steps_cache") if cached!=nil {return cached}
+    let steps=[]
+    for segment in candidate.segments {steps.push({description:segment_description(segment) distance_m:route_seconds(route_get(segment,"distance")) duration_seconds:route_seconds(route_get(route_get(segment,"cost"),"duration"))})}
+    candidate.steps_cache=steps return steps
 }
-fn model_route_summaries(){let result=[] for candidate in candidates {result.push(model_route_summary(candidate))} return result}
+fn query_route_summary(candidate){
+    let check=route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents"))
+    let cost=route_cost_facts(candidate) let completion=route_completion(candidate) let steps=route_summary_steps(candidate) let budget=route_get(constraints,"budget_cents")
+    return {id:candidate.id geometry_ref:candidate.geometry_ref derived_from_route_id:route_get(candidate,"derived_from_route_id")
+        mode:if candidate.kind=="taxi" {"taxi"} elif candidate.kind=="walking" {"walk"} elif candidate.kind=="mixed" {"mixed"} else {"transit"} kind:candidate.kind
+        map_metadata:route_map_metadata(candidate) completion_status:completion node_ref:route_get(candidate,"node_ref") requested_destination_ref:"destination"
+        incomplete_reason:if completion!="reached_requested_destination" {"仅包含已取得路段，终点或后续连接尚未取得，小计不是到目的地总价"} else {nil}
+        duration_seconds:candidate.duration_seconds duration_label:duration_text(candidate.duration_seconds) distance_m:route_get(candidate,"distance_m")
+        price_label:if cost.coverage=="queried_legs_only" {"已查段 "+money_text(candidate.price_cents)} else {money_text(candidate.price_cents)} cost:cost legs:route_leg_facts(candidate) steps:steps
+        assessment:{evaluated_at:time_now() passed:check.passed reasons:route_reasons(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")) waiting_included:candidate.waiting_included waiting_basis:candidate.waiting_basis origin_complete:candidate.origin_complete endpoint_complete:candidate.endpoint_complete connection_status:if route_get(candidate,"provider_connection_status")=="unknown" {"provider_connection_unknown"} elif candidate.origin_complete && candidate.endpoint_complete {"geometry_checked"} else {"unknown"}
+            budget_status:if budget==nil {"unknown"} elif cost.known_subtotal_cents>budget {"over_budget"} elif cost.full_journey_amount_cents!=nil {"within_estimate"} else {"unknown"}
+            deadline_status:if check.estimated_arrival_ts!=nil && check.estimated_arrival_ts>arrive_by {"over_deadline"} elif candidate.duration_seconds!=nil && candidate.waiting_included && candidate.request_bound && candidate.origin_complete && candidate.endpoint_complete && route_get(candidate,"provider_connection_status")!="unknown" {"within_estimate"} else {"unknown"}}
+        source:{provider:candidate.source queried_at:candidate.source_ts expires_at:candidate.expires_at warnings:candidate.warnings}}
+}
+fn model_route_summary(candidate){return query_route_summary(candidate)}
+fn model_route_summaries(){let result=[] for candidate in candidates {result.push(query_route_summary(candidate))} return result}
 fn model_task_context(){
  let facts=interface_facts()
- return {limits:user_limits received_at:received_at arrive_by:arrive_by viewport:facts.viewport rendering_environment:facts.rendering_environment origin:position_record destination:destination_record source_label:source_label()}
+ let configured=false let config=read_text("private-config.json")
+ if config!=nil {let key=route_get(config.parse_json(),"didi_mcp_key") configured=key.is_string() && key!=""}
+ return {limits:user_limits received_at:received_at arrive_by:arrive_by viewport:facts.viewport rendering_environment:facts.rendering_environment providers:{didi:{configured:configured availability:"配置不等于服务可用；未调用或调用失败不能推断未配置"}} origin:position_record destination:destination_record source_label:source_label()}
 }
 fn finish_tool_from_state(token){
  if !current_task(token) || active_tool==nil {return}
@@ -1863,22 +2038,24 @@ fn finish_tool_from_state(token){
  if name=="read_location" {agent_tool_result({success:true origin:position_record new_nodes:tool_new_nodes()})}
  elif name=="read_calendar" {agent_tool_result({success:true records:calendar_events})}
  elif name=="read_notes" {agent_tool_result({success:true records:note_records})}
- elif name=="query_transit" || name=="query_driving" {
-    let added=[] for index candidate in candidates {if index>=tool_candidate_start {added.push(model_route_summary(candidate))}}
+ elif name=="query_route" || name=="query_transit" || name=="query_driving" {
+    let added=[] for index candidate in candidates {if index>=tool_candidate_start {added.push(query_route_summary(candidate))}}
     agent_tool_result({success:true routes:added new_nodes:tool_new_nodes()})
  } else {agent_tool_result({success:true origin:position_record destination:destination_record constraints:constraints limits:user_limits arrive_by:arrive_by new_nodes:tool_new_nodes()})}
 }
 fn agent_execute_next(token){
+ let render_entry_at=time_now()
  if !current_task(token){return}
  if agent_call_index>=agent_calls.len(){start_timeout(0.01,||agent_pump(token)) return}
  let call=agent_calls[agent_call_index] active_tool=call
  let name=call.function.name let p=nil
+ if is_render_tool(name) {render_probe_begin(call,render_entry_at)}
  tool_candidate_start=candidates.len() tool_node_refs=[] for ref node in route_nodes {tool_node_refs.push(ref)}
  let call_at=time_now()
  start_timeout(0.01,||trace_emit_run("tool_call",{name:name arguments:call.function.arguments occurred_at:call_at},call.id,token))
  try {p=call.function.arguments.parse_json()} {agent_tool_result({success:false error:"工具参数JSON无法解析"}) return}
  try {
-  if name=="read_skill" {let text=read_text("skills/"+p.name+".md") if text==nil {agent_tool_result({success:false error:"技能不存在；可用native_ui/navigation_data"})} else {agent_tool_result({success:true name:p.name content:text})}}
+  if name=="read_skill" {agent_tool_result(read_agent_skill(p))}
   elif name=="read_calendar" || name=="read_notes" || name=="read_location" {read_source_tool(name,token,fn(){finish_tool_from_state(token)})}
   elif name=="set_constraints" {if set_constraints(p){finish_tool_from_state(token)} else {agent_tool_result({success:false error:constraint_error})}}
   elif name=="search_places" {
@@ -1891,8 +2068,7 @@ fn agent_execute_next(token){
     elif constraints!=nil && route_get(constraints,"user_selected")!=true && route_get(constraints,"inferred")!=true {if select_destination({poi_id:p.poi_id},p.basis){finish_tool_from_state(token)} else {agent_tool_result({success:false error:destination_error})}}
     else {pending_user_poi=poi if !position_current(position_record){agent_tool_result({success:false error:"请取得当前起点后再采用地点"})} elif apply_user_poi(){constraints.inferred=true constraints.user_selected=false constraints.inference={reason:p.basis origin_city:position_record.city poi_source:poi.source} finish_tool_from_state(token)} else {agent_tool_result({success:false error:"缺少可计算的用户时间/预算或真实城市"})}}
   }
-  elif name=="query_transit" {query_transit(p,token)}
-  elif name=="query_driving" {query_driving(token)}
+  elif name=="query_route" {query_route(p,token)}
   elif name=="extend_route" {extend_route(p,token)}
   elif name=="search_didi_places" {search_didi_places(p,token)}
   elif name=="quote_didi" {quote_didi(p,token)}
@@ -1900,9 +2076,11 @@ fn agent_execute_next(token){
   elif name=="compare_routes" {present_results("")}
   elif name=="get_route" {let candidate=ui_route(p.id) if candidate==nil {agent_tool_result({success:false error:"路线ID不在本轮候选中"})} else {map_path_catalog(candidate) agent_tool_result({success:true route:interface_route_facts(candidate,route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")))})}}
   elif name=="get_route_graph" {prepare_route_graph() agent_tool_result({success:true graph:route_graph_facts()})}
-  elif name=="render_ui" {
+  elif is_render_tool(name) {
+    render_probe_mark("before_mount")
     interface_revision+=1 let revision=interface_revision
-    let changed=mount_ui_blocks(p,token,revision)
+    let changed=mount_ui_blocks(render_tool_params(name,p),token,revision)
+    render_probe_mark("mount_returned") if render_probe!=nil {render_probe.active=false}
     if changed==nil {agent_tool_result({success:false error:interface_error}) return}
     start_timeout(0.25,||{if current_task(token) && active_tool==call {
       let result=render_ui_result(changed)
@@ -1953,9 +2131,10 @@ fn block_height(block){
  if block.overlay || block.document {if ui_viewport!=nil {return ui_viewport.height} return Fill}
  return Fit
 }
+fn block_actual_visible(block){return block.visible && block.complete}
 fn set_block_visibility(block){
  if block.handle==nil {return true}
- let visible=block.visible if answer_text!="" && !generated_render_complete {visible=false}
+ let visible=block_actual_visible(block) if answer_text!="" && !generated_render_complete {visible=false}
  block.container.set_visible(visible) return true
 }
 fn block_by_id(id){for block in ui_blocks {if block.id==id {return block}} return nil}
@@ -1980,9 +2159,24 @@ fn invalidate_interface(){ stop_interface() clear_generated() interface_error = 
 fn shell_busy(){ return agent_active || phase == "picking" }
 fn shell_action(){ if shell_busy(){cancel_task()} else {query_task()} }
 
-fn ui_route(ref){ if ref == "viewed" { return viewed_route() } for candidate in candidates { if candidate.id == ref { return candidate } } return nil }
+fn ui_route(ref){ if ref == "viewed" { return viewed_route() } for candidate in candidates { if candidate.id == ref || route_get(candidate,"geometry_ref")==ref { return candidate } } return nil }
 
 
+fn route_leg_facts(candidate){
+    let result=[] let legs=route_get(candidate,"legs")
+    if legs.is_array() {for leg in legs {result.push({id:leg.id from_ref:leg.from_ref to_ref:leg.to_ref requested_to_ref:route_get(leg,"requested_to_ref") mode:leg.mode departure_ts:leg.departure_ts duration_seconds:leg.duration_seconds price_cents:leg.price_cents price_basis:leg.price_basis waiting_included:leg.waiting_included source_ts:leg.source_ts warnings:leg.warnings quote_ref:route_get(leg,"quote_ref") place_match_basis:route_get(leg,"place_match_basis") provider_connection_status:route_get(leg,"provider_connection_status")})}}
+    return result
+}
+fn route_completion(candidate){
+    let completion=route_get(candidate,"completion_status")
+    if completion!=nil {return completion}
+    return if candidate.actual_endpoint==nil {"unknown"} elif candidate.endpoint_complete {"reached_requested_destination"} else {"incomplete"}
+}
+fn route_cost_facts(candidate){
+    let known=route_get(candidate,"known_cost_cents") if known==nil {known=if candidate.price_cents!=nil {candidate.price_cents} else {0}}
+    let covered=route_completion(candidate)=="reached_requested_destination" && candidate.request_bound && candidate.origin_complete && candidate.endpoint_complete && route_get(candidate,"connection_verified")!=false && route_get(candidate,"provider_connection_status")!="unknown"
+    return {amount_cents:candidate.price_cents known_subtotal_cents:known full_journey_amount_cents:if covered {candidate.price_cents} else {nil} complete:candidate.price_cents!=nil coverage:if covered {"requested_journey"} else {"queried_legs_only"} currency:candidate.currency basis:route_get(candidate,"price_basis") estimated:candidate.estimated}
+}
 fn interface_route_facts(candidate, check){
     let segments = []
     if candidate.segments.is_array() {
@@ -1998,40 +2192,53 @@ fn interface_route_facts(candidate, check){
                 buslines: buslines})
         }
     }
-    return {id: candidate.id kind: candidate.kind kind_label: kind_text(candidate.kind) price_cents: candidate.price_cents currency: candidate.currency price_label: money_text(candidate.price_cents)
-        known_cost_cents:route_get(candidate,"known_cost_cents") budget_status:route_get(candidate,"budget_status") deadline_status:route_get(candidate,"deadline_status") waiting_slack_seconds:route_get(candidate,"waiting_slack_seconds") legs:if route_get(candidate,"prefix_id")!=nil {route_prefix_facts(route_prefixes[candidate.prefix_id]).legs} else {[]}
-        duration_seconds: candidate.duration_seconds duration_label: duration_text(candidate.duration_seconds) departure_ts: candidate.departure_ts estimated_arrival_ts: check.estimated_arrival_ts
-        passed: check.passed reason: check.reason reasons: route_reasons(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
-        source: candidate.source source_ts: candidate.source_ts expires_at: candidate.expires_at estimated: candidate.estimated warnings: candidate.warnings
-        waiting_included: candidate.waiting_included waiting_basis: candidate.waiting_basis taxi_wait_verified: candidate.taxi_wait_verified
-        request_bound: candidate.request_bound origin_complete: candidate.origin_complete endpoint_complete: candidate.endpoint_complete endpoint_gap_m: candidate.endpoint_gap_m map_paths:route_get(candidate,"map_paths_cache") segments: segments}
+    let fact=query_route_summary(candidate)
+    fact.kind_label=route_kind_label(candidate) fact.price_cents=candidate.price_cents fact.currency=candidate.currency
+    fact.known_cost_cents=fact.cost.known_subtotal_cents fact.budget_status=fact.assessment.budget_status fact.deadline_status=fact.assessment.deadline_status
+    fact.waiting_slack_seconds=if check.estimated_arrival_ts!=nil {arrive_by-check.estimated_arrival_ts} else {nil}
+    fact.departure_ts=candidate.departure_ts fact.estimated_arrival_ts=check.estimated_arrival_ts
+    fact.passed=check.passed fact.reason=check.reason fact.reasons=fact.assessment.reasons
+    fact.source_ts=candidate.source_ts fact.expires_at=candidate.expires_at fact.estimated=candidate.estimated fact.warnings=candidate.warnings
+    fact.waiting_included=candidate.waiting_included fact.waiting_basis=candidate.waiting_basis fact.taxi_wait_verified=candidate.taxi_wait_verified
+    fact.request_bound=candidate.request_bound fact.origin_complete=candidate.origin_complete fact.endpoint_complete=candidate.endpoint_complete fact.endpoint_gap_m=candidate.endpoint_gap_m
+    fact.map_paths=route_get(map_geometry_owner(candidate),"map_paths_cache") fact.segments=segments
+    return fact
 }
 fn interface_facts(){
     try {let area = ui.content.rect() if area != nil && area.width>0 && area.height>0 {ui_viewport=area ui_overlay_top=area.y-ui.sentence.rect().y+12}} {}
+    render_probe_mark("source_check_entered")
     let routes = [] let source_valid = sources_current() let sources = []
+    render_probe_mark("source_check_returned")
     for candidate in candidates {
+        if render_probe!=nil && render_probe.active {render_probe.current_route=candidate.id} render_probe_mark("route_entered")
         let check = route_recheck(candidate, time_now(), arrive_by, route_get(constraints, "budget_cents"))
         routes.push(interface_route_facts(candidate, check))
+        render_probe_mark("route_returned")
     }
+    if render_probe!=nil && render_probe.active {render_probe.current_route=nil} render_probe_mark("facts_remainder_entered")
     for record in source_records { sources.push({id: route_get(record, "id") kind: route_get(record, "kind") source: route_get(record, "source") mock: route_get(record, "mock") source_time: route_get(record, "source_time") read_at: route_get(record, "read_at")}) }
     if position_record!=nil && destination_record!=nil && constraints!=nil {prepare_route_graph()}
-    return {route_graph:route_graph_facts() taxi_quotes:didi_quotes taxi_quote_places:didi_places phase: phase status: runtime_status error: interface_error now: time_now() received_at: received_at arrive_by: arrive_by
+    let graph_nodes=[] let route_ids=[]
+    for ref node in route_nodes {graph_nodes.push(node)} for candidate in candidates {route_ids.push(candidate.id)}
+    let result={route_graph:{nodes:graph_nodes route_ids:route_ids initial_route_id:"origin"} taxi_quotes:didi_quotes taxi_quote_places:didi_places phase: phase status: runtime_status error: interface_error now: time_now() received_at: received_at arrive_by: arrive_by
         origin_available: position_record != nil destination_available: destination_record != nil limits_available: user_limits != nil
         origin: position_record destination: destination_record limits: user_limits source_label: source_label() sources: sources sources_current: source_valid answer: answer_text
         comparison: if candidates.len() > 0 { comparison_summary() } else { "" } routes: routes viewed_route_id: viewed_route_id maps_available: user_limits != nil viewport: ui_viewport rendering_environment: {scroll:"viewport表示可见区域，不是内容高度上限；普通区块按Fit自然增长并在父ScrollYView滚动，overlay和整稿source有独立有限视口" label_default:"宽度Fill、高度Fit、Flow.Right wrap:true；可显式覆盖原生属性"}
         places: picker_pois preview_place: picker_preview_poi place_status: picker_status
         semantics: "点路线只查看；未知金额/等待不等于零。"}
+    render_probe_mark("facts_returned")
+    return result
 }
 fn generated_context(){
-    return "let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\nlet Label = Label{width: Fill height: Fit flow: Flow.Right{wrap:true} draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nlet mailbox_buffer = \"\"\nfn emit(event){event.block_id=block_id event.block_revision=block_revision mailbox_buffer += event.to_json() + \"\\n\" ui.mailbox.set_text(mailbox_buffer)}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(){let value = ui.fact_revision.text() if value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} start_timeout(0.1, || refresh())}\nstart_timeout(0.02, || {last_facts = ui.fact_revision.text() ui.body.render() emit({action:\"rendered\"}) start_timeout(0.1, || refresh())})\n"
+    return "let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\nlet Label = Label{width: Fill height: Fit flow: Flow.Right{wrap:true} draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nlet mailbox_buffer = \"\"\nfn emit(event){event.block_id=source_block_id event.block_revision=source_block_revision mailbox_buffer += event.to_json() + \"\\n\" ui.mailbox.set_text(mailbox_buffer)}\nfn show_block(target_id){emit({action:\"show_block\" block:target_id visible:true})}\nfn hide_self(){emit({action:\"show_block\" block:source_block_id visible:false})}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(){let value = ui.fact_revision.text() if value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} start_timeout(0.1, || refresh())}\nstart_timeout(0.02, || {last_facts = ui.fact_revision.text() ui.body.render() emit({action:\"rendered\"}) start_timeout(0.1, || refresh())})\n"
 }
 fn facts_json(){
- if ui_facts_cached_revision!=ui_facts_revision {ui_facts_json=interface_facts().to_json() ui_facts_cached_revision=ui_facts_revision}
+ if ui_facts_cached_revision!=ui_facts_revision {let value=interface_facts() render_probe_mark("serialize_entered") ui_facts_json=value.to_json() render_probe_mark("serialize_returned") ui_facts_cached_revision=ui_facts_revision}
  return ui_facts_json
 }
 fn block_source(block,body){
  let finite=block.overlay || block.document
- let context="let block_id="+block.id.to_json()+"\nlet block_revision="+block.revision+"\n"+generated_context()
+ let context="let source_block_id="+block.id.to_json()+"\nlet source_block_revision="+block.revision+"\n"+generated_context()
  let height_text=if finite {"Fill"} else {"Fit"}
  let head=context+"\nView{width:Fill height:"+height_text+" flow:Down\nmailbox := Label{visible:false text:\"\"}\nfact_state := Label{visible:false text:"+facts_json().to_json()+"}\nfact_revision := Label{visible:false text:"+(""+ui_facts_revision).to_json()+"}\n"
  if finite {head+="scroll := ScrollYView{width:Fill height:Fill flow:Down clip_x:true clip_y:true\n"}
@@ -2046,17 +2253,26 @@ fn render_ui_result(changed){
   block.error=diagnostic
   if diagnostic=="" && block.notified {block.complete=true}
   if diagnostic!="" {success=false}
-  results.push({id:block.id revision:block.revision diagnostics:diagnostic notified:block.notified})
+  results.push({id:block.id revision:block.revision diagnostics:diagnostic notified:block.notified complete:block.complete visible:block_actual_visible(block)})
  }
  sync_block_state()
  return {success:success blocks:results diagnostics:interface_error notified:generated_render_notified viewport:ui_viewport}
 }
 fn mount_interface(body,token,revision){return mount_ui_blocks({source:body},token,revision)}
 fn mount_ui_blocks(params,token,revision){
+ render_probe_mark("mount_entered")
  if token!=run_id || revision!=interface_revision {return []}
  let submissions=route_get(params,"blocks") let document=route_get(params,"source")!=nil
- if document {clear_generated() submissions=[{id:"__document" source:params.source}]}
+ if document {submissions=[{id:"__document" source:params.source}]}
  if !submissions.is_array() {interface_error="render_ui需要source或blocks" return nil}
+ render_probe_mark("fragment_check_entered")
+ // Diagnose fragments before changing existing blocks; the wrapper must not repair their structure.
+ for input in submissions {
+  let diagnostic=ui.validate_fragment(input.source)
+  if diagnostic!="" {interface_error=input.id+": "+diagnostic return nil}
+ }
+ render_probe_mark("fragment_check_returned")
+ if document {clear_generated()}
  let changed=[] interface_run=token interface_inflight=false
  for input in submissions {let existing=block_by_id(input.id) if existing!=nil && route_get(input,"overlay")!=nil && existing.overlay!=(input.overlay==true) {interface_error="已存在区块的overlay位置不变；请使用新id" return nil}}
  for input in submissions {
@@ -2090,7 +2306,7 @@ fn install_block_later(block,token,revision,call_id){
   block.handle=block.container.child(0)
   block.handle.diagnostics()
   block.body=block.source
-  try {block.handle.set_text(block.source) block.container.set_visible(block.visible) block.installed=true block.written_revision=block.source_revision}
+  try {block.handle.set_text(block.source) block.installed=true block.written_revision=block.source_revision set_block_visibility(block)}
   {block.error="生成区块执行失败"}
   trace_emit_run("render_source",{block_id:block.id revision:revision source:block.source},call_id,token)
  })
@@ -2137,7 +2353,7 @@ fn ui_dispatch_action(action){
  elif name=="map" {register_map_block(action.widget,action.target,route_get(action,"status_widget"),route_get(action,"interactive"),route_get(action,"path_indices"),block_id)}
  elif name=="map_camera" {action.widget=block_map_key(block_id,action.widget) map_camera_changed(action)}
  elif name=="map_fit" {let slot=map_slots[block_map_key(block_id,action.widget)] if slot!=nil && slot.interactive {let route=map_candidate(slot.target) if route!=nil {fit_map_slot(slot,route)}}}
- elif name=="show_block" {let target=block_by_id(action.block) if target!=nil {target.visible=action.visible!=false target.container.set_visible(target.visible) render_content()}}
+ elif name=="show_block" {let target=block_by_id(action.block) if target!=nil {target.visible=action.visible!=false set_block_visibility(target) render_content()} else {block_error(block,"show_block目标区块不存在："+action.block)}}
  elif name=="view_route" {let route=ui_route(id) if route!=nil {view_route(route.id)} else {show_status("路线已不在本次查询中")}}
  elif name=="runtime_error" {block_error(block,route_get(action,"message"))}
  else {show_status("本地动作未实现："+name)}
@@ -2194,7 +2410,7 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
         }}
         generated_area := View{width:Fill height:Fit flow:Down on_render: || {
             for block in inline_blocks {
-                View{width:Fill height:block_height(block) visible:block.visible flow:Down
+                View{width:Fill height:block_height(block) visible:block_actual_visible(block) flow:Down
                   generated := Splash{width:Fill height:block_inner_height(block) body:block.body}
                 }
             }
@@ -2205,7 +2421,7 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
     }
 }
 block_overlay := View{width:Fill height:Fill flow:Overlay on_render:||{
- for block in overlay_blocks {View{width:Fill height:block_height(block) margin:Inset{top:ui_overlay_top} visible:block.visible flow:Down clip_x:true clip_y:true Splash{width:Fill height:Fill body:block.body}}}
+ for block in overlay_blocks {View{width:Fill height:block_height(block) margin:Inset{top:ui_overlay_top} visible:block_actual_visible(block) flow:Down clip_x:true clip_y:true Splash{width:Fill height:Fill body:block.body}}}
 }}
 trace_overlay := View{width:1 height:1 flow:Overlay
 trace_identity := Label{visible:trace_enabled width:1 height:1 padding:0 text:trace_identity_json() draw_text +: {color:#x0000 text_style:NavRegular{font_size:0.5}}}

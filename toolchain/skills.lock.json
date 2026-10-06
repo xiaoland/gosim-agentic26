@@ -1,0 +1,86 @@
+{
+  "repository": "https://github.com/ZhangHanDong/makepad-skills",
+  "revision": "6e16c8d5beefcb410d57e83a799014beb2957977",
+  "license": "MIT (upstream README)",
+  "adaptations": "Short standard SKILL.md entry points with Chinese metadata and Navigation compatibility notes. Upstream technical documents retained as UPSTREAM.md/references; example URLs replaced by explicit non-address placeholders to satisfy the bundle asset gate. Upstream hashes identify originals; local hashes identify adapted files.",
+  "files": [
+    {
+      "upstream_path": "skills/makepad-2.0-events/SKILL.md",
+      "upstream_sha256": "af338572c3330afb0dd245d7937cf178bbf0708d2a740b7b3252d7d67aaf25cb",
+      "local_path": "bundle/assets/skills/makepad-2-0-events/UPSTREAM.md",
+      "local_sha256": "52c6097a07d268399c7391f732ca30ed6634fc35ddf5dc6e2fb23fe68e588b96"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-events/references/event-patterns.md",
+      "upstream_sha256": "840a7a6d942e08fc6a57ce87a5ca91776c4176d6a5c18cceeb2967797a6b6e33",
+      "local_path": "bundle/assets/skills/makepad-2-0-events/references/event-patterns.md",
+      "local_sha256": "8ff9f6aa02066c7045ac12240d3b086e9c9f4be4ef9a4daa1b0d5517aea9ff84"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-layout/SKILL.md",
+      "upstream_sha256": "072a368014f065b9e3d6f03ca4f9eb902f85373e4eadb7465fe940ba5cb04e80",
+      "local_path": "bundle/assets/skills/makepad-2-0-layout/UPSTREAM.md",
+      "local_sha256": "072a368014f065b9e3d6f03ca4f9eb902f85373e4eadb7465fe940ba5cb04e80"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-layout/references/layout-patterns.md",
+      "upstream_sha256": "29044614f84907f15328d2cab93b0ab31bd9a586229655d9ad502d2008d41315",
+      "local_path": "bundle/assets/skills/makepad-2-0-layout/references/layout-patterns.md",
+      "local_sha256": "29044614f84907f15328d2cab93b0ab31bd9a586229655d9ad502d2008d41315"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-splash/SKILL.md",
+      "upstream_sha256": "6cf7b583a13a0b08dc4198d08be982fda5245b1f81e07a4968f3fe793f32b5c4",
+      "local_path": "bundle/assets/skills/makepad-2-0-splash/UPSTREAM.md",
+      "local_sha256": "bf0272f390d859d12210e60fba6be48423f2f7cb701543b1a613ca492b8a7fe0"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-splash/references/canvas-splash-patterns.md",
+      "upstream_sha256": "9f48e0eb18ea47c9b5ce92c2a1d3065e8a3327b219d74dafae67732b56b2339f",
+      "local_path": "bundle/assets/skills/makepad-2-0-splash/references/canvas-splash-patterns.md",
+      "local_sha256": "9f48e0eb18ea47c9b5ce92c2a1d3065e8a3327b219d74dafae67732b56b2339f"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-splash/references/splash-language-reference.md",
+      "upstream_sha256": "68bb7428de437591926d0fdc2cfe0a94779865f47486b6857729a7b82f749ff6",
+      "local_path": "bundle/assets/skills/makepad-2-0-splash/references/splash-language-reference.md",
+      "local_sha256": "d4291c8f553fe7af11a0922ff8f913a3d8fb2255f4192487b5fdcc1ae847be0e"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-splash/references/splash-scripting-patterns.md",
+      "upstream_sha256": "303b441df36f38aa88b23e707d73e40b82cfa9d1291bf2ad357f8f978489208c",
+      "local_path": "bundle/assets/skills/makepad-2-0-splash/references/splash-scripting-patterns.md",
+      "local_sha256": "5a9c613d83636b44bc67190ebef6897d2e3650d414c51eb14278302efae6bbca"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-troubleshooting/SKILL.md",
+      "upstream_sha256": "33d8fdd74c2f78e524d3621025e96f46be6045d48bbe32d8d1844cdd149820c5",
+      "local_path": "bundle/assets/skills/makepad-2-0-troubleshooting/UPSTREAM.md",
+      "local_sha256": "33d8fdd74c2f78e524d3621025e96f46be6045d48bbe32d8d1844cdd149820c5"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-troubleshooting/references/error-solutions.md",
+      "upstream_sha256": "0aaa23db1693f23d709631e9830155b6cb17d6cbf37a9f99adfe1279dce07b37",
+      "local_path": "bundle/assets/skills/makepad-2-0-troubleshooting/references/error-solutions.md",
+      "local_sha256": "0aaa23db1693f23d709631e9830155b6cb17d6cbf37a9f99adfe1279dce07b37"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-widgets/SKILL.md",
+      "upstream_sha256": "72372a9833fea6b6ba78422dc762c907240f113448ee4a60b231518db33d6c72",
+      "local_path": "bundle/assets/skills/makepad-2-0-widgets/UPSTREAM.md",
+      "local_sha256": "72372a9833fea6b6ba78422dc762c907240f113448ee4a60b231518db33d6c72"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-widgets/references/widget-advanced.md",
+      "upstream_sha256": "2bbcd0c35a4c53aed98f8eddfc6ea1f6542e74cd4ca0b15290dc7f7795cfbb4d",
+      "local_path": "bundle/assets/skills/makepad-2-0-widgets/references/widget-advanced.md",
+      "local_sha256": "2bbcd0c35a4c53aed98f8eddfc6ea1f6542e74cd4ca0b15290dc7f7795cfbb4d"
+    },
+    {
+      "upstream_path": "skills/makepad-2.0-widgets/references/widget-catalog.md",
+      "upstream_sha256": "926e27d73997e9aa80e019f88026d2e0b2437f5a8f6745693f90b57a16a673cd",
+      "local_path": "bundle/assets/skills/makepad-2-0-widgets/references/widget-catalog.md",
+      "local_sha256": "45ac15ff3108c92ac8deb3a44fed46082005e9efc843dbd98b0781d93fd4130b"
+    }
+  ]
+}

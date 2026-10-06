@@ -1,0 +1,63 @@
+{
+  "mechanical_acceptance_passed": true,
+  "model_requests": 14,
+  "normal_self_repair": true,
+  "quote_original_id": "route_1_6",
+  "quote_derived_id": "route_1_7",
+  "original_amount_cents": 3300,
+  "derived_amount_cents": 2800,
+  "full_journey_amount_cents": null,
+  "same_duration_seconds": 1505,
+  "quote_directory_count": 3,
+  "quote_pages": [
+    [
+      0,
+      1,
+      2
+    ]
+  ],
+  "transit_directory_count": 8,
+  "transit_pages": [
+    [
+      0,
+      1,
+      2,
+      3
+    ],
+    [
+      4,
+      5,
+      6,
+      7
+    ]
+  ],
+  "all_actual_png_accepted": true,
+  "drag_new_camera_png_accepted": true,
+  "both_returns_preserved_list": true,
+  "callback_diagnostics": [],
+  "heap_expected_route_count": 7,
+  "heap_files_parse_complete": true,
+  "heap_routes": [
+    "route_1_1",
+    "route_1_2",
+    "route_1_3",
+    "route_1_4",
+    "route_1_5",
+    "route_1_6",
+    "route_1_7"
+  ],
+  "heap_basis": "references exported after render attempt; original geometry retained privately",
+  "native_budget_age": "not_observed",
+  "first_render_elapsed_ms": 10.485172271728516,
+  "old_intermittent_hard_budget_root_cause_unresolved": true,
+  "generated_narrative_limitations": [
+    "列表静态打车按钮称符合时效，而当前Route deadline_status未知；详情正确显示未知连接与候车。",
+    "静态公交摘要称全部超40分钟而查询最快35分钟，详情按当前实时assessment显示理由。",
+    "首个失败__document的部分内容仍留在普通列表前，之后五块成功不删除它。"
+  ],
+  "owned_instance_closed": true,
+  "source_main_sha256": "5fc19a90d051de7d140b5fc68105c9ebb01e21a6677dd449c6ba26f68c32d312",
+  "capture_mode": "macOS locked OctoSense host in Android style; explicit demo location/calendar/notes; live M3/Amap/Didi",
+  "presentation": "Edited actual screenshots with Chinese narration; not an uninterrupted recording; not Android device validation",
+  "mixed_transit_taxi_exploration_verified_in_this_run": false
+}

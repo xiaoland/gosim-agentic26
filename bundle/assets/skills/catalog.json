@@ -1,0 +1,65 @@
+[
+  {
+    "name": "makepad-2-0-events",
+    "description": "Makepad 2.0回调、事件和状态更新资料，用于实现按钮交互及局部界面更新。",
+    "files": [
+      "SKILL.md",
+      "UPSTREAM.md",
+      "references/event-patterns.md"
+    ]
+  },
+  {
+    "name": "makepad-2-0-layout",
+    "description": "Makepad 2.0布局：Flow、Fill、Fit、Inset、间距、对齐和滚动，用于分析界面尺寸、排列与裁剪。",
+    "files": [
+      "SKILL.md",
+      "UPSTREAM.md",
+      "references/layout-patterns.md"
+    ]
+  },
+  {
+    "name": "makepad-2-0-splash",
+    "description": "Makepad 2.0 Splash语法：表达式、变量、函数、脚本状态和运行时求值，用于编写或修正原生界面源码。",
+    "files": [
+      "SKILL.md",
+      "UPSTREAM.md",
+      "references/canvas-splash-patterns.md",
+      "references/splash-language-reference.md",
+      "references/splash-scripting-patterns.md"
+    ]
+  },
+  {
+    "name": "makepad-2-0-troubleshooting",
+    "description": "Makepad 2.0常见语法、布局、控件和运行时错误资料，用于理解执行诊断及修正源码。",
+    "files": [
+      "SKILL.md",
+      "UPSTREAM.md",
+      "references/error-solutions.md"
+    ]
+  },
+  {
+    "name": "makepad-2-0-widgets",
+    "description": "Makepad 2.0上游控件及属性资料，用于选择控件并查询其原生接口。",
+    "files": [
+      "SKILL.md",
+      "UPSTREAM.md",
+      "references/widget-advanced.md",
+      "references/widget-catalog.md"
+    ]
+  },
+  {
+    "name": "native-ui",
+    "description": "Navigation的render_ui嵌入环境、共享事实、区块交互、字体和地图接口，用于将Makepad/Splash源码交给当前宿主执行。",
+    "files": [
+      "SKILL.md",
+      "references/host-interface.md"
+    ]
+  },
+  {
+    "name": "navigation-data",
+    "description": "Navigation真实出行资料、统一Route身份、混合接驳与供应商报价语义，用于选择工具并解释可追溯路线。",
+    "files": [
+      "SKILL.md"
+    ]
+  }
+]

@@ -1,0 +1,3 @@
+agentic26-navigation 0.13.0 — PASSED
+  [warning] publisher-signature: unsigned: accountability rests on the hub alone
+  grants: capabilities {"location", "net", "storage"}, hosts {"api.minimax.cn", "mcp.didichuxing.com", "restapi.amap.com"}, storage 16777216 bytes, agent none

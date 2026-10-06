@@ -109,19 +109,28 @@ fn blocks_tick(){
  if !blocks_started {
   blocks_started=true run_id+=1 received_at=time_now() arrive_by=received_at+2400 constraints={budget_cents:5000} user_limits={minutes:40 budget_cents:5000} phase="proposal"
   candidates=[route_candidate("route-a","public_transit",1200,500,received_at,received_at,"114.01,22.01","114.01,22.01",true,[{polyline:"114,22;114.01,22.01"}]) route_candidate("route-b","taxi",900,1800,received_at,received_at,"114.02,22.02","114.02,22.02",true,[{polyline:"114,22;114.02,22.02"}])]
+  candidates[0].geometry_ref="fixture-geometry-a" candidates[1].geometry_ref="fixture-geometry-b"
   viewed_route_id="route-a"
-  blocks_mount({blocks:[{id:"list" source:"start_timeout(0.1,||ui.kept.set_text(\"TOP LEVEL RAN\")) View{width:Fill height:Fit flow:Down entry := TextInput{text:\"INITIAL\"} kept := Label{text:\"OLD\"} for i in 5 {Label{text:\"候选列表第\"+i+\"行\"}} open := Button{text:\"查看方案\" on_click:||{emit({action:\"view_route\" id:\"route-b\"}) emit({action:\"show_block\" block:\"details\" visible:true})}} for i in 16 {Label{text:\"列表后续第\"+i+\"行\"}}}"}]})
+  blocks_mount(render_tool_params("render_routes",{source:"start_timeout(0.1,||ui.kept.set_text(\"TOP LEVEL RAN\")) View{width:Fill height:Fit flow:Down entry := TextInput{text:\"INITIAL\"} kept := Label{text:\"OLD\"} for i in 5 {Label{text:\"候选列表第\"+i+\"行\"}} open := Button{text:\"查看方案\" on_click:||{emit({action:\"view_route\" id:\"route-b\"}) show_block(\"route_detail\")}} for i in 16 {Label{text:\"列表后续第\"+i+\"行\"}}}"}))
   start_timeout(0.4,||{
-   blocks_first=block_by_id("list") blocks_first.handle.find("entry").set_text("LOCAL INPUT") blocks_first.handle.find("kept").set_text("LOCAL STATE")
-   blocks_mount({blocks:[{id:"summary" source:"emit({action:\"map\" widget:\"same_map\" target:\"route-a\" status_widget:\"note\"}) View{width:Fill height:Fit flow:Down Label{text:\"总结区块／独立蓝色地图\"} same_map := Image{width:Fill height:120} note := Label{text:\"\"}}"} {id:"details" overlay:true visible:false source:"on_facts_changed=fn(current){ui.selected.set_text(\"当前方案：\"+current.viewed_route_id)} emit({action:\"map\" widget:\"same_map\" target:\"viewed\" status_widget:\"note\"}) View{width:Fill height:Fit flow:Down show_bg:true draw_bg +: {color:#xf7f7f7} back := Button{text:\"返回列表\" on_click:||{emit({action:\"show_block\" block:\"details\" visible:false})}} selected := Label{text:\"当前方案：\"+facts.viewed_route_id} same_map := Image{width:Fill height:120} note := Label{text:\"\"} for i in 24 {Label{text:\"详情第\"+i+\"段：分段／费用／用时／限制，合成验证\"}}}"}]})
+   blocks_first=block_by_id("routes") blocks_first.handle.find("entry").set_text("LOCAL INPUT") blocks_first.handle.find("kept").set_text("LOCAL STATE")
+   let original_revision=blocks_first.revision let original_source=blocks_first.source
+   let rejected=blocks_mount({blocks:[{id:"routes" source:"Label{text:\"replacement\"}"},{id:"fragment-bad" source:"}{"}]})
+   blocks_check("坏片段进入正常区块错误且批量保留旧稿",rejected==nil && interface_error.search("fragment-bad:")==0 && blocks_first.revision==original_revision && blocks_first.source==original_source && blocks_first.handle.find("entry").text()=="LOCAL INPUT" && block_by_id("fragment-bad")==nil)
+   blocks_mount({blocks:[{id:"summary" source:"emit({action:\"map\" widget:\"same_map\" target:\"route-a\" status_widget:\"note\"}) View{width:Fill height:Fit flow:Down Label{text:\"总结区块／独立蓝色地图\"} same_map := Image{width:Fill height:120} note := Label{text:\"\"}}"}]})
+   blocks_mount(render_tool_params("render_route_detail",{source:"on_facts_changed=fn(current){ui.selected.set_text(\"当前方案：\"+current.viewed_route_id)} emit({action:\"map\" widget:\"same_map\" target:\"viewed\" status_widget:\"note\"}) View{width:Fill height:Fit flow:Down show_bg:true draw_bg +: {color:#xf7f7f7} back := Button{text:\"返回列表\" on_click:||{hide_self()}} selected := Label{text:\"当前方案：\"+facts.viewed_route_id} same_map := Image{width:Fill height:120} note := Label{text:\"\"} for i in 24 {Label{text:\"详情第\"+i+\"段：分段／费用／用时／限制，合成验证\"}}}"}))
    start_timeout(0.5,||{
-    blocks_detail=block_by_id("details")
+    blocks_detail=block_by_id("route_detail")
+    blocks_check("默认详情工具实际ID与按钮目标一致",blocks_detail.id=="route_detail" && blocks_first.id=="routes")
+    ui_dispatch_action({action:"show_block" block:"missing-detail" visible:true block_id:"routes"})
+    blocks_check("不存在的详情目标提供本地错误且不误开其他块",blocks_first.error=="show_block目标区块不存在：missing-detail" && !blocks_detail.visible)
+    blocks_first.error="" sync_block_state() render_content()
     blocks_check("追加区块保留输入、本地状态且未重跑顶层",blocks_first.handle.find("entry").text()=="LOCAL INPUT" && blocks_first.handle.find("kept").text()=="LOCAL STATE")
     blocks_check("普通总结为自然高度而非满视口",block_by_id("summary").handle.rect().height<ui_viewport.height)
     blocks_check("各块独立成功且隐藏overlay不显示",blocks_first.complete && block_by_id("summary").complete && blocks_detail.complete && !blocks_detail.container.visible())
     blocks_mount({blocks:[{id:"summary" source:"emit({action:\"map\" widget:\"same_map\" target:\"route-a\" status_widget:\"note\"}) View{width:Fill height:Fit flow:Down Label{text:\"替换总结，列表保持\"} same_map := Image{width:Fill height:120} note := Label{text:\"\"}}"}]})
     start_timeout(0.4,||{
-     blocks_check("替换只重建指定块，详情与列表VM保留",blocks_first==block_by_id("list") && blocks_detail==block_by_id("details") && blocks_first.revision==1 && block_by_id("summary").revision==2)
+     blocks_check("替换只重建指定块，详情与列表VM保留",blocks_first==block_by_id("routes") && blocks_detail==block_by_id("route_detail") && blocks_first.revision==1 && block_by_id("summary").revision==2)
      blocks_phase=1 fs.write("blocks-ready.json","{}")
     })
    })
@@ -130,19 +139,19 @@ fn blocks_tick(){
  if blocks_phase==1 && fs.exists("blocks-opened.json") {
   blocks_phase=2
   blocks_check("真实按钮跨块打开详情并更新事实",blocks_detail.container.visible() && viewed_route_id=="route-b" && blocks_detail.handle.find("selected").text()=="当前方案：route-b")
-  let one=map_slots[block_map_key("summary","same_map")] let two=map_slots[block_map_key("details","same_map")]
+  let one=map_slots[block_map_key("summary","same_map")] let two=map_slots[block_map_key("route_detail","same_map")]
   blocks_check("同名地图按块独立目标与字节加载",one!=nil && two!=nil && one!=two && one.target_id=="route-a" && two.target_id=="route-b" && one.state=="ready" && two.state=="ready")
   fs.write("blocks-open-checked.json","{}")
  }
  if blocks_phase==2 && fs.exists("blocks-returned.json") {
   blocks_phase=3
-  if fs.exists("blocks-geometry-only.json") {fs.write("harness-smoke.json",{checks:[{name:"overlay返回保留输入和本地状态" passed:!blocks_detail.container.visible() && blocks_first.handle.find("entry").text()=="LOCAL INPUT" && blocks_first.handle.find("kept").text()=="LOCAL STATE"}]}.to_json()) return}
+  if fs.exists("blocks-geometry-only.json") {fs.write("harness-smoke.json",{checks:blocks_checks}.to_json()) return}
   blocks_check("返回仅隐藏详情，列表输入和脚本状态保留",!blocks_detail.container.visible() && blocks_first.handle.find("entry").text()=="LOCAL INPUT" && blocks_first.handle.find("kept").text()=="LOCAL STATE")
-  let invalid=blocks_mount({blocks:[{id:"details" overlay:false source:"Label{text:\"not installed\"}"}]})
-  blocks_check("位置变更输入错误不提交成功空结果",invalid==nil && block_by_id("details")==blocks_detail)
+  let invalid=blocks_mount({blocks:[{id:"route_detail" overlay:false source:"Label{text:\"not installed\"}"}]})
+  blocks_check("位置变更输入错误不提交成功空结果",invalid==nil && block_by_id("route_detail")==blocks_detail)
   blocks_mount({blocks:[{id:"summary" source:"View{draw_bg:{color:#xff0000} Label{text:\"bad\"}}"}]})
   start_timeout(0.4,||{
-   blocks_check("单块真实执行诊断不隐藏其他成功块",!render_ui_result([block_by_id("summary")]).success && render_ui_result([block_by_id("summary")]).blocks[0].diagnostics!="" && blocks_first.complete && generated_render_complete && blocks_first.handle.find("kept").text()=="LOCAL STATE")
+   blocks_check("单块真实执行诊断不隐藏其他成功块",!render_ui_result([block_by_id("summary")]).success && render_ui_result([block_by_id("summary")]).blocks[0].diagnostics!="" && !block_by_id("summary").complete && !block_by_id("summary").container.visible() && blocks_first.complete && generated_render_complete && blocks_first.handle.find("kept").text()=="LOCAL STATE")
    blocks_old_revision=block_by_id("summary").revision
    blocks_mount({blocks:[{id:"summary" source:"Label{text:\"只修复总结区块\"}"}]})
    start_timeout(0.4,||{
@@ -349,15 +358,24 @@ fn agent_pump(token){
  let complete=candidates[candidates.len()-1]
  let first=route_prefixes["prefix-1-0"] let second=route_prefixes["prefix-2-0"] let final=route_prefixes["prefix-3-0"]
  let leg=final.legs[2]
- let priced=route_prefix_quote(final,route_nodes["origin"],{ref:"quote:test" price_cents:900},final.legs[0].id,"合成同地点估价关联；不同坐标不认证","quoted",arrive_by,5000).prefix
+ let walking_variant=complete.to_json().parse_json() walking_variant.legs[1].mode="walk"
+ let priced=route_quote_variant(complete,{ref:"quote:test" price_cents:900},final.legs[0].id,"合成同地点估价关联；不同坐标不认证").candidate
  let unknown={id:"unknown" to_ref:leg.to_ref actual_origin:leg.actual_origin actual_endpoint:leg.actual_endpoint request_bound:true origin_complete:true endpoint_complete:true price_cents:nil duration_seconds:leg.duration_seconds departure_ts:leg.departure_ts source_ts:leg.source_ts waiting_included:false segments:leg.segments}
  let partial=route_prefix_extend(second,unknown,"unknown",arrive_by,5000).prefix
  let broken={id:"broken" to_ref:leg.to_ref actual_origin:"115,24" actual_endpoint:leg.actual_endpoint request_bound:true origin_complete:true endpoint_complete:true price_cents:1200 duration_seconds:300 departure_ts:leg.departure_ts source_ts:leg.source_ts waiting_included:false segments:leg.segments}
  let disconnected=route_prefix_extend(second,broken,"broken",arrive_by,5000)
  let budget=route_prefix_extend(second,leg,"over",arrive_by,2000).prefix
  let late=route_prefix_extend(second,leg,"late",time_now()-1,5000).prefix
+ let map_cold=route_map_metadata(complete) let map_cache_before=route_get(complete,"map_geometry_cache")
+ let old_directory=map_path_catalog(candidates[1]) let extended_cold=route_map_metadata(complete)
+ let quote_cold=route_map_metadata(priced) let new_directory=map_path_catalog(complete)
+ let quoted_directory=map_path_catalog(priced) let quoted_facts=interface_route_facts(priced,route_recheck(priced,time_now(),arrive_by,5000))
  fs.write("harness-smoke.json",{checks:[
+ {name:"未读地图目录不是零且不构造几何" passed:map_cold.catalog_status=="not_loaded" && map_cold.path_count==nil && map_cache_before==nil && map_cold.max_paths_per_image==4}
+ {name:"extend新几何不能沿用旧Route目录" passed:route_map_metadata(candidates[1]).catalog_status=="ready" && extended_cold.catalog_status=="not_loaded" && extended_cold.path_count==nil}
+ {name:"报价派生复用同源目录并保当前Route身份" passed:quote_cold.catalog_status=="not_loaded" && quoted_directory==new_directory && quoted_facts.id==priced.id && quoted_facts.map_paths==new_directory && quoted_facts.map_metadata.catalog_status=="ready" && quoted_facts.map_metadata.path_count==new_directory.len()}
  {name:"公交前后局部打车组成三完整leg" passed:final.legs.len()==3 && final.legs[0].mode=="taxi" && final.legs[1].mode=="transit" && final.legs[2].mode=="taxi"}
+ {name:"Route展示交通方式来自实际legs" passed:interface_route_facts(walking_variant,route_recheck(walking_variant,time_now(),arrive_by,5000)).kind_label=="打车＋步行" && interface_route_facts(complete,route_recheck(complete,time_now(),arrive_by,5000)).kind_label=="打车＋公共交通"}
  {name:"每笔完整估价仅相加一次" passed:complete.price_cents==3000 && first.price_cents==1200 && second.price_cents==1800 && final.known_cost_cents==3000}
  {name:"出租车候车未知与价格可比较分离" passed:final.budget_status=="within_estimate" && final.deadline_status=="unknown" && final.waiting_slack_seconds>0 && !complete.feasible}
  {name:"未知报价不是零且保留已知小计" passed:partial.price_cents==nil && partial.known_cost_cents==1800 && partial.budget_status=="unknown"}
@@ -386,9 +404,9 @@ start_timeout(1,||{
  register_route_node("stop:a","fixture station A","114.01,22","mock",city)
  register_route_node("stop:b","fixture station B","114.02,22","mock",city)
  agent_active=true phase="running" agent_calls=[
- {id:"mixed-taxi-a" function:{name:"extend_route" arguments:{prefix_id:"origin" to_ref:"stop:a" mode:"taxi"}.to_json()}}
- {id:"mixed-transit" function:{name:"extend_route" arguments:{prefix_id:"prefix-1-0" to_ref:"stop:b" mode:"transit" strategy:0}.to_json()}}
- {id:"mixed-taxi-b" function:{name:"extend_route" arguments:{prefix_id:"prefix-2-0" to_ref:"destination" mode:"taxi"}.to_json()}}
+ {id:"mixed-taxi-a" function:{name:"extend_route" arguments:{route_id:"origin" to_ref:"stop:a" mode:"taxi"}.to_json()}}
+ {id:"mixed-transit" function:{name:"extend_route" arguments:{route_id:"route_"+run_id+"_1" to_ref:"stop:b" mode:"transit" strategy:0}.to_json()}}
+ {id:"mixed-taxi-b" function:{name:"extend_route" arguments:{route_id:"route_"+run_id+"_2" to_ref:"destination" mode:"taxi"}.to_json()}}
  ] agent_call_index=0 agent_execute_next(run_id)
 })
 '''
@@ -444,7 +462,7 @@ fn agent_tool_result(result){
  if active_tool!=nil {
   let name=active_tool.function.name
   let legacy=result
-  if name=="query_driving" {let origin=false let destination=false for node in result.new_nodes {if node.ref=="origin" {origin=true} if node.ref=="destination" {destination=true}} performance_origins=origin && destination legacy={success:true facts:performance_legacy_facts() records:[]}}
+  if name=="query_route" {let origin=false let destination=false for node in result.new_nodes {if node.ref=="origin" {origin=true} if node.ref=="destination" {destination=true}} performance_origins=origin && destination legacy={success:true facts:performance_legacy_facts() records:[]}}
   elif name=="compare_routes" {legacy={success:true comparison:comparison_summary() mixed_attempts:route_graph_facts().prefixes queried_transit_count:transit_count queried_driving:driving_done facts:performance_legacy_facts()}}
   elif name=="render_ui" {legacy={success:result.success diagnostics:result.diagnostics viewport:result.viewport facts:performance_legacy_facts()} performance_render=result.success}
   elif name=="get_route" {performance_detail=result.success && result.route.segments.len()>0 && result.route.price_cents==1200}
@@ -513,7 +531,7 @@ fn performance_seed(){
  }
  agent_messages=[{role:"system" content:"synthetic same-record performance comparison"} {role:"user" content:({request:"公开合成查询" facts:{position:position_record destination:destination_record}}).to_json()}]
  performance_old_messages=[agent_messages[0] agent_messages[1]]
- agent_calls=[performance_call("perf-drive","query_driving",{}) performance_call("perf-compare","compare_routes",{}) performance_call("perf-detail","get_route",{id:"perf-0"}) performance_call("perf-graph","get_route_graph",{}) performance_call("perf-render","render_ui",{source:"result := Label{text:\"Performance result: complete local details\"} Button{text:\"Open detail\" on_click:||emit({action:\"view_route\" id:\"perf-0\"})}"})]
+ agent_calls=[performance_call("perf-drive","query_route",{mode:"taxi"}) performance_call("perf-compare","compare_routes",{}) performance_call("perf-detail","get_route",{id:"perf-0"}) performance_call("perf-graph","get_route_graph",{}) performance_call("perf-render","render_ui",{source:"result := Label{text:\"Performance result: complete local details\"} Button{text:\"Open detail\" on_click:||emit({action:\"view_route\" id:\"perf-0\"})}"})]
  let assistant={role:"assistant" content:nil tool_calls:agent_calls}
  agent_messages.push(assistant) performance_old_messages.push(assistant) agent_call_index=0
  agent_execute_next(run_id)
@@ -527,6 +545,163 @@ fn performance_tick(){
 start_timeout(1,||performance_tick())
 '''
 
+SKILLS_FIXTURE = r'''
+fn agent_pump(token){}
+fn skills_tick(){
+ if !fs.exists("skills-go.json") {start_timeout(0.1,||skills_tick()) return}
+ agent_begin()
+ let checks=[]
+ let catalog=agent_skill_catalog()
+ checks.push({name:"七个技能从frontmatter曝光" passed:catalog.len()==7})
+ let prompt=agent_messages[0].content
+ let metadata_ok=true
+ for skill in catalog {if prompt.split(skill.name).len()<2 || prompt.split(skill.description).len()<2 {metadata_ok=false}}
+ checks.push({name:"首次模型消息包含所有名称与描述" passed:metadata_ok})
+ let entry=read_agent_skill({name:"native-ui"})
+ checks.push({name:"默认读取完整SKILL.md" passed:entry.success && entry.path=="SKILL.md" && entry.content==read_text("skills/native-ui/SKILL.md")})
+ checks.push({name:"技能正文不提前进入模型上下文" passed:prompt.split(entry.content).len()==1})
+ let host=read_agent_skill({name:"native-ui" path:"references/host-interface.md"})
+ checks.push({name:"按需读取完整宿主引用" passed:host.success && host.content==read_text("skills/native-ui/references/host-interface.md")})
+ let upstream=read_agent_skill({name:"makepad-2-0-splash" path:"UPSTREAM.md"})
+ checks.push({name:"上游正文按需读取" passed:upstream.success && upstream.content.len()>10000})
+ let reference=read_agent_skill({name:"makepad-2-0-layout" path:"references/layout-patterns.md"})
+ checks.push({name:"按需读取上游嵌套引用" passed:reference.success && reference.content==read_text("skills/makepad-2-0-layout/references/layout-patterns.md")})
+ let legacy=read_agent_skill({name:"native_ui"})
+ checks.push({name:"旧工具调用名称兼容" passed:legacy.success && legacy.content==entry.content})
+ let missing=read_agent_skill({name:"native-ui" path:"absent.md"})
+ checks.push({name:"不存在的引用返回实际资源目录" passed:!missing.success && missing.files.len()>0})
+ fs.write("harness-smoke.json",({checks:checks}).to_json())
+}
+start_timeout(1,||skills_tick())
+'''
+
+CONTRACT_FIXTURE=r'''
+let contract_started=false
+let contract_stage=0
+let contract_results=[]
+let contract_params=[]
+let contract_checks=[]
+let contract_geometry_reads=0
+let contract_partial=nil let contract_quote_id="" let contract_schema=nil
+fn contract_check(name,passed){contract_checks.push({name:name passed:passed})}
+fn contract_call(id,name,p){return {id:id type:"function" function:{name:name arguments:p.to_json()}}}
+fn contract_start(calls){agent_calls=calls agent_call_index=0 agent_active=true phase="running" start_timeout(0.01,||agent_execute_next(run_id))}
+fn map_geometry_uncached(candidate){contract_geometry_reads+=1 return product_map_geometry_uncached(candidate)}
+fn load_map_slot(slot){slot.state="ready" slot.status="SYNTHETIC MAP BINDING" slot.target_id=map_candidate(slot.target).id}
+fn amap_request(path,params,token,done){
+ contract_params.push({path:path params:params})
+ let from=coord_text(position_record) let to=coord_text(destination_record)
+ let data={status:"1" route:{origin:from destination:to taxi_cost:"32" paths:[{distance:"12345" cost:{duration:"900"} steps:[{instruction:"沿合成道路前行" road:"Synthetic Road" distance:"12345" cost:{duration:"900"} polyline:from+";"+to}]}]}}
+ if path=="/v5/direction/transit/integrated" {data={status:"1" route:{origin:from destination:to transits:[{distance:"15000" cost:{duration:"1200" transit_fee:if params.search("&strategy=8")>=0 {nil} else {"4"}} segments:[{walking:{distance:"15000" cost:{duration:"1200"} steps:[{instruction:"合成步行接驳" polyline:from+";"+to}]}}]}]}}}
+ start_timeout(0.01,||done(data))
+}
+fn agent_tool_result(result){contract_results.push({name:active_tool.function.name result:result}) product_agent_tool_result(result)}
+fn agent_begin(){}
+fn agent_pump(token){
+ if contract_stage==1 {
+  contract_stage=2
+  let ids=[] let unique=true
+  for c in candidates {for id in ids {if id==c.id {unique=false}} ids.push(c.id)}
+  contract_check("同一assistant批次查询候选ID与跨轮几何引用唯一",unique && candidates.len()==4 && candidates[0].geometry_ref!=candidates[1].geometry_ref && candidates[0].id.search("route_"+run_id+"_")==0)
+  let a=contract_results[0].result.routes[0] let taxi=contract_results[2].result.routes[0] let unknown=contract_results[3].result.routes[0]
+  contract_check("统一query保真实距离费用分段及未知候车",a.distance_m==15000 && a.cost.amount_cents==400 && a.steps.len()==1 && taxi.distance_m==12345 && taxi.cost.amount_cents==3200 && !taxi.assessment.waiting_included && taxi.cost.basis!="" && a.duration_label==duration_text(a.duration_seconds) && a.price_label==money_text(a.cost.amount_cents) && taxi.duration_label==duration_text(taxi.duration_seconds))
+  contract_check("未知报价不变零且保不成立依据",unknown.cost.amount_cents==nil && !unknown.assessment.passed && unknown.assessment.reasons.len()>0)
+  let over={} for key value in candidates[0] {over[key]=value} over.price_cents=10000 over.known_cost_cents=10000
+  let independent=query_route_summary(over).assessment
+  let late_route={} for key value in candidates[0] {late_route[key]=value} late_route.duration_seconds=4000
+  let late_assessment=query_route_summary(late_route).assessment
+  contract_check("预算与期限各自判断，不因超预算改变已知时间结论",independent.budget_status=="over_budget" && independent.deadline_status=="within_estimate" && !independent.passed && late_assessment.budget_status=="within_estimate" && late_assessment.deadline_status=="over_deadline")
+  contract_check("策略默认0与显式策略走原供应商接口",contract_params[0].params.search("&strategy=0")>=0 && contract_params[1].params.search("&strategy=1")>=0 && contract_params[2].path=="/v5/direction/driving" && contract_params[2].params.search("&strategy=0")>=0)
+  contract_check("查询未提前扫描几何，polyline引用不含坐标",contract_geometry_reads==0 && route_get(candidates[0],"map_geometry_cache")==nil && ui_route(a.geometry_ref)==candidates[0])
+  let geometry=map_geometry(ui_route(a.geometry_ref)) let again=map_geometry(ui_route(a.id))
+  contract_check("路线ID与polyline引用复用同一惰性缓存",contract_geometry_reads==1 && geometry.paths.to_json()==again.paths.to_json())
+  contract_schema=agent_tools()
+  let schema_description=contract_schema[0].function.description contract_schema[0].function.description="SAME RUN PROBE"
+  contract_check("同run工具schema按同一对象复用",agent_tools()[0].function.description=="SAME RUN PROBE")
+  contract_schema[0].function.description=schema_description
+  let names=[] let no_visible=true for t in agent_tools() {names.push(t.function.name) if is_render_tool(t.function.name) && t.function.name!="render_ui" && route_get(t.function.parameters.properties,"visible")!=nil {no_visible=false}}
+  contract_check("只曝光统一query及五渲染入口与通用入口",names.to_json().search("query_route")>=0 && names.to_json().search("query_transit")==-1 && names.to_json().search("query_driving")==-1 && no_visible && model_task_context().providers.didi.configured && model_task_context().to_json().search("didi-fixture-secret")==-1)
+  let from=coord_text(position_record) let to=coord_text(destination_record)
+  let partial_data={status:"1" route:{origin:from destination:to taxi_cost:"32" paths:[{distance:"12000" cost:{duration:"900"} steps:[{polyline:from+";114.025,22"}]}]}}
+  add_candidates(nil,partial_data,time_now(),time_now(),"query_driving") contract_partial=candidates[candidates.len()-1]
+  let ext_leg=extension_legs(partial_data,"taxi",route_nodes["origin"],route_nodes["destination"],time_now(),time_now())[0]
+  let ext=route_prefix_extend(route_prefixes["origin"],ext_leg,"partial-test",arrive_by,5000)
+  let partial_facts=query_route_summary(contract_partial)
+  contract_check("相同偏离终点的直查与扩展均未完成且小计不冒全价",partial_facts.completion_status=="incomplete" && ext.success && route_prefix_facts(ext.prefix).completion_status=="incomplete" && partial_facts.cost.amount_cents==3200 && partial_facts.cost.full_journey_amount_cents==nil && partial_facts.price_label.search("已查段")>=0)
+  let quote={ref:"didi-quote:fixture" price_cents:2300 from:{city:"fixture"} to:{city:"fixture"}}
+  didi_quotes[quote.ref]=quote
+  let bad=route_quote_variant(candidates[0],quote,candidates[0].legs[0].id,"合成地点关联")
+  contract_check("公交完整供应商报价leg不可按taxi step替换",!bad.success && candidates[0].legs.len()==1 && candidates[0].price_cents==400)
+  contract_quote_id="route_"+run_id+"_"+(candidate_sequence+1)
+  contract_start([
+   contract_call("attach-direct","attach_quote",{route_id:contract_partial.id leg_id:contract_partial.legs[0].id quote_ref:quote.ref place_basis:"合成同城同名地点；不同供应商连接未认证"})
+   contract_call("read-old","get_route",{id:contract_partial.id})
+   contract_call("read-new","get_route",{id:contract_quote_id})
+   contract_call("routes","render_routes",{source:"entry := TextInput{text:\"Initial\"} open := Button{text:\"查看合成详情\" on_click:||{show_block(\"one-detail\") emit({action:\"view_route\" id:snapshot().routes[5].id})}}"})
+   contract_call("detail","render_route_detail",{id:"one-detail" visible:true source:"let route_id=facts.routes[5].id let bound=false on_facts_changed=fn(current){if current.viewed_route_id==route_id && !bound {bound=true emit({action:\"map\" widget:\"preview\" target:current.routes[5].geometry_ref interactive:true})}} View{width:Fill height:Fit flow:Down Label{text:\"合成详情独立地图引用\"} preview := AutoNaviMapView{width:Fill height:100 on_camera_changed:fn(lon,lat,zoom,width,height,request){emit({action:\"map_camera\" widget:\"preview\" center_lon:lon center_lat:lat zoom:zoom width:width height:height request:request})}} Button{text:\"返回合成列表\" on_click:||hide_self()}}"})
+   contract_call("summary","render_summary",{visible:false source:"Label{text:\"合成总结\"}"})
+   contract_call("explanation","render_explanation",{source:"Label{text:\"合成解释\"}"})
+   contract_call("suggestions","render_suggestions",{source:"Label{text:\"合成建议\"}"})
+   contract_call("additional","render_ui",{blocks:[{id:"additional" source:"Label{text:\"任意额外区块\"}"}]})
+  ])
+ } elif contract_stage==2 {
+  contract_stage=3
+  let attached=nil let old=nil let newer=nil
+  for item in contract_results {if item.name=="attach_quote" {attached=item.result} elif item.name=="get_route" {if item.result.route.id==contract_partial.id {old=item.result.route} else {newer=item.result.route}}}
+  let derived=ui_route(contract_quote_id)
+  contract_check("直查32附价23派生新ID且原值不变，读回身份费用一致",attached.success && attached.route.id==contract_quote_id && attached.route.derived_from_route_id==contract_partial.id && old.cost.amount_cents==3200 && newer.cost.amount_cents==2300 && newer.cost.full_journey_amount_cents==nil && newer.completion_status=="incomplete" && newer.duration_seconds==old.duration_seconds && newer.assessment.connection_status=="provider_connection_unknown" && !newer.assessment.passed)
+  let reads=contract_geometry_reads
+  contract_check("报价派生保实际几何并共享cache，不重扫折线",map_geometry(derived).paths.to_json()==map_geometry(contract_partial).paths.to_json() && contract_geometry_reads==reads && ui_route(newer.geometry_ref).id==newer.id)
+  let step_description=contract_partial.steps_cache[0].description contract_partial.steps_cache[0].description="IMMUTABLE STEP PROBE"
+  contract_check("不可变步骤缓存派生共享且当前评估仍重算",query_route_summary(derived).steps[0].description=="IMMUTABLE STEP PROBE" && query_route_summary(derived).assessment.evaluated_at>=newer.assessment.evaluated_at)
+  contract_partial.steps_cache[0].description=step_description
+  for i in 3 {
+   let large={} for key value in contract_partial {large[key]=value} assign_candidate_ref(large) large.geometry_owner_id=contract_partial.id large.steps_cache=nil large.segments=[]
+   for n in 20 {large.segments.push({road:"Synthetic Road" distance:"100" cost:{duration:"10"} polyline:"114,22;114.025,22"})}
+   route_summary_steps(large) candidates.push(large)
+  }
+  let large_facts=interface_facts() let step_count=0 for item in large_facts.routes {step_count+=item.steps.len()}
+  contract_check("实际9Route66steps规模快照只保一份路线且读取不重解析",large_facts.routes.len()==9 && step_count==66 && large_facts.route_graph.route_ids.len()==9 && route_get(large_facts.route_graph,"routes")==nil && large_facts.routes[5].steps[0].description==step_description)
+
+  block_by_id("routes").handle.find("entry").set_text("LOCAL KEPT")
+  contract_start([contract_call("cross-entry","render_route_detail",{id:"additional" visible:false source:"Label{text:\"已有普通块跨入口更新\"}"}) contract_call("replace","render_summary",{source:"Label{text:\"仅替换总结\"}"}) contract_call("bad","render_explanation",{source:"View{draw_bg:{color:#xff0000} Label{text:\"BAD\"}}"}) contract_call("repair","render_explanation",{source:"Label{text:\"已修正解释\"}"})])
+ } elif contract_stage==3 {
+  contract_stage=4 agent_active=false phase="waiting"
+  let bad=nil let fixed=nil for item in contract_results {if item.name=="render_explanation" {if !item.result.success {bad=item.result} else {fixed=item.result}}}
+  contract_check("不同渲染入口替换保留列表输入及独立详情",block_by_id("routes").revision==1 && block_by_id("routes").handle.find("entry").text()=="LOCAL KEPT" && block_by_id("summary").revision==2 && block_by_id("one-detail").overlay && !block_by_id("one-detail").visible && !block_by_id("additional").overlay && block_by_id("additional").visible && map_slots[block_map_key("one-detail","preview")]==nil)
+  contract_check("失败块返回真实诊断并可原入口修正",bad!=nil && bad.blocks[0].diagnostics!="" && fixed!=nil && fixed.success && block_by_id("explanation").complete)
+  fs.write("contract-ready.json","{}")
+ }
+}
+fn contract_tick(){
+ let identity=ui.trace_identity.text().parse_json()
+ if trace_state==nil || identity.instance!=trace_state.instance {start_timeout(0.1,||contract_tick()) return}
+ if !contract_started && fs.exists("contract-go.json") {
+  contract_started=true contract_stage=1 run_id+=1 received_at=time_now() arrive_by=received_at+2400 user_limits={minutes:40 budget_cents:5000} constraints={budget_cents:5000}
+  position_record={name:"Synthetic origin" source:"synthetic-fixture" mock:true longitude:114 latitude:22 city:"fixture" citycode:"0755" adcode:"440306" currency:"CNY" sampled_at_unix:received_at}
+  destination_record={name:"Synthetic destination" source:"synthetic-fixture" longitude:114.03 latitude:22 city:"fixture" citycode:"0755" adcode:"440306" currency:"CNY"}
+  contract_start([contract_call("t0","query_route",{mode:"transit"}) contract_call("t1","query_route",{mode:"transit" strategy:1}) contract_call("taxi","query_route",{mode:"taxi"}) contract_call("unknown","query_route",{mode:"transit" strategy:8})])
+ }
+ if contract_stage==4 && fs.exists("contract-clicked.json") {
+  contract_stage=5
+  let slot=map_slots[block_map_key("one-detail","preview")]
+  contract_check("真实按钮跨入口详情与runtime几何引用对应同候选",block_by_id("one-detail").container.visible() && viewed_route_id==contract_quote_id && slot!=nil && slot.target==ui_route(contract_quote_id).geometry_ref && slot.target_id==contract_quote_id)
+  fs.write("contract-click-checked.json","{}")
+ }
+ if contract_stage==5 && fs.exists("contract-returned.json") {
+  contract_stage=6
+  contract_check("返回保留原列表本地输入",!block_by_id("one-detail").container.visible() && block_by_id("routes").handle.find("entry").text()=="LOCAL KEPT")
+  let old=candidates[0].geometry_ref ui.sentence.set_text("40分钟内到机场，预算50") start_task()
+  let schema_cleared=agent_tool_schema==nil contract_schema[0].function.description="OLD RUN PROBE"
+  contract_check("新run清除schema并重建本次对象",schema_cleared && agent_tools()[0].function.description!="OLD RUN PROBE")
+  start_timeout(0.05,||{contract_check("新查询清空候选引用与所有渲染区块",ui_route(old)==nil && candidates.len()==0 && candidate_sequence==0 && ui_blocks.len()==0) agent_active=false phase="waiting" fs.write("harness-smoke.json",{checks:contract_checks}.to_json())})
+  return
+ }
+ start_timeout(0.1,||contract_tick())
+}
+start_timeout(1,||contract_tick())
+'''
+
 def main():
  if '--loop-settle-private-replay' in sys.argv:assert '--loop-settle' in sys.argv, 'private replay is an explicit modifier of --loop-settle'
  sp=importlib.util.spec_from_file_location('agent',ROOT/'tools/agent.py');a=importlib.util.module_from_spec(sp);sp.loader.exec_module(a)
@@ -534,6 +709,8 @@ def main():
  a.STATE=w/'private-state';a.HOME_DIR=a.STATE/'home';a.CORE=a.STATE/'core';a.SESSION=a.STATE/'session.json'
  for p in [a.STATE,a.HOME_DIR,a.CORE]:p.mkdir(parents=True,exist_ok=True)
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
+ if '--tool-contract' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_begin(','fn product_agent_begin(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1).replace('fn amap_request(','fn product_amap_request(',1).replace('fn map_geometry_uncached(','fn product_map_geometry_uncached(',1).replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+CONTRACT_FIXTURE
+ if '--skills' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1)+'\n'+SKILLS_FIXTURE
  if '--trace' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+TRACE_FIXTURE
  if '--mixed-routing' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn amap_request(','fn product_amap_request(',1)+'\n'+MIXED_FIXTURE
  if '--loop-settle' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('fn map_geometry_uncached(','fn product_map_geometry_uncached(',1).replace('fn trace_emit_run(','fn product_trace_emit_run(',1).replace('fn refresh_generated_facts(','fn product_refresh_generated_facts(',1)+'\n'+LOOP_SETTLE_FIXTURE
@@ -552,7 +729,13 @@ def main():
   source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1).replace('fn agent_begin(','fn product_agent_begin(',1).replace('fn amap_request(','fn product_amap_request(',1).replace('ui.generated.fact_state.set_text(', 'performance_set_facts(')+'\n'+legacy+'\n'+PERFORMANCE_FIXTURE
  if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
  env=a.host_env(True);process=None;port=None
- def q(route,**args):return urlopen(f'http://127.0.0.1:{port}/'+route+('?' + urlencode(args) if args else ''),timeout=15).read()
+ def q(route,**args):
+  if route in ('k','m','t','click'):
+   until=time.monotonic()+10
+   while not json.loads(urlopen(f'http://127.0.0.1:{port}/s',timeout=15).read()).get('w'):
+    assert time.monotonic()<until,'宿主窗口尚未创建；不派发输入'
+    time.sleep(.1)
+  return urlopen(f'http://127.0.0.1:{port}/'+route+('?' + urlencode(args) if args else ''),timeout=15).read()
  def stop():
   nonlocal process
   if process and process.poll() is None:
@@ -580,10 +763,53 @@ def main():
   manifest=json.loads((mount/'manifest.json').read_text());manifest['id']='os.agentic26-navigation';(mount/'manifest.json').write_text(json.dumps(manifest));(mount/'main.splash').write_text(source)
   subprocess.run([str(ROOT.parent/'.octosense-agentic26/OctoSense-App-Hub/target/release/hub'),'stamp',str(mount)],stdout=subprocess.DEVNULL,check=True)
   a.init_demo();jail=a.jail_path();a.materialize_skills(ROOT/'bundle',jail);(jail/'private-config.json').write_text('{"location_mode":"demo"}');(jail/'trip.json').write_text('historical fixture ignored');(jail/'agent-run.json').write_text('historical audit ignored')
-  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret'}))
-  if '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
+  if '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret','didi_mcp_key':'didi-fixture-secret'}))
+  if '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   launch('native');report=None
+  if '--tool-contract' in sys.argv:
+   time.sleep(3)
+   q('k',c='Space',cmd=1,wait=1)
+   for ch in 'android':q('k',c='Key'+ch.upper(),wait=1)
+   q('k',c='enter',wait=1);time.sleep(1)
+   q('m',k='down',x=200,y=300,wait=1)
+   for y in range(320,570,25):q('m',k='move',x=200,y=y,wait=1)
+   q('m',k='up',x=200,y=570,wait=1);q('t',t='Navigation',wait=1);q('k',c='enter',wait=1);time.sleep(1)
+   (jail/'contract-go.json').write_text('{}')
+   def contract_wait(name):
+    for _ in range(250):
+     if (jail/name).exists():return
+     time.sleep(.1)
+    raise RuntimeError('contract fixture missing '+name+'; '+str(w/'native.log'))
+   contract_wait('contract-ready.json')
+   (w/'contract-list.png').write_bytes(q('g',raw=1))
+   def contract_click(text):
+    rows=json.loads(q('snap'))['s'];row=next(x for x in rows if x.get('t')==text);r=row['r'];q('click',x=r[0]+r[2]/2,y=r[1]+r[3]/2,wait=1);time.sleep(.4)
+   contract_click('查看合成详情');(jail/'contract-clicked.json').write_text('{}');contract_wait('contract-click-checked.json')
+   (w/'contract-detail.png').write_bytes(q('g',raw=1))
+   contract_click('返回合成列表');(jail/'contract-returned.json').write_text('{}');contract_wait('harness-smoke.json')
+   report=json.loads((jail/'harness-smoke.json').read_text())
+   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),mode='Android',no_external_services=True,model_called=False,synthetic_routes=True,synthetic_map_binding=True)
+   (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+   assert all(row['passed'] for row in report['checks']),report
+   print('PASS: '+str(len(report['checks']))+'项统一工具与引用原生检查；'+str(w/'report.json'));return
+  if '--skills' in sys.argv:
+   time.sleep(3)
+   q('k',c='Space',cmd=1,wait=1)
+   for ch in 'android':q('k',c='Key'+ch.upper(),wait=1)
+   q('k',c='enter',wait=1);time.sleep(1)
+   q('m',k='down',x=200,y=300,wait=1)
+   for y in range(320,570,25):q('m',k='move',x=200,y=y,wait=1)
+   q('m',k='up',x=200,y=570,wait=1);q('t',t='Navigation',wait=1);q('k',c='enter',wait=1);time.sleep(1)
+   (jail/'skills-go.json').write_text('{}')
+   for _ in range(100):
+    if (jail/'harness-smoke.json').exists():break
+    time.sleep(.1)
+   report=json.loads((jail/'harness-smoke.json').read_text())
+   assert all(row['passed'] for row in report['checks']),report
+   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),mode='Android',agent_external_requests=False,model_called=False)
+   (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+   print('PASS: '+str(len(report['checks']))+'项技能原生检查；'+str(w/'report.json'));return
   if '--loop-settle' in sys.argv:
    if '--loop-settle-private-replay' in sys.argv:
     from urllib.parse import parse_qs

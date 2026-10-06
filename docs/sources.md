@@ -1,6 +1,6 @@
 # 资料与事实核对
 
-核对日期：2026-10-01，北京时间。动态信息后续需重新核实。
+初始核对日期：2026-10-01，北京时间；后续核对日期按各条记录。动态信息需重新核实。
 
 ## 一手资料
 
@@ -12,6 +12,10 @@
 - [开发模板与工具](https://github.com/OctoSense-org/OctoScript-App-Design-Flow)：QUICKSTART、SCRIPT-API、CAPABILITIES 和 AI-SERVICES。精确源码版本见 `toolchain/sources.lock.json`。
 
 官网要求可运行作品、公开 Apache-2.0 源码、固定宿主版本、启动说明和真实任务证据。Rinx 是主要基线，作品需在注明版本的 OctoSense 或 Rinx 环境验收。Hub 检查是包预检，不替代运行/交互/Agent 任务核验，也不代表比赛录取或验收；当前无需等待上架。当前实现与完成证据归 README 和任务包。
+
+2026-10-06收到用户转达赛事更新OctoSense并阅读README提交App Hub的提醒，重新读取[Hub README](https://github.com/OctoSense-org/OctoSense-App-Hub/blob/main/README.md)与[PUBLISHING的提交流程](https://github.com/OctoSense-org/OctoSense-App-Hub/blob/main/docs/PUBLISHING.md#submitting)。应用repo保留准确bundle版本，以tag、完整commit SHA和bundle路径提交Hub issue，由维护者发布catalog／index／artifacts；不存在独立publish-app action。首次可unsigned，已有key登记后的更新必须同key签名。用户随后于23:08授权自由推送、演示视频与必要Hub交付；发布结果依实际远端与审核状态记录，不自行创建签名私钥。
+
+同文档[What an app is](https://github.com/OctoSense-org/OctoSense-App-Hub/blob/main/docs/PUBLISHING.md#what-an-app-is)明确bundle不含原生代码，需新增原生runtime应进入shell release。当前本地宿主覆盖的接口必须与最新官方源码及发布宿主逐项核实，不得把本地patchedhost通过等同于正式Hub安装通过；当前升级与完整验收归[运行时任务](../tasks/runtime-upgrade/packet.md)。
 
 用户补充“初赛代码只要求 octoscript 的应用”，本项目据此收敛交付范围。[公开赛程固定版本](https://github.com/gosimfoundation/hackathon-agenticapp26/blob/cc56fa42bcff23ec0df51e91191b0e283458a970/docs/competition-schedule.md#初赛需求成立作品能跑)也明确初赛不以 Rust 或 ROM 开发为门槛；可运行原型、操作结果、失败或空状态与复现材料的要求仍然保留。该证据不要求本项目新增原生宿主服务。
 
@@ -92,6 +96,6 @@ Apple 平台事件明确使用 WGS84，并携带系统采样时间与精度；�
 
 2026-10-06核对[高德路径规划2.0](https://lbs.amap.com/api/webservice/guide/api/newroute)：驾车route.taxi_cost是元单位出租车估算，strategy=0只返回单路线；不是滴滴车型报价。使用公开深圳端点及当前key的实际响应核验多路径有route级估价、单路径同价，发现应用在多路径分支主动丢弃价格。实际证据和修复入口归[混合路线任务](../tasks/mixed-routing/packet.md)，不能从文档字段存在断言所有地点／请求均会有价。
 
-[滴滴官方开发文档](https://mcp.didichuxing.com/api)提供正式MCP、个人账号激活key、地点查询及taxi_estimate。询价参数坐标来自maps_textsearch，价格来自structuredContent.items[].priceText（元）；生产与sandbox分开，后者Mock不能作实时报价。坐标系在该文档未声明，不能假定高德点可直接替代。当前只计划询价，不接创建／取消订单。接入验证需正式独立key，不能以高德key替代。
+[滴滴官方开发文档](https://mcp.didichuxing.com/api)提供正式MCP、个人账号激活key、地点查询及taxi_estimate。询价参数坐标来自maps_textsearch，价格来自structuredContent.items[].priceText（元）；生产与sandbox分开，后者Mock不能作实时报价。坐标系在该文档未声明，不能假定高德点可直接替代。当前已接入正式询价并验证报价派生，不接创建／取消订单，证据归[路线任务](../tasks/route-identity/packet.md)。接入使用正式独立key，不能以高德key替代。
 
 [腾讯出行MCP接入指南](https://tms-web-1g1czzwka2fd06f2-1301126013.ap-shanghai.app.tcloudbase.com/api/18-doc-mcp-guide.html)提供独立应用KEY及询价工具，是备选调查结果，尚未实现或验证腾讯报价。优先接滴滴，避免两套提供方适配在截止前重复建设。

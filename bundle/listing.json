@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "subtitle": "自主组合工具与界面的出行 Agent",
-  "description": "Navigation 单次查询原型：MiniMax M3 自主读取本次可用信息、查询定位与交通、比较候选并生成 Splash／Makepad 界面。固定入口为输入框和查询／终止按钮，每次查询独立开始，不保存或恢复行程，不进行问题澄清或跨次对话。原生布局资料按需读取，内容区支持纵向滚动和文字换行。默认通过授权的 macOS CoreLocation 取得位置，正常模式不提供演示日历、笔记；显式演示模式另行标注。地图、费用与耗时来自高德查询，估计与缺失数据保留真实含义。实时定位与动态执行诊断使用锁定宿主覆盖。",
+  "description": "Navigation 出行能力层原型：MiniMax M3 自主检索、组合与比较路线，并生成 Makepad／Splash 界面。高德提供地点、公交与出租车估价、地图数据，滴滴正式 MCP 提供当前打车询价。统一 Route 保管分段、费用、耗时与几何，未知费用、连接与候车时间不当作零。固定入口为文本输入和查询／终止按钮；每次查询独立，不保存或恢复行程，不进行澄清对话。当前使用锁定的本地 OctoSense 宿主覆盖，尚未通过最新版官方 App Hub 安装兼容及完整在线任务验收；macOS 宿主 Android 样式不是 Android 真机。",
   "category": "travel",
   "keywords": [
     "navigation",
@@ -10,18 +10,19 @@
     "development"
   ],
   "screenshots": [
-    "screenshots/01-main.png"
+    "screenshots/01-main.png",
+    "screenshots/02-route-part.png"
   ],
   "icon": "assets/icon.svg",
   "platforms": [
     "macos"
   ],
   "publisher": {
-    "name": "Replace with your publisher name",
-    "support": "https://example.com/support",
-    "privacy_policy_url": "https://example.com/privacy"
+    "name": "xiaoland",
+    "support": "https://github.com/xiaoland/gosim-agentic26/issues",
+    "privacy_policy_url": "https://github.com/xiaoland/gosim-agentic26/blob/main/toolchain/README.md#数据与隐私"
   },
-  "release_notes": "保留曾正常显示的生成界面：后续局部事件错误继续反馈，不再把整稿切换为文字兜底；首次生成失败仍可显示最终文字。澄清可见视口与可滚动内容高度的区别。地图仍由Agent自行生成，未加入宿主固定地图；不宣称已解决所有地图省略。沿用单次查询、无持久化与无澄清。",
+  "release_notes": "0.13.0：统一路线身份，询价附到实际打车段并生成新 Route，原路线保留；地图几何由运行时保存，Agent 按目录选择路径与分页；独立 DSL 区块与原生执行诊断支持同一工具循环修稿。查看和返回使用通用本地导航函数。完整在线验收仍在修正，近期首渲染复现宿主脚本时间预算错误；本地原生覆盖不代表官方已发布这些接口。 最终稿以原生UTF-8字节长度计日志大小，并固定滴滴非流式请求为application/json，真实回调询价通过。展示截图来自0.13.0实际在线Android样式运行；完整混合任务仍未验收。",
   "age_rating": "all",
   "license": "Apache-2.0"
 }

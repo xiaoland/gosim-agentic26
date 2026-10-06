@@ -208,9 +208,38 @@ def verify_source():
             '官方运行时依赖与 agent-runtime.lock.json 不符。')
 
 
+def refresh_skill_catalog(bundle):
+    directory = bundle / 'assets/skills'
+    if not directory.is_dir():
+        return
+    catalog = []
+    for entry in sorted(directory.glob('*/SKILL.md')):
+        text = entry.read_text()
+        require(text.startswith('---\n'), f'{entry}: 缺少技能 frontmatter。')
+        metadata = {}
+        # Local skill entries use single-line YAML scalars; no YAML runtime dependency.
+        for line in text.split('---', 2)[1].splitlines():
+            key, separator, value = line.partition(':')
+            if separator and key in ('name', 'description'):
+                value = value.strip()
+                metadata[key] = json.loads(value) if value.startswith('"') else value.strip("'")
+        name = metadata.get('name', '')
+        require(re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', name) and name == entry.parent.name,
+                f'{entry}: 技能名称应与目录一致，并使用小写字母、数字和连字符。')
+        require(isinstance(metadata.get('description'), str) and 0 < len(metadata['description']) <= 1024,
+                f'{entry}: 缺少有效技能描述。')
+        catalog.append({**metadata, 'files': [p.relative_to(entry.parent).as_posix()
+                       for p in sorted(entry.parent.rglob('*')) if p.is_file()]})
+    path = directory / 'catalog.json'
+    data = json_bytes(catalog)
+    if not path.exists() or path.read_bytes() != data:
+        path.write_bytes(data)
+
+
 def bundle_files(values, root=None):
     root = ROOT / 'bundle' if root is None else root
     require(root.is_dir() and not root.is_symlink(), '应用 bundle 目录缺失或是符号链接。')
+    refresh_skill_catalog(root)
     files = {}
     for path in sorted(root.rglob('*')):
         require(not path.is_symlink(), 'bundle 中不能包含符号链接。')
@@ -401,9 +430,12 @@ def jail_path():
 
 
 def materialize_skills(bundle, jail):
-    # Skills have one authoritative body in the bundle; fs reads its runtime copy.
-    for source in (bundle / 'assets/skills').glob('*.md'):
-        write_private(jail / 'skills' / source.name, source.read_bytes())
+    # Copy the same catalog, skill entries and resources used in the packaged bundle.
+    refresh_skill_catalog(bundle)
+    directory = bundle / 'assets/skills'
+    for source in sorted(directory.rglob('*')):
+        if source.is_file():
+            write_private(jail / 'skills' / source.relative_to(directory), source.read_bytes())
 
 
 def configure(values, jail, location_mode="live", trace=False):
