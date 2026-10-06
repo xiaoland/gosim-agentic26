@@ -19,7 +19,7 @@
 
 ## 当前任务
 
-[GitHub赛事验收README](../tasks/competition-readme/packet.md)保存评审入口整理与源码同步边界。
+[README项目介绍](../tasks/competition-readme/packet.md)保存项目背景、设计思路和技术特点的叙事整理与源码同步边界。
 
 [Agent增量DSL区块](../tasks/ui-blocks/packet.md)保存render_ui单／多区块提交与本轮局部更新的实现入口。
 
