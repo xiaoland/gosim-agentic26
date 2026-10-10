@@ -191,6 +191,63 @@ fn route_recheck(selected, nowTs, deadlineTs, budgetCents){
     return {passed: route_reasons(selected, nowTs, deadlineTs, budgetCents).len() == 0 reason: reason estimated_arrival_ts: arrival}
 }
 
+// 守护判断与模型分离：已知超限优先，缺证据不能当成立。
+fn guardian_assess(candidate, now, deadline, remaining){
+ let reasons=[] let invalid=false
+ if remaining<0 {invalid=true reasons.push("已确认花费超过总预算")}
+ if now>deadline {invalid=true reasons.push("绝对到达期限已过")}
+ if candidate==nil {return {status:if invalid {"invalid"} else {"unknown"} reasons:reasons}}
+ if candidate.price_cents!=nil && candidate.price_cents>remaining {invalid=true reasons.push("剩余路线估价超过剩余预算")}
+ let arrival=nil if candidate.duration_seconds!=nil {arrival=route_later(now,candidate.departure_ts)+candidate.duration_seconds if arrival>deadline {invalid=true reasons.push("预计到达超过绝对期限")}}
+ let unknown=route_reasons(candidate,now,deadline,if remaining<0 {0} else {remaining})
+ for reason in unknown {reasons.push(reason)}
+ return {status:if invalid {"invalid"} elif unknown.len()==0 {"valid"} else {"unknown"} reasons:reasons estimated_arrival_ts:arrival remaining_budget_cents:remaining}
+}
+// 同计划以交通方式与公交线路/上下站识别；逐点几何、报价和用时不充当身份。
+fn guardian_plan_key(candidate){
+ let segments=[]
+ for segment in candidate.segments {
+   let bus=route_get(segment,"bus") let lines=[]
+   if bus!=nil && route_get(bus,"buslines").is_array() {for line in bus.buslines {lines.push({id:route_get(line,"id") name:route_get(line,"name") departure_id:route_get(route_get(line,"departure_stop"),"id") departure_name:route_get(route_get(line,"departure_stop"),"name") arrival_id:route_get(route_get(line,"arrival_stop"),"id") arrival_name:route_get(route_get(line,"arrival_stop"),"name")})}}
+   let walking=route_get(segment,"walking") let roads=[]
+   if walking!=nil && route_get(walking,"steps").is_array() {for step in walking.steps {roads.push({road:route_get(step,"road")})}}
+   segments.push({lines:lines walk:roads road:route_get(segment,"road") taxi:route_get(segment,"taxi")!=nil})
+ }
+ return {kind:candidate.kind segments:segments}.to_json()
+}
+fn guardian_plan_identified(candidate){
+ for segment in candidate.segments {
+  let lines=route_get(route_get(segment,"bus"),"buslines")
+  if lines.is_array() {for line in lines {
+   if !route_get(line,"id").is_string() || line.id=="" || !route_get(route_get(line,"departure_stop"),"id").is_string() || line.departure_stop.id=="" || !route_get(route_get(line,"arrival_stop"),"id").is_string() || line.arrival_stop.id=="" {return false}
+  }}
+ }
+ return true
+}
+fn guardian_materialize_node(node){
+ if node==nil {return nil}
+ return {name:route_get(node,"name") location:coord_text(node) city_metadata:route_get(node,"city_metadata") source:route_get(node,"source")}
+}
+fn guardian_materialize(candidate){
+ let legs=[]
+ if route_get(candidate,"legs").is_array() {for leg in candidate.legs {
+   legs.push({mode:leg.mode from:guardian_materialize_node(route_nodes[leg.from_ref]) to:guardian_materialize_node(route_nodes[leg.to_ref]) departure_ts:leg.departure_ts duration_seconds:leg.duration_seconds price_cents:leg.price_cents price_basis:leg.price_basis waiting_included:leg.waiting_included source_ts:leg.source_ts warnings:leg.warnings quote:if route_get(leg,"quote_ref")!=nil {didi_quotes[leg.quote_ref]} else {nil} place_match_basis:route_get(leg,"place_match_basis") provider_connection_status:route_get(leg,"provider_connection_status")})
+ }}
+ return {id:candidate.id kind:candidate.kind segments:candidate.segments selected_legs:legs price_cents:candidate.price_cents currency:candidate.currency duration_seconds:candidate.duration_seconds departure_ts:candidate.departure_ts source:candidate.source source_ts:candidate.source_ts expires_at:candidate.expires_at waiting_included:candidate.waiting_included waiting_basis:candidate.waiting_basis requested_origin:route_get(candidate,"requested_origin") requested_destination:route_get(candidate,"requested_destination") price_basis:route_get(candidate,"price_basis") known_cost_cents:route_get(candidate,"known_cost_cents") estimated:true request_bound:candidate.request_bound origin_complete:candidate.origin_complete endpoint_complete:candidate.endpoint_complete actual_origin:candidate.actual_origin actual_endpoint:candidate.actual_endpoint completion_status:route_completion(candidate) provider_connection_status:route_get(candidate,"provider_connection_status") warnings:candidate.warnings plan_key:guardian_plan_key(candidate)}
+}
+fn guardian_valid_goal(goal){
+ if !goal.is_object() || goal.schema!=1 || !goal.version.is_number() || goal.version<1 || goal.version%1!=0 || !goal.confirmed_at.is_number() {return false}
+ if !goal.deadline_ts.is_number() || goal.deadline_ts<0 || goal.deadline_ts>9007199254740991 || !goal.total_budget_cents.is_number() || goal.total_budget_cents<0 || goal.total_budget_cents%1!=0 || goal.total_budget_cents>9007199254740991 {return false}
+ if !goal.spent_cents.is_number() || goal.spent_cents<0 || goal.spent_cents%1!=0 || goal.spent_cents>9007199254740991 || goal.currency!="CNY" || !goal.preferences.is_string() || !goal.risk_acceptance.is_string() || !goal.progress.is_string() {return false}
+ if !goal.destination.is_object() || !goal.destination.name.is_string() || route_point(coord_text(goal.destination))==nil || !goal.selected_route.is_object() || !goal.selected_route.plan_key.is_string() || !goal.confirmations.is_array() {return false}
+ let route=goal.selected_route
+ if !route.id.is_string() || !route.kind.is_string() || !route.segments.is_array() || !route.departure_ts.is_number() || route.departure_ts<0 || route.departure_ts>9007199254740991 || !route.source_ts.is_number() || route.source_ts<0 || route.source_ts>9007199254740991 {return false}
+ if route.price_cents!=nil && (!route.price_cents.is_number() || route.price_cents<0 || route.price_cents%1!=0 || route.price_cents>9007199254740991) {return false}
+ if route.duration_seconds!=nil && (!route.duration_seconds.is_number() || route.duration_seconds<0 || route.duration_seconds>9007199254740991) {return false}
+ for segment in route.segments {if !segment.is_object() {return false}}
+ return goal.state=="active" || goal.state=="ended"
+}
+
 // 模型只解释意图并决定下一步；地点、费用与可行性来自工具和确定性检查。
 let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource("{{assets}}/assets/fonts/NavigationSans-Regular.otf") asc: 0.0 desc: 0.0}}}
 let NavBold = theme.font_bold{font_family: FontFamily{latin := FontMember{res: http_resource("{{assets}}/assets/fonts/NavigationSans-Regular.otf") asc: 0.0 desc: 0.0}}}
@@ -200,6 +257,16 @@ let teal = #x06796f
 // 已核对的扩展宿主提供此类型；官方原版不具备本应用的区块、布局和地图接口。
 let native_ui_available = route_get(mod.widgets, "AutoNaviMapView") != nil
 let missing_runtime_message = "当前宿主缺少 Navigation 所需的原生扩展，查询暂不可用。\n需要区块寻址、布局测量、渲染诊断和交互地图接口；请使用 README 中注明的配套宿主。官方原版首屏仅展示兼容说明。"
+let guardian_goal=nil
+let guardian_pending=nil
+let guardian_sequence=0
+let guardian_mode=false
+let guardian_error=""
+let guardian_check=nil
+let guardian_loaded=false
+let guardian_progress_open=false
+let guardian_layout_pending=false
+let guardian_reported_run=-1
 let run_id = 0
 let phase = "idle"
 let received_at = 0
@@ -369,6 +436,7 @@ let map_generation = 0
 let ui_render_generation = 0
 fn invalidate_map(){ map_generation += 1 for id slot in map_slots { slot.request += 1 slot.bytes = nil slot.state = "stale" slot.status = "地图数据已过期" trace_map("map_stale",slot) } }
 fn map_candidate(target){
+    if target == "saved_goal_route" && guardian_goal!=nil {return guardian_goal.selected_route}
     if target == "destination" && destination_record != nil { return {id: "destination:" + destination_record.id segments: [] requested_origin: nil requested_destination: coord_text(destination_record)} }
     if target == "preview" && picker_preview_poi != nil { return {id: "preview:" + picker_preview_poi.id segments: [] requested_origin: nil requested_destination: coord_text(picker_preview_poi)} }
     return ui_route(target)
@@ -482,7 +550,7 @@ fn accept_map_slot(slot, bytes, token, request, target_id, detail){
 
 
 fn view_route(id){
-    for candidate in candidates { if candidate.id == id { map_path_catalog(candidate) viewed_route_id = id ui_facts_revision+=1 load_interface_map() render_content() return } }
+    for candidate in candidates { if candidate.id == id { map_path_catalog(candidate) viewed_route_id = id ui_facts_revision+=1 load_interface_map() render_content() guardian_refresh() return } }
 }
 
 fn open_destination_picker(){
@@ -1495,7 +1563,7 @@ fn present_results(reason){
  for candidate in candidates { let check = route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")) candidate.feasible=check.passed candidate.reason=check.reason }
  phase = "proposal" show_status("已计算当前候选；已查范围不代表所有可能路线")
  refresh_generated_facts()
- if active_tool != nil { agent_tool_result({success:true comparison:comparison_summary() routes:model_route_summaries() queried_transit_count:transit_count queried_driving:driving_done}) }
+ if active_tool != nil { agent_tool_result({success:true guardian_current_check:guardian_current_check() fresh_route_count:candidates.len() comparison:comparison_summary() routes:model_route_summaries() queried_transit_count:transit_count queried_driving:driving_done}) }
 }
 fn read_source_tool(name, token, done){
     if (name == "read_calendar" || name == "read_notes") && location_mode() != "demo" { fail_task("当前真实模式未接通日历和笔记来源") return }
@@ -1702,12 +1770,183 @@ fn minimax_request(task, input, schema, token, record, done){
 }
 
 
-fn start_task(){
+// 仅本应用自写记录使用固定末尾标记，检测截断；不保证任意篡改完整性。
+// 手工固定外封装顺序，避免宿主parse_json/to_json重排对象字段导致误拒。
+fn guardian_encode(goal){return "{\"schema\":1,\"saved_at\":"+time_now().to_json()+",\"goal\":"+goal.to_json()+",\"complete\":\"navigation-goal-v1\"}"}
+fn guardian_store(goal){
+ // fs.write是截断写且没有rename；保留一份已确认快照供损坏时明确恢复。
+ try {
+   if guardian_goal!=nil {fs.write("guardian-goal.previous.json",guardian_encode(guardian_goal))}
+   fs.write("guardian-goal.json",guardian_encode(goal))
+ }
+ {guardian_error="保存失败；原目标仍保留，必要时可从已确认备份恢复" guardian_refresh() return false}
+ guardian_goal=goal guardian_error=""
+ if goal==nil {try {if fs.exists("guardian-goal.previous.json") {fs.remove("guardian-goal.previous.json")}} {guardian_error="目标已删除；旧备份清理失败，删除记录仍阻止恢复"}}
+ ui_facts_revision+=1 guardian_refresh() return true
+}
+fn guardian_read(path){
+ let saved=nil let data=nil
+ try {saved=read_text(path)} {guardian_error="守护记录无法读取" return nil}
+ if saved==nil {return nil}
+ if saved.strip_suffix(",\"complete\":\"navigation-goal-v1\"}")==saved {guardian_error="守护记录不完整，未采用截断快照" return nil}
+ // 宿主JSON解析器返回部分对象且不报告语法错误；读取和判断不能混在try末尾。
+ try {data=saved.parse_json()} {guardian_error="守护记录无法解析" return nil}
+ if !data.is_object() || data.schema!=1 || !data.saved_at.is_number() || data.complete!="navigation-goal-v1" || (data.goal!=nil && !guardian_valid_goal(data.goal)) {guardian_error="守护记录格式或版本无效" return nil}
+ return data
+}
+fn guardian_load(){
+ if guardian_loaded {return} guardian_loaded=true
+ let data=guardian_read("guardian-goal.json")
+ if data!=nil {guardian_goal=data.goal if data.goal!=nil {guardian_check=route_get(data.goal,"last_check")} return}
+ let previous=guardian_read("guardian-goal.previous.json")
+ if previous!=nil && previous.goal!=nil {guardian_goal=previous.goal guardian_check=route_get(previous.goal,"last_check") guardian_error="主记录损坏或缺失，已恢复较早确认备份（保存于"+guardian_deadline(previous.saved_at)+"）；这不保证是最新状态，请核对进度费用。"}
+}
+fn guardian_sync_layout(){
+ guardian_layout_pending=false
+ if !native_ui_available {return}
+ let area=ui.content.rect()
+ if area==nil || area.width<=0 || area.height<=0 {return}
+ let top=area.y-ui.sentence.rect().y+12
+ if ui_viewport==nil || ui_viewport.height!=area.height || ui_viewport.width!=area.width || ui_overlay_top!=top {
+   ui_viewport=area ui_overlay_top=top ui_facts_revision+=1
+   ui.block_overlay.render_style() refresh_generated_facts()
+ }
+}
+fn guardian_refresh(){
+ ui.guardian_panel.render() ui.guardian_confirmation.render()
+ ui.guardian_panel.set_visible(guardian_goal!=nil || guardian_error!="")
+ ui.guardian_confirmation.set_visible(guardian_pending!=nil)
+ refresh_generated_facts()
+ if !guardian_layout_pending {guardian_layout_pending=true start_timeout(0.05,||guardian_sync_layout())}
+}
+fn guardian_current_check(){
+ if guardian_goal==nil || guardian_goal.state!="active" {return nil}
+ if guardian_mode && guardian_reported_run==run_id && guardian_check!=nil && guardian_check.goal_version==guardian_goal.version {return guardian_check}
+ let check=guardian_assess(nil,time_now(),guardian_goal.deadline_ts,guardian_goal.total_budget_cents-guardian_goal.spent_cents)
+ check.goal_version=guardian_goal.version check.run=run_id check.evidence_scope="no_current_traffic_evidence" check.reasons.push("历史方案仅供识别和比较；尚未取得本轮原计划交通证据")
+ return check
+}
+fn guardian_public_goal(goal,saved){
+ if goal==nil {return nil}
+ let route=goal.selected_route
+ return {schema:goal.schema state:goal.state version:goal.version deadline_ts:goal.deadline_ts total_budget_cents:goal.total_budget_cents currency:goal.currency spent_cents:goal.spent_cents progress:goal.progress preferences:goal.preferences risk_acceptance:goal.risk_acceptance destination:goal.destination confirmed_at:goal.confirmed_at selection_basis:goal.selection_basis
+   selected_route:{id:if saved {"saved_goal_route"} else {route.id} original_route_id:route.id geometry_ref:if saved {"saved_goal_route"} else {route.id} map_target:if saved {"saved_goal_route"} else {route.id} evidence_scope:if saved {"saved_snapshot"} else {"current_query_proposal"} selected_legs:route_get(route,"selected_legs") kind:route.kind price_cents:route.price_cents duration_seconds:route.duration_seconds source:route.source source_ts:route.source_ts expires_at:route.expires_at warnings:route.warnings completion_status:route.completion_status steps:route_summary_steps(route) map_metadata:route_map_metadata(route) map_paths:route_get(route,"map_paths_cache")} confirmations:goal.confirmations}
+}
+fn guardian_snapshot(){
+ let remaining=nil if guardian_goal!=nil {remaining=guardian_goal.total_budget_cents-guardian_goal.spent_cents}
+ let proposal=nil
+ if guardian_pending!=nil {let p=guardian_pending proposal={proposal_version:p.proposal_version base_version:p.base_version created_at:p.created_at goal:guardian_public_goal(p.goal,false) assessment:p.assessment cost_delta_cents:p.cost_delta_cents}}
+ return {goal:guardian_public_goal(guardian_goal,true) proposal:proposal last_check:guardian_check current_check:guardian_current_check() remaining_budget_cents:remaining error:guardian_error monitoring:"仅打开或主动重新核验；不会后台监控。上次核验不代表当前仍成立。"}
+}
+fn guardian_propose(p){
+ let route=ui_route(route_get(p,"route_id"))
+ if route==nil || destination_record==nil || constraints==nil {return {success:false error:"提案必须引用本轮真实Route和目的地"}}
+ if !p.preferences.is_string() || !p.risk_acceptance.is_string() || !p.basis.is_string() || p.basis.trim()=="" {return {success:false error:"请明确偏好、风险与选定依据供用户确认"}}
+ if guardian_goal!=nil && guardian_goal.state=="active" && !guardian_mode {return {success:false error:"已有活跃目标；请重新核验或结束/删除后再确认新目标"}}
+ let deadline=arrive_by let total=constraints.budget_cents let spent=0 let progress="" let version=1
+ if guardian_mode {deadline=guardian_goal.deadline_ts total=guardian_goal.total_budget_cents spent=guardian_goal.spent_cents progress=guardian_goal.progress version=guardian_goal.version+1}
+ let assessment=guardian_assess(route,time_now(),deadline,total-spent)
+ guardian_sequence+=1
+ guardian_pending={proposal_version:guardian_sequence run:run_id base_version:if guardian_mode {guardian_goal.version} else {nil} created_at:time_now() goal:{schema:1 state:"active" version:version deadline_ts:deadline total_budget_cents:total currency:constraints.currency spent_cents:spent progress:progress preferences:if guardian_mode {guardian_goal.preferences} else {p.preferences} risk_acceptance:if guardian_mode {guardian_goal.risk_acceptance} else {p.risk_acceptance} destination:destination_record selected_route:guardian_materialize(route) selection_basis:p.basis confirmed_at:nil confirmations:[]} assessment:assessment cost_delta_cents:if guardian_mode && guardian_goal.progress=="" && guardian_goal.spent_cents==0 && route.price_cents!=nil && guardian_goal.selected_route.price_cents!=nil {route.price_cents-guardian_goal.selected_route.price_cents} else {nil}}
+ ui_facts_revision+=1 guardian_refresh()
+ return {success:true proposal:guardian_snapshot().proposal confirmation:"仅父应用的真实确认按钮可保存/替换；生成DSL事件不是用户确认"}
+}
+fn guardian_selected_candidate(){
+ if guardian_goal==nil || guardian_goal.state!="active" || !guardian_mode || viewed_route_id=="saved_goal_route" {return nil}
+ return viewed_route()
+}
+fn guardian_prepare_selected(){
+ let route=guardian_selected_candidate()
+ if route==nil || shell_busy() {return {success:false error:"请先查看本轮核验候选，查询完成后再准备替代提案"}}
+ return guardian_propose({route_id:route.id preferences:guardian_goal.preferences risk_acceptance:guardian_goal.risk_acceptance basis:"用户选择本轮当前查看方案；可行性与风险以提案评估为准"})
+}
+fn guardian_confirm(version){
+ let pending=guardian_pending
+ if pending==nil || pending.proposal_version!=version || pending.run!=run_id {guardian_error="提案已失效，请重新提出并确认" guardian_refresh() return false}
+ if pending.base_version!=nil && (guardian_goal==nil || guardian_goal.state!="active" || guardian_goal.version!=pending.base_version) {guardian_error="目标版本已变化，未替换路线" guardian_refresh() return false}
+ let goal=pending.goal.to_json().parse_json() goal.confirmed_at=time_now()
+ if pending.base_version!=nil {goal.confirmations=guardian_goal.confirmations.to_json().parse_json()}
+ goal.confirmations.push({version:goal.version confirmed_at:goal.confirmed_at action:if pending.base_version==nil {"save_goal"} else {"replace_route"} route_id:goal.selected_route.id proposal_version:version basis:goal.selection_basis})
+ if !guardian_valid_goal(goal) {guardian_error="提案格式无效，未保存" guardian_refresh() return false}
+ if !guardian_store(goal) {return false}
+ guardian_pending=nil guardian_check=nil
+ guardian_refresh() return true
+}
+fn guardian_reject(){guardian_pending=nil ui_facts_revision+=1 guardian_refresh()}
+fn guardian_finish(){
+ if guardian_goal==nil {return false}
+ let goal=guardian_goal.to_json().parse_json() goal.state="ended" goal.ended_at=time_now()
+ if !guardian_store(goal) {return false} guardian_pending=nil if guardian_mode && agent_active {cancel_task()} guardian_mode=false guardian_refresh() return true
+}
+fn guardian_delete(){
+ if !guardian_store(nil) {return false} guardian_pending=nil guardian_check=nil if guardian_mode && agent_active {cancel_task()} guardian_mode=false guardian_refresh() return true
+}
+fn guardian_progress(){
+ if guardian_goal==nil || guardian_goal.state!="active" {return false}
+ let spent=route_cents(ui.guardian_spent.text().trim()) let progress=ui.guardian_progress_input.text().trim()
+ if spent==nil {guardian_error="请输入累计已花人民币金额，保留最多两位小数" guardian_refresh() return false}
+ let goal=guardian_goal.to_json().parse_json() goal.spent_cents=spent goal.progress=progress goal.version+=1
+ goal.last_check=nil
+ goal.confirmations.push({version:goal.version confirmed_at:time_now() action:"confirm_progress" spent_cents:spent progress:progress})
+ if !guardian_store(goal) {return false}
+ guardian_pending=nil guardian_check=nil guardian_progress_open=false
+ if guardian_mode && agent_active {cancel_task()} guardian_refresh() return true
+}
+fn guardian_report(p){
+ if !guardian_mode || guardian_goal==nil || guardian_goal.state!="active" {return {success:false error:"当前不是活跃目标核验"}}
+ let route=ui_route(route_get(p,"route_id"))
+ let remaining=guardian_goal.total_budget_cents-guardian_goal.spent_cents
+ let assessment=guardian_assess(nil,time_now(),guardian_goal.deadline_ts,remaining)
+ let same=false
+ if route!=nil && guardian_goal.progress=="" && guardian_goal.spent_cents==0 {let gap=route_endpoint_gap(route.actual_origin,guardian_goal.selected_route.actual_origin) let end_gap=route_endpoint_gap(route.actual_endpoint,guardian_goal.selected_route.actual_endpoint) same=gap!=nil && gap<=25 && end_gap!=nil && end_gap<=25 && guardian_plan_identified(route) && guardian_plan_identified(guardian_goal.selected_route) && guardian_plan_key(route)==guardian_goal.selected_route.plan_key}
+ if same {assessment=guardian_assess(route,time_now(),guardian_goal.deadline_ts,remaining)}
+ else {assessment.reasons.push("未取得原选定剩余路段的新证据；新路线仅为替代候选")}
+ let check={run:run_id evidence_scope:"current_query_check" status:assessment.status reasons:assessment.reasons checked_at:time_now() goal_version:guardian_goal.version original_plan_verified:same comparison_scope:if guardian_goal.progress=="" && guardian_goal.spent_cents==0 {"same_full_journey_estimates"} else {"remaining_route_not_comparable_with_original_full_journey"} origin:position_record original_route_id:guardian_goal.selected_route.id candidate_route:if route!=nil {query_route_summary(route)} else {nil} cost_delta_cents:if route!=nil && guardian_goal.progress=="" && guardian_goal.spent_cents==0 && route.price_cents!=nil && guardian_goal.selected_route.price_cents!=nil {route.price_cents-guardian_goal.selected_route.price_cents} else {nil} duration_delta_seconds:if route!=nil && guardian_goal.progress=="" && guardian_goal.spent_cents==0 && route.duration_seconds!=nil && guardian_goal.selected_route.duration_seconds!=nil {route.duration_seconds-guardian_goal.selected_route.duration_seconds} else {nil} remaining_budget_cents:remaining}
+ let updated=guardian_goal.to_json().parse_json() updated.last_check=check
+ if !guardian_store(updated) {return {success:false error:guardian_error}}
+ guardian_check=check guardian_reported_run=run_id ui_facts_revision+=1 guardian_refresh()
+ return {success:true check:check instruction:if check.status=="invalid" {"原目标失效；自主探索替代并呈现差额和风险，目标不放宽；用户确认才替换"} elif check.status=="unknown" {"缺证据保持未知；可探索替代并提出确认，不把新线路当旧路线成立"} else {"当前证据估计成立；不是到达保证或后台监控"}}
+}
+fn guardian_saved_route_facts(){
+ let goal=guardian_goal let fact=guardian_public_goal(goal,true).selected_route
+ fact.current_check=guardian_current_check()
+ fact.snapshot=true fact.source_scope="已确认路线旧快照，不是当前交通证据" fact.currency=goal.currency
+ fact.geometry_ref="saved_goal_route" fact.price_label=money_text(goal.selected_route.price_cents) fact.duration_label=duration_text(goal.selected_route.duration_seconds) fact.kind_label=route_kind_label(goal.selected_route)
+ return fact
+}
+fn guardian_recheck(){
+ if !native_ui_available || guardian_goal==nil || guardian_goal.state!="active" {return false}
+ start_task_with("重新核验已确认的出行目标",true)
+ return true
+}
+fn guardian_label(){
+ if guardian_goal==nil {return guardian_error}
+ let check=guardian_check let status="待重新核验"
+ if check!=nil {status=if check.status=="valid" {"上次核验估计成立"} elif check.status=="invalid" {"上次核验约束失效"} else {"上次核验证据不足"}}
+ let text=guardian_goal.destination.name+" · 到达期限 "+guardian_deadline(guardian_goal.deadline_ts)+" · 总预算 "+money_text(guardian_goal.total_budget_cents)+" · 已花 "+money_text(guardian_goal.spent_cents)+"\n"+if guardian_goal.state=="ended" {"目标已结束"} else {status}
+ if check!=nil {
+  text+=" · 上次核验 "+beijing_clock(check.checked_at)
+  let reasons="" for reason in check.reasons {if reasons!="" {reasons+="；"} reasons+=reason}
+  if reasons!="" {text+="\n上次核验依据："+reasons}
+ } else {text+=" · 尚未核验"}
+ return text+"\n仅打开或主动核验，不会后台监控。"+if guardian_error!="" {"\n"+guardian_error} else {""}
+}
+fn guardian_deadline(epoch){let v=local_time(epoch+28800) return ""+v.year+"-"+v.month+"-"+v.day+" "+beijing_clock(epoch)}
+fn guardian_proposal_label(){
+ if guardian_pending==nil {return ""}
+ let p=guardian_pending let goal=p.goal let reasons=""
+ for reason in p.assessment.reasons {if reasons!="" {reasons+="；"} reasons+=reason}
+ return if p.base_version==nil {"确认保存出行目标与选定路线"} else {"确认替换选定路线（目标不变）"}+"\n目的地："+goal.destination.name+"\n绝对期限："+guardian_deadline(goal.deadline_ts)+"；总预算："+money_text(goal.total_budget_cents)+"；已花："+money_text(goal.spent_cents)+"\n偏好："+goal.preferences+"\n风险接受："+goal.risk_acceptance+"\n选定方案："+route_kind_label(goal.selected_route)+" · "+money_text(goal.selected_route.price_cents)+" · "+duration_text(goal.selected_route.duration_seconds)+"\n依据："+goal.selection_basis+"\n提案评估于 "+beijing_clock(p.created_at)+"："+if p.assessment.status=="valid" {"估计成立"} elif p.assessment.status=="invalid" {"已知约束失效"} else {"证据不足，状态未知"}+"；"+reasons+if p.cost_delta_cents!=nil {"；估价差额 ¥"+(p.cost_delta_cents/100)} else {"；估价差额未知"}+"\n确认方案不保证到达，不会下单。"
+}
+
+fn start_task(){start_task_with(ui.sentence.text().trim(),false)}
+fn start_task_with(text,recheck){
     render_probe=nil
     agent_tool_schema=nil
     invalidate_interface()
-    let text = ui.sentence.text().trim()
     if text == "" { show_status("请用一句话说明行程、时限与预算") return }
+    guardian_mode=recheck guardian_pending=nil guardian_reported_run=-1
+    if !recheck {guardian_check=nil}
     cancel_pending_location()
     run_id += 1 ui_facts_revision+=1
     if task_timer != nil { stop_timer(task_timer) }
@@ -1719,12 +1958,20 @@ fn start_task(){
     position_record = nil constraints = nil destination_record = nil poi_records = [] candidates = [] candidate_sequence = 0 chosen = nil used_tools = []
     transit_count = 0 transit_completed = 0 driving_done = false driving_completed = false progress_text = "" answer_text = "" phase = "running"
     if user_limits != nil {arrive_by=received_at+user_limits.minutes*60}
+    if recheck {
+      arrive_by=guardian_goal.deadline_ts
+      user_limits={minutes:(arrive_by-received_at)/60 budget_cents:guardian_goal.total_budget_cents-guardian_goal.spent_cents currency:guardian_goal.currency}
+      constraints={budget_cents:user_limits.budget_cents currency:guardian_goal.currency objective:"min_cost" destination_query:guardian_goal.destination.name guardian_locked:true}
+      destination_record=guardian_goal.destination.to_json().parse_json()
+      guardian_check=route_get(guardian_goal,"last_check")
+    }
     agent_messages=[] agent_calls=[] agent_call_index=0 active_tool=nil tool_node_refs=[] tool_candidate_start=0 agent_active=true
     trace_initialize()
     trace_emit("query_started",{input:text facts:interface_facts().to_json()},nil)
     trace_marker()
     source_records.push({id:"current-input" kind:"user" source:"explicit-current-input" mock:false raw:text read_at:received_at})
     render_content()
+    guardian_refresh()
     refresh_generated_facts()
     start_timeout(0.01, || agent_begin())
 }
@@ -1855,7 +2102,7 @@ let agent_tool_schema = nil
 fn tool(name,description,properties,required){return {type:"function" function:{name:name description:description parameters:{type:"object" properties:properties required:required}}}}
 fn is_render_tool(name){return name=="render_ui" || name=="render_summary" || name=="render_explanation" || name=="render_routes" || name=="render_suggestions" || name=="render_route_detail"}
 fn render_block_tool(name,description){
- let source_description="任意Makepad Splash DSL。"
+ let source_description="任意Makepad Splash DSL。区块源码的父body默认Fit，顶层ScrollYView{height:Fill}在未指定区块height时会零高，包括overlay与整稿；普通内容用自然Fit的View，父容器承担滚动；确需内部Fill滚动时显式指定区块height。事件引用实际构造的本块widget名字。"
  if name=="render_route_detail" {source_description="独立详情区块的Splash DSL：父容器初始隐藏，打开父容器时源码内容应正常可见，根不再visible:false。多个候选共用同ID详情时，初始按facts.viewed_route_id、on_facts_changed按传入current.viewed_route_id查同一Route，用该Route的kind_label、price_label、duration_label、reason、segments更新文案和地图target；view_route只改变父事实，不替生成稿更换内容。每候选使用独立静态详情也合法，但须使用不同区块ID，列表按钮打开对应区块。地图按目标Route的map_metadata/map_paths目录选择path_indices；目录未读不表示最多四条，可用get_route取得当前目录。每图最多4条独立paths，可自选多个独立命名地图或本地分段翻页，使所有分图或页面的索引合起来覆盖全部真实折线；布局、张数、分页和分组由你选择，不猜索引或沿用extend前目录。首次打开所选路线后，从本详情区块向自己的命名地图emit map绑定(target为路线id或geometry_ref)；on_camera_changed的map_camera仅处理已绑定地图的后续相机变化。打开用show_block(实际目标区块ID)，关闭/返回用hide_self()，不重建列表。"}
  let default_id=name.strip_prefix("render_")
  return tool(name,description+"；source是任意Splash DSL，不是模板。省略id时实际区块ID为"+default_id+"；show_block(target_id)必须使用要打开的实际ID，hide_self()无参数关闭发起块。id可覆盖默认块名，重复id仅更新此块，其余状态保留；overlay/height可选。",{source:{type:"string" description:source_description} id:{type:"string" description:"实际区块ID；省略时为"+default_id+"，打开按钮调用show_block(此实际ID)；详情返回调用hide_self()，不用猜来源ID。"} overlay:{type:"boolean"} height:{type:"number"}},["source"])
@@ -1874,6 +2121,8 @@ fn agent_tools(){
  if agent_tool_schema!=nil {return agent_tool_schema}
  let mode=location_mode()
  let tools = [
+ tool("propose_goal","提出确认保存目标或替换路线；只暂存本轮真实Route提案，用户在父应用按钮确认才保存。已有目标时不得改变目的地/绝对期限/总预算/偏好风险。",{route_id:{type:"string"} preferences:{type:"string"} risk_acceptance:{type:"string"} basis:{type:"string"}},["route_id" "preferences" "risk_acceptance" "basis"])
+ tool("report_goal_check","计算并记录原计划本轮三态核验；引用本轮新Route，或省略route_id检查已过期/已超支及信息不足。本工具结果才是本次成立/失效/未知结论，旧快照仅供识别比较，不能用旧数值口头自算当前成立。返回原计划证据与替代差额。新路线不自动替换原路线，进度只能由用户确认。",{route_id:{type:"string"}},[])
  tool("read_skill","读取技能目录中的技能。省略path读取SKILL.md；path可读取该技能返回的files中的引用资料。",{name:{type:"string"} path:{type:"string"}},["name"])
  tool("read_location",if mode=="demo" {"读取显式模拟出发位置并核实城市。"} else {"读取当前设备定位并核实城市。"},{},[])
  tool("search_places","用真实高德搜索公开地点，返回完整POI和城市；不采用目标。",{query:{type:"string"}},["query"])
@@ -1920,7 +2169,7 @@ fn read_agent_skill(p){
  return {success:false error:"技能不在目录中" name:name catalog:agent_skill_metadata()}
 }
 fn agent_begin(){
- agent_messages=[{role:"system" content:"你是Navigation出行Agent。围绕本次时间、预算和偏好探索步行、公共交通与打车接驳；工具选择和顺序由你决定，时间费用由工具计算。标题与结论取同一Route当前assessment：预算、截止与连接独立判断，unknown不是符合，passed=false不等于每项超限；已查段小计不是全程价格，期限从received_at起算。每次输入是独立查询，不澄清或保存结果。向用户呈现已评估方案及实际依据，包括不成立方案的分段、费用、耗时、限制和地图；未取得的数据或服务失败如实说明。结果面向用户，不使用内部ID/时间戳或已结束的正在处理标题。技能目录（正文及引用资料通过read_skill按需读取）：\n"+agent_skill_metadata().to_json()} {role:"user" content:({request:request_text facts:model_task_context()}).to_json()}]
+ agent_messages=[{role:"system" content:"你是Navigation出行Agent。围绕本次时间、预算和偏好探索步行、公共交通与打车接驳；工具选择和顺序由你决定，时间费用由工具计算。标题与结论取同一Route当前assessment：预算、截止与连接独立判断，unknown不是符合，passed=false不等于每项超限；已查段小计不是全程价格，新规划期限从received_at起算，守护使用已确认绝对期限。新输入是独立查询，不恢复模型对话。守护核验维护facts.guardian中的已确认目标，本轮核验交付以本轮新交通证据及report_goal_check工具判断为准，旧快照不认证当前成立；不放宽绝对期限或其它约束，提案由用户真实确认后生效。只前台核验，不后台监听或下单。向用户呈现已评估方案及实际依据，包括不成立方案的分段、费用、耗时、限制和地图；未取得的数据或服务失败如实说明。结果面向用户，不使用内部ID/时间戳或已结束的正在处理标题。技能目录（正文及引用资料通过read_skill按需读取）：\n"+agent_skill_metadata().to_json()} {role:"user" content:({request:request_text facts:model_task_context()}).to_json()}]
  agent_active=true agent_pump(run_id)
 }
 
@@ -2003,13 +2252,13 @@ fn model_task_context(){
  let facts=interface_facts()
  let configured=false let config=read_text("private-config.json")
  if config!=nil {let key=route_get(config.parse_json(),"didi_mcp_key") configured=key.is_string() && key!=""}
- return {limits:user_limits received_at:received_at arrive_by:arrive_by viewport:facts.viewport rendering_environment:facts.rendering_environment providers:{didi:{configured:configured availability:"配置不等于服务可用；未调用或调用失败不能推断未配置"}} origin:position_record destination:destination_record source_label:source_label()}
+ return {guardian:guardian_snapshot() guardian_recheck:guardian_mode limits:user_limits received_at:received_at arrive_by:arrive_by viewport:facts.viewport rendering_environment:facts.rendering_environment providers:{didi:{configured:configured availability:"配置不等于服务可用；未调用或调用失败不能推断未配置"}} origin:position_record destination:destination_record source_label:source_label()}
 }
 fn finish_tool_from_state(token){
  if !current_task(token) || active_tool==nil {return}
  let name=active_tool.function.name
  prepare_route_graph()
- if name=="read_location" {agent_tool_result({success:true origin:position_record new_nodes:tool_new_nodes()})}
+ if name=="read_location" {agent_tool_result({success:true origin:position_record guardian_current_check:guardian_current_check() fresh_route_count:candidates.len() location_scope:"当前位置，不是当前交通证据，也不证明乘车或付费" new_nodes:tool_new_nodes()})}
  elif name=="read_calendar" {agent_tool_result({success:true records:calendar_events})}
  elif name=="read_notes" {agent_tool_result({success:true records:note_records})}
  elif name=="query_route" || name=="query_transit" || name=="query_driving" {
@@ -2029,7 +2278,10 @@ fn agent_execute_next(token){
  start_timeout(0.01,||trace_emit_run("tool_call",{name:name arguments:call.function.arguments occurred_at:call_at},call.id,token))
  try {p=call.function.arguments.parse_json()} {agent_tool_result({success:false error:"工具参数JSON无法解析"}) return}
  try {
-  if name=="read_skill" {agent_tool_result(read_agent_skill(p))}
+  if name=="propose_goal" {agent_tool_result(guardian_propose(p))}
+  elif name=="report_goal_check" {agent_tool_result(guardian_report(p))}
+  elif guardian_mode && (name=="set_constraints" || name=="adopt_destination") {agent_tool_result({success:false error:"已确认目的地和绝对期限/总预算锁定，不得更换或放宽"})}
+  elif name=="read_skill" {agent_tool_result(read_agent_skill(p))}
   elif name=="read_calendar" || name=="read_notes" || name=="read_location" {read_source_tool(name,token,fn(){finish_tool_from_state(token)})}
   elif name=="set_constraints" {if set_constraints(p){finish_tool_from_state(token)} else {agent_tool_result({success:false error:constraint_error})}}
   elif name=="search_places" {
@@ -2048,7 +2300,10 @@ fn agent_execute_next(token){
   elif name=="quote_didi" {quote_didi(p,token)}
   elif name=="attach_quote" {attach_quote(p,token)}
   elif name=="compare_routes" {present_results("")}
-  elif name=="get_route" {let candidate=ui_route(p.id) if candidate==nil {agent_tool_result({success:false error:"路线ID不在本轮候选中"})} else {map_path_catalog(candidate) agent_tool_result({success:true route:interface_route_facts(candidate,route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")))})}}
+  elif name=="get_route" {
+    if p.id=="saved_goal_route" && guardian_goal!=nil {map_path_catalog(guardian_goal.selected_route) agent_tool_result({success:true route:guardian_saved_route_facts()})}
+    else {let candidate=ui_route(p.id) if candidate==nil {agent_tool_result({success:false error:"路线ID不在本轮候选中"})} else {map_path_catalog(candidate) agent_tool_result({success:true route:interface_route_facts(candidate,route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")))})}}
+  }
   elif name=="get_route_graph" {prepare_route_graph() agent_tool_result({success:true graph:route_graph_facts()})}
   elif is_render_tool(name) {
     render_probe_mark("before_mount")
@@ -2194,7 +2449,7 @@ fn interface_facts(){
     if position_record!=nil && destination_record!=nil && constraints!=nil {prepare_route_graph()}
     let graph_nodes=[] let route_ids=[]
     for ref node in route_nodes {graph_nodes.push(node)} for candidate in candidates {route_ids.push(candidate.id)}
-    let result={route_graph:{nodes:graph_nodes route_ids:route_ids initial_route_id:"origin"} taxi_quotes:didi_quotes taxi_quote_places:didi_places phase: phase status: runtime_status error: interface_error now: time_now() received_at: received_at arrive_by: arrive_by
+    let result={guardian:guardian_snapshot() guardian_recheck:guardian_mode route_graph:{nodes:graph_nodes route_ids:route_ids initial_route_id:"origin"} taxi_quotes:didi_quotes taxi_quote_places:didi_places phase: phase status: runtime_status error: interface_error now: time_now() received_at: received_at arrive_by: arrive_by
         origin_available: position_record != nil destination_available: destination_record != nil limits_available: user_limits != nil
         origin: position_record destination: destination_record limits: user_limits source_label: source_label() sources: sources sources_current: source_valid answer: answer_text
         comparison: if candidates.len() > 0 { comparison_summary() } else { "" } routes: routes viewed_route_id: viewed_route_id maps_available: user_limits != nil viewport: ui_viewport rendering_environment: {scroll:"viewport表示可见区域，不是内容高度上限；普通区块按Fit自然增长并在父ScrollYView滚动，overlay和整稿source有独立有限视口" label_default:"宽度Fill、高度Fit、Flow.Right wrap:true；可显式覆盖原生属性"}
@@ -2211,13 +2466,13 @@ fn facts_json(){
  return ui_facts_json
 }
 fn block_source(block,body){
- let finite=block.overlay || block.document
+ let finite=block.overlay || block.document || block.height!=nil
  let context="let source_block_id="+block.id.to_json()+"\nlet source_block_revision="+block.revision+"\n"+generated_context()
  let height_text=if finite {"Fill"} else {"Fit"}
  let head=context+"\nView{width:Fill height:"+height_text+" flow:Down\nmailbox := Label{visible:false text:\"\"}\nfact_state := Label{visible:false text:"+facts_json().to_json()+"}\nfact_revision := Label{visible:false text:"+(""+ui_facts_revision).to_json()+"}\n"
  if finite {head+="scroll := ScrollYView{width:Fill height:Fill flow:Down clip_x:true clip_y:true\n"}
  let tail=if finite {"}\n}"} else {"}"}
- return head+"body := View{width:Fill height:Fit flow:Down on_render:||{let facts=snapshot()\n"+body+"\n}}\n"+tail
+ return head+"body := View{width:Fill height:"+if block.height!=nil {"Fill"} else {"Fit"}+" flow:Down on_render:||{let facts=snapshot()\n"+body+"\n}}\n"+tail
 }
 fn render_ui_result(changed){
  let results=[] let success=true
@@ -2242,6 +2497,10 @@ fn mount_ui_blocks(params,token,revision){
  render_probe_mark("fragment_check_entered")
  // Diagnose fragments before changing existing blocks; the wrapper must not repair their structure.
  for input in submissions {
+  let existing=block_by_id(input.id)
+  let overlay=if route_get(input,"overlay")!=nil {input.overlay==true} elif existing!=nil {existing.overlay} else {false}
+  let height=if route_get(input,"height")!=nil {input.height} elif existing!=nil {existing.height} else {nil}
+  if height==nil && regex("^[ \t\r\n]*([A-Za-z_][A-Za-z0-9_]*[ \t\r\n]*:=[ \t\r\n]*)?ScrollYView[ \t\r\n]*[{][^{}]*height[ \t\r\n]*:[ \t\r\n]*Fill","").test(input.source) {interface_error=input.id+": 源码父body为Fit，顶层ScrollYView height:Fill在未指定区块height时会零高，overlay与整稿也相同；请由Agent修改布局，使用自然Fit内容或显式区块height，父容器已承担滚动。" return nil}
   let diagnostic=ui.validate_fragment(input.source)
   if diagnostic!="" {interface_error=input.id+": "+diagnostic return nil}
  }
@@ -2369,6 +2628,7 @@ fn update_map_widget(slot){
         }
     } { interface_error = "此图控件加载失败；其它图和行程保留" ui.feedback.render() }
 }
+guardian_load()
 trace_initialize()
 View{width:Fill height:Fill flow:Overlay
 SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.color: #xf7f7f7
@@ -2377,10 +2637,46 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
     control := View{width: Fill height: Fit on_render: || {
         ButtonFlat{enabled:native_ui_available draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: if !native_ui_available {"查询（不可用）"} elif shell_busy() { "终止" } else { "查询" } width: 160 height: 36 on_click: || shell_action()}
     }}
+    guardian_panel := View{width:Fill height:Fit flow:Down spacing:4 on_render:||{
+      if guardian_goal!=nil || guardian_error!="" {
+        Label{width:Fill height:Fit flow:Flow.Right{wrap:true} draw_text.text_style:NavRegular draw_text.color:ink text:guardian_label()}
+        if guardian_goal!=nil {
+          View{width:Fill height:Fit flow:Right spacing:6
+            ButtonFlat{text:"重新核验" enabled:native_ui_available && guardian_goal.state=="active" && !shell_busy() width:90 height:36 on_click:||guardian_recheck()}
+            ButtonFlat{text:"结束目标" width:90 height:36 on_click:||guardian_finish()}
+            ButtonFlat{text:"删除目标" width:90 height:36 on_click:||guardian_delete()}
+          }
+          if guardian_goal.state=="active" {
+            if guardian_selected_candidate()!=nil {
+              let route=guardian_selected_candidate()
+              guardian_viewed_candidate := Label{width:Fill height:Fit flow:Flow.Right{wrap:true} draw_text.text_style:NavRegular text:"当前查看："+route.id+" · "+route_kind_label(route)+" · "+money_text(route.price_cents)+" · "+duration_text(route.duration_seconds)}
+              guardian_prepare := ButtonFlat{text:"用当前查看方案准备替代" width:Fill height:36 enabled:!shell_busy() on_click:||guardian_prepare_selected()}
+            }
+            ButtonFlat{text:if guardian_progress_open {"收起进度"} else {"确认进度/费用"} width:140 height:32 on_click:||{guardian_progress_open=!guardian_progress_open guardian_refresh()}}
+            if guardian_progress_open {View{width:Fill height:Fit flow:Down spacing:4
+              Label{width:Fill height:Fit draw_text.text_style:NavRegular text:"确认进度与累计已花费用（人民币元）"}
+              guardian_progress_input := TextInput{width:Fill height:36 text:guardian_goal.progress empty_text:"例如尚未出发／已下车到某站；位置不会证明乘车"}
+              guardian_spent := TextInput{width:Fill height:36 text:""+(guardian_goal.spent_cents/100) empty_text:"累计已花金额"}
+              ButtonFlat{text:"确认进度/费用" width:140 height:32 on_click:||guardian_progress()}
+            }}
+          }
+        }
+      }
+    }}
     content := ScrollYView{width: Fill height: Fill flow: Down spacing: 8
         feedback := View{width: Fill height: Fit on_render: || {
             Label{draw_text.text_style: NavRegular width: Fill height: Fit flow: Flow.Right{wrap:true} visible: interface_error != "" || interface_inflight || ((!generated_active || phase == "failed") && runtime_status != "")
                 text: if phase == "failed" && runtime_status != "" { runtime_status } elif interface_error != "" { if generated_render_complete { "界面操作未能完成；已有结果保留" } elif agent_active { "界面正在修正；可终止本次查询" } else { "生成界面未能正常显示，请重新查询" } } elif interface_inflight { "Agent 正在生成界面；可终止" } else { runtime_status } draw_text.color: ink}
+        }}
+        guardian_confirmation := View{width:Fill height:Fit flow:Down spacing:6 on_render:||{
+          if guardian_pending!=nil {
+            let version=guardian_pending.proposal_version
+            guardian_proposal_text := Label{width:Fill height:Fit flow:Flow.Right{wrap:true} draw_text.text_style:NavRegular draw_text.color:ink text:guardian_proposal_label()}
+            View{width:Fill height:Fit flow:Right spacing:8
+              guardian_accept := Button{text:"确认此方案" width:140 height:40 on_click:||guardian_confirm(version)}
+              guardian_decline := ButtonFlat{text:"拒绝提案" width:120 height:40 on_click:||guardian_reject()}
+            }
+          }
         }}
         generated_area := View{width:Fill height:Fit flow:Down on_render: || {
             for block in inline_blocks {
@@ -2401,4 +2697,4 @@ trace_overlay := View{width:1 height:1 flow:Overlay
 trace_identity := Label{visible:trace_enabled width:1 height:1 padding:0 text:trace_identity_json() draw_text +: {color:#x0000 text_style:NavRegular{font_size:0.5}}}
 }
 }
-start_timeout(0.1, || { trace_initialize() if trace_enabled {try {ui.trace_identity.set_text(trace_identity_json())} {}} trace_marker() if native_ui_available {ui_viewport = ui.content.rect()} render_content() if native_ui_available {poll_generated()} })
+start_timeout(0.1, || { trace_initialize() if trace_enabled {try {ui.trace_identity.set_text(trace_identity_json())} {}} trace_marker() if native_ui_available {ui_viewport = ui.content.rect()} render_content() if native_ui_available {poll_generated()} if guardian_goal!=nil && guardian_goal.state=="active" {start_timeout(0.2,||guardian_recheck())} })

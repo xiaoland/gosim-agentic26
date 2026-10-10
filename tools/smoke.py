@@ -728,6 +728,9 @@ def main():
   legacy=legacy[legacy.index('fn interface_facts(){'):legacy.index('fn generated_context(){')].replace('fn interface_facts(){','fn performance_legacy_facts(){',1)
   source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1).replace('fn agent_begin(','fn product_agent_begin(',1).replace('fn amap_request(','fn product_amap_request(',1).replace('ui.generated.fact_state.set_text(', 'performance_set_facts(')+'\n'+legacy+'\n'+PERFORMANCE_FIXTURE
  if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
+ if '--guardian' in sys.argv:
+  import test_goal_guardian as guardian
+  source=guardian.source(original)
  env=a.host_env(True);process=None;port=None
  def q(route,**args):
   if route in ('k','m','t','click'):
@@ -763,10 +766,13 @@ def main():
   manifest=json.loads((mount/'manifest.json').read_text());manifest['id']='os.agentic26-navigation';(mount/'manifest.json').write_text(json.dumps(manifest));(mount/'main.splash').write_text(source)
   subprocess.run([str(ROOT.parent/'.octosense-agentic26/OctoSense-App-Hub/target/release/hub'),'stamp',str(mount)],stdout=subprocess.DEVNULL,check=True)
   a.init_demo();jail=a.jail_path();a.materialize_skills(ROOT/'bundle',jail);(jail/'private-config.json').write_text('{"location_mode":"demo"}');(jail/'trip.json').write_text('historical fixture ignored');(jail/'agent-run.json').write_text('historical audit ignored')
-  if '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'didi-fixture-secret','amap_api_key':'trace-map-secret','didi_mcp_key':'didi-fixture-secret'}))
-  if '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
+  if '--guardian' in sys.argv or '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'didi-fixture-secret','amap_api_key':'trace-map-secret','didi_mcp_key':'didi-fixture-secret'}))
+  if '--guardian' in sys.argv or '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   launch('native');report=None
+  if '--guardian' in sys.argv:
+   guardian.run(w,jail,q,stop,launch,original,source)
+   return
   if '--tool-contract' in sys.argv:
    time.sleep(3)
    q('k',c='Space',cmd=1,wait=1)

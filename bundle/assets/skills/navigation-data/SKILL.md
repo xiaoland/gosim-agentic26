@@ -16,7 +16,7 @@ query_route、extend_route 返回 routes；get_route({id})、attach_quote 返回
 
 Route 的 duration_seconds、distance_m 和费用来自实际资料；duration_label、price_label 是应用格式化字段。cost.amount_cents 是该 Route 所包含全部 legs 的估价合计，任一 leg 缺价则 nil；known_subtotal_cents 仅累计已知金额。cost.full_journey_amount_cents 只在请求起终点覆盖及连接核实、金额齐全时提供，否则 nil。cost.coverage 为 requested_journey 或 queried_legs_only；后者的 price_label 明确显示“已查段”。费用均为整数分，currency 与 basis 保留来源语义，未知不是零。
 
-completion_status 为 reached_requested_destination、incomplete 或 unknown，依据实际路线终点，不由查询工具名称决定。到达请求终点与满足预算/期限是独立事实；起点、候车、跨供应商连接和时效仍可未知。assessment.passed/reasons/evaluated_at 是按当前时刻重算的约束判断；budget_status、deadline_status 和 connection_status 各自描述独立条件，passed=false 不能改写成所有条件都超限，unknown 不能改写成符合。已查小计低于预算不证明全程预算内，已知行驶用时短不证明候车和连接后准时。用户期限从 received_at 起算，查询、生成和交互时间均计入。duration_seconds 是路线估计用时；是否超过当前截止看 assessment，不把原分钟数、当前剩余期限和来源 expires_at 混成一个条件。来源过期与超过到达截止是两种理由。
+completion_status 为 reached_requested_destination、incomplete 或 unknown，依据实际路线终点，不由查询工具名称决定。到达请求终点与满足预算/期限是独立事实；起点、候车、跨供应商连接和时效仍可未知。assessment.passed/reasons/evaluated_at 是按当前时刻重算的约束判断；budget_status、deadline_status 和 connection_status 各自描述独立条件，passed=false 不能改写成所有条件都超限，unknown 不能改写成符合。已查小计低于预算不证明全程预算内，已知行驶用时短不证明候车和连接后准时。新规划的用户期限从 received_at 起算，查询、生成和交互时间均计入；守护核验使用已确认的绝对期限，重新打开不会重新起算。duration_seconds 是路线估计用时；是否超过当前截止看 assessment，不把原分钟数、当前剩余期限和来源 expires_at 混成一个条件。来源过期与超过到达截止是两种理由。
 
 展示或解释所选 Route 时，按同一 id 查 snapshot().routes，并使用该对象的 price_label/duration_label/cost/assessment；标题和按钮同样属于事实陈述，不在详情承认未知却在卡片称已符合；不要把报价文字静态写到另一个 Route 卡片，也不要继续使用过期比较结论。
 
@@ -36,3 +36,9 @@ extend_route({route_id,to_ref,mode,strategy?}) 从现有 Route 的实际末端�
 
 
 地图由父应用持有的真实路线几何绘制，map 事件 target 可以直接用 geometry_ref（polyline_…）或路线 id，不需要模型传坐标或 polyline。geometry_ref 映射同一候选的惰性几何缓存，不在查询时扫描全部折线。`get_route` 与原生 `snapshot().routes` 的 `map_paths` 列出全部可用折线的 index、start、end、point_count；费用及可行性仍针对整条路线，分图不会重新计算或切摊票价。高德静态图每次最多4条独立折线；可用 map 事件的 path_indices 在多个独立命名地图中选择不同完整折线，资料见 native-ui。应用不自动截断、分组或跨缺口补线；模型可以决定分步查看或并列展示，保留完整路线及实际缺失说明。
+
+出行目标守护使用propose_goal({route_id,preferences,risk_acceptance,basis})提出本轮真实路线和目标。偏好与风险接受文字必须供用户明确确认，不能将推断描述为既定用户指令。父应用确认后才持久保存选定路线、绝对到达期限、总预算/币种和确认版本，未确认查询不恢复。重新打开或点击重新核验后建立新工具循环；模型历史不恢复。守护的report_goal_check({route_id?})确定性返回valid/invalid/unknown。已知到达超期或已花金额超预算直接失效；缺交通/费用/候车/连接证据为未知，不能当成立。新线路与原选定线路不同，只能作为替代提案；失效时自主探索接驳与报价，展示差额、来源和风险，用户确认才替换，不放宽目标。
+
+进度与累计已花费用由用户在父应用确认，从总预算扣除。不能用定位推断上车、付费、购票或已完成路段。当前首版不会逐段推断在途进度；有已确认进度或已花费用时，原计划可能因缺剩余路段证据保持未知，可以基于当前位置探索替代。不要重复把已付公共交通整程票价算作剩余费用；票价适用范围或进度不明确时说明缺口，建议用户使用进度入口简短确认。所有检查仅在打开或主动核验时执行，不后台监听或下单。
+
+守护核验的交付是本轮实际证据与report_goal_check计算并记录的结论，不是读旧快照后自算到达。初始current_check没有本轮交通证据时为unknown（绝对期限已过或已超支仍invalid）；read_location仅取得位置，不证明原路线仍成立或已上车。get_route({id:"saved_goal_route"})返回evidence_scope:saved_snapshot、历史来源时间、估价与路线目录，只供识别原计划/比较/看旧地图。original_route_id不是本轮引用。自行选择query_route/extend_route/报价等工具取得可用交通证据，交付当前核验及依据；缺证据可以如实结束为未知，不能口头宣称仍成立。有进度时新剩余段与旧整程估价/耗时不可直接比较，差额未知须说明适用范围。

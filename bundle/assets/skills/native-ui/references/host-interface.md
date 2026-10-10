@@ -4,13 +4,13 @@ render_summary、render_explanation、render_routes、render_suggestions、rende
 
 render_ui 仍可提交任意额外内容，用 source 替换整稿，也可用 blocks 提交一个或多个命名区块：`{blocks:[{id:"summary",source:"Label{text:\"本次结果\"}"}]}`。后续相同 id 只替换该块，新 id 追加；未更新块的输入、滚动、脚本和地图状态保留。source 是同一引擎的单文档替换，会清除此前所有块。每块源码在其独立 View.on_render 闭包中执行。可以包含脚本语句和原生控件表达式；这里是 Makepad Splash，不是 JavaScript。不支持 XML/JSX 标签（例如 <View>、</View>）；原生控件直接使用 View{...} 表达式。显示文字是带引号的字符串（例如 text:"最早到达"），不能把中文标题当作未定义变量或把 source 当作隐含变量。空值是 nil；函数写 fn(x){...} 或 || {...}；字符串与数字可用 + 连接。
 
-每次顶部查询开始一个新任务；不存在澄清问答、跨查询继续或结果保存。
+每次顶部查询开始一个独立任务；不提供澄清问答或恢复模型对话。普通未确认查询不保存；只有父应用明确确认的守护目标与选定路线保存为业务状态。
 
 数组使用 `for item in items {...}` 遍历、`items[index]` 访问和 `items.len()` 取长度；没有 Array.find 方法。按字段查找记录时使用 for 遍历并比较字段，找到后保存记录或 return；`ui.body.find("name")` 是原生控件句柄的查找方法，与数组不同。
 
 snapshot() 返回当前真实任务事实，包括 viewport、limits、origin、destination、sources、routes、viewed_route_id、原 arrive_by。emit(object) 把用户动作写到父应用。NavRegular 是 Navigation 无衬线字体，Label、Button、ButtonFlat、TextInput 已默认使用它。Label 的应用局部默认值是 width:Fill height:Fit flow:Flow.Right{wrap:true}，文字按可用宽度自然换行；可覆盖原生属性。
 
-普通 blocks 区块默认 Fit 自然高度，由父 ScrollYView 连续滚动；不是每块占满视口。区块可选 height 指定确需的原生高度。`overlay:true` 区块放在生成视口上方，有限高度、独立 ScrollYView；generic render_ui.blocks 的 visible 参数可控制父容器初始状态。现有块的普通／overlay位置保持不变。整稿 source 仍置于有限高度子 Splash 与 ScrollYView 内。Fit 是内容自然尺寸，Fill 是填父级剩余尺寸，不能在无确定高度的 Fit 父级里假定 Fill 会产生页面高度。控件写 View{width:Fill height:Fit flow:Down ...}；flow 可用 Down、Right、Overlay。子控件不放 children 数组，直接写在父控件的花括号里。控件命名写 title := Label{...}；这个名称不是脚本变量，事件中使用 ui.body.find("title") 取得真实句柄。句柄支持 set_text(text)，TextInput 支持 text()，Image 支持 load_image_from_data_async(bytes)。不要对句柄赋 on_click 属性；事件闭包在构造控件时指定。
+普通 blocks 区块默认 Fit 自然高度，由父 ScrollYView 连续滚动；不是每块占满视口。区块可选 height 指定确需的原生高度。`overlay:true` 区块放在生成视口上方，有限高度、独立 ScrollYView；generic render_ui.blocks 的 visible 参数可控制父容器初始状态。现有块的普通／overlay位置保持不变。整稿 source 仍置于有限高度子 Splash 与 ScrollYView 内。Fit 是内容自然尺寸，Fill 是填父级剩余尺寸，不能在无确定高度的 Fit 父级里假定 Fill 会产生页面高度。普通、overlay与整稿源码的父body默认Fit，因此未指定区块height时，顶层ScrollYView height:Fill会被拒绝；overlay外层有限视口不改变内层body的这一条件。自然Fit长内容由父容器滚动，内部Fill滚动需显式区块height。控件写 View{width:Fill height:Fit flow:Down ...}；flow 可用 Down、Right、Overlay。子控件不放 children 数组，直接写在父控件的花括号里。控件命名写 title := Label{...}；这个名称不是脚本变量，事件中使用 ui.body.find("title") 取得真实句柄。句柄支持 set_text(text)，TextInput 支持 text()，Image 支持 load_image_from_data_async(bytes)。不要对句柄赋 on_click 属性；事件闭包在构造控件时指定。
 
 回调共享的脚本状态在 View 表达式外用 `let` 声明，例如 `let bound_route = ""`；事件闭包捕获这个词法变量。View 内的 `name := value` 定义命名成员，不声明同名词法变量，不能用 `bound_route := ""` 代替回调所读取的状态。
 
@@ -128,7 +128,7 @@ on_facts_changed 是外层已定义的脚本变量，在原生 View 表达式外
 
 路线查看的交互目标是打开包含所选路线实际地图、分段、费用和限制的独立详情页或浮层；地图无法加载时显示实际原因。关闭／返回后保留原列表的位置和内容；页面样式与结构由生成稿自行组织。
 
-用户动作 emit({action:"view_route" id:真实路线ID或"viewed"}) 只本地切换当前查看路线，随后 snapshot().viewed_route_id 更新；它不会自动创建详情页面。提供查看按钮时，生成稿应通过 on_facts_changed 根据实际当前路线更新自己呈现的选择或路线信息，让用户看见操作结果；不得仅发出事件而保持所有内容不变。父应用只处理本次路线查看和地图加载；不把事件转为第二条用户消息或查询续聊。地图可自由放多个命名 AutoNaviMapView。这是原生GCJ-02摄像视口，拖动／缩放后通过on_camera_changed回调请求该新视口的高德底图与同源真实路线，并非只缩放旧图。构造时应给有限高度，并将回调的六个实参用map_camera事件传给父应用，见上例。回调request由控件产生，应用和模型不另造编号。手势在地图区域内改变相机；区域外的详情滚动由页面自己的ScrollYView处理。底图按官方静态图接口更新，有网络延迟，不是连续瓦片加载。
+用户动作 emit({action:"view_route" id:真实路线ID或"viewed"}) 只本地切换当前查看路线，随后 snapshot().viewed_route_id 更新；它不会自动创建详情页面。活跃目标的本轮核验候选被查看后，父应用提供“用当前查看方案准备替代”入口，显示所选候选费用与耗时；查询完成时用户可点击准备提案，再通过父确认控件决定是否替换。该入口不请求模型、不直接保存，也不修改目标约束；历史saved_goal_route不能用作本轮替代。展示候选时提供现有view_route本地动作即可，不要要求用户另发消息才能选择方案。提供查看按钮时，生成稿应通过 on_facts_changed 根据实际当前路线更新自己呈现的选择或路线信息，让用户看见操作结果；不得仅发出事件而保持所有内容不变。父应用只处理本次路线查看和地图加载；不把事件转为第二条用户消息或查询续聊。地图可自由放多个命名 AutoNaviMapView。这是原生GCJ-02摄像视口，拖动／缩放后通过on_camera_changed回调请求该新视口的高德底图与同源真实路线，并非只缩放旧图。构造时应给有限高度，并将回调的六个实参用map_camera事件传给父应用，见上例。回调request由控件产生，应用和模型不另造编号。手势在地图区域内改变相机；区域外的详情滚动由页面自己的ScrollYView处理。底图按官方静态图接口更新，有网络延迟，不是连续瓦片加载。
 
 emit({action:"map" widget:"image_name" target:真实路线ID或"viewed"或"destination" status_widget:"caption_name" interactive:true})。父应用绑定真实路线、初始化全路线视口，再分别请求和加载真实高德视口图片；status_widget 是可选命名 Label，显示来源和加载错误。target 用当前实际路线ID可固定本次详情目标；用 "viewed" 会随父查看状态更新，"destination" 仅显示实际目的地。命名地图应已构造且具有限高度，先显示详情页再发事件，父才能向实际实例加载字节。切换目标显示加载状态，新路线重新匹配全路线视口；同一目标再次打开保留原生相机和当前run图片。来源与加载反馈由 status_widget 接收。旧Image静态图接口仍可用，省略interactive:true即可；它只有图片，不具备地图拖动缩放。未知或缺失几何不伪造直线。
 
@@ -150,3 +150,9 @@ render_ui 返回本稿真实 diagnostics；success 只表示执行时没有已�
 render_ui 的 blocks 回执逐块返回 id、revision、diagnostics、notified；失败块可以单独提交修正版，其它块保留。success 只表示本次提交没有已报告执行错误，不保证内容目标完成。区块没有删除／重排序接口；新查询清空全部区块。
 
 地图事件 target 也可直接引用 query_route 返回的 geometry_ref（polyline_…）；父应用按同一候选的真实几何加载，不由模型传折线坐标。原路线 id、viewed 和 path_indices 仍可用；新查询使上一轮引用失效。
+
+守护业务事实在snapshot().guardian中，包含goal、proposal、last_check和remaining_budget_cents。propose_goal/report_goal_check是父Agent工具，不是子VM方法；emit不支持确认保存、替换或更新费用。待确认提案由父应用可靠确认区显示完整目标、真实估计原因、选定依据与差额，真实按钮点击才保存。生成页面可解释这些事实与风险，不能声称render成功就已获得用户确认。新查询仍建立独立模型历史，只有确认业务状态跨次保存。
+
+使用target:"saved_goal_route"可以查看已确认路线快照的实际几何；get_route({id:"saved_goal_route"})取得其目录，source_ts仍为旧查询时间，不是当前交通证据。新候选和比较仍只来自本轮查询。
+
+守护父确认区由应用管理显隐，生成稿仍需通过on_facts_changed响应确认和进度改变。current_check明确本轮证据范围；last_check不可冒称当前结果。saved_goal_route快照只供线路识别、历史估价和地图，get_route回执的current_check不从旧交通数值认证当前成立。
