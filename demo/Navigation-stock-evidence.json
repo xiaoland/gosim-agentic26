@@ -1,0 +1,82 @@
+{
+  "host_commit": "7b36c8afc2e4bad9dfa5d77692b6fd453f0b9785",
+  "makepad_commit": "d653bc4493619ab979ccff165cf48c0c63b77d19",
+  "binary_sha256": "174c938bbfbe402f315f33930be96864c3fac1fd3b307632879e6f3a0218989b",
+  "unmodified_official_host": true,
+  "source_main_sha256": "72d3c8a9e3269375df147dc9529fd201cdbf178fa7cd9a3179a4aa329e2703f5",
+  "capture_mode": "macOS arm64 official card-host phone viewport 390x844; not Android mode",
+  "duration_seconds": 29.54,
+  "presentation": "真实截图剪辑；中文旁白与字幕；非连续录屏；非Android模式或真机",
+  "verified_behavior": [
+    "390×844手机视口下首屏可见，包含输入框、查询不可用状态及原生扩展兼容说明。",
+    "点击禁用查询、修改输入为“去机场，预算50元”并回车后，查询仍不可用，缺能力说明保持可见。",
+    "同一宿主二进制运行修复前源码报告2428:181 empty-stack；修复后原生检查errors为空。",
+    "本任务启动的实例已关闭。",
+    "官方card-host及全部依赖工作树clean，Cargo清单与锁文件原样；依赖path patch属于官方声明。"
+  ],
+  "limitations": [
+    "画面为实际截图剪辑，不是连续录屏。",
+    "macOS arm64官方card-host的手机视口，不是Android模式或Android真机。",
+    "本次只验证首屏和缺能力反馈，不证明宿主模型闭环、定位或路线规划可用。",
+    "采集源码由source_main_sha256标识，不冒称后来模型迁移后的完整运行。",
+    "未进行模型或交通请求的网络抓包核验。"
+  ],
+  "scenes": [
+    {
+      "start_seconds": 0,
+      "duration_seconds": 11.81,
+      "screenshot": "first.png",
+      "screenshot_sha256": "d21247029387eb432b22d4f19b749ed9e47d4e55a6d0cdb830b74cc47725b72a",
+      "title": "官方原版宿主，首屏可见",
+      "narration": "这是官方原版宿主的真实首屏。修复后，输入框和兼容说明正常显示。画面来自 macOS 的手机视口，不是 Android 模式或真机。"
+    },
+    {
+      "start_seconds": 11.81,
+      "duration_seconds": 17.73,
+      "screenshot": "after-input.png",
+      "screenshot_sha256": "a0678b8446156807bfe16c03101fc4c5055de00693e16436b725a40c195a2fe5",
+      "title": "缺能力时明确停止查询",
+      "narration": "点击禁用查询、修改输入并回车后，查询仍不可用。当前宿主缺少所需原生扩展，应用明确列出依赖，不生成路线结果。本段为真实截图剪辑，不证明模型、定位或路线规划可用。"
+    }
+  ],
+  "video_sha256": "a4e487219e16d45f95806a41e6162031e1884f0c20f6f6832c23f05c25ec9fec",
+  "media_duration_seconds": 29.63,
+  "media_verification": {
+    "complete_video_audio_decode": true,
+    "mean_audio_volume_db": -18.3,
+    "peak_audio_volume_db": -2.9,
+    "encoding": "H.264/yuv420p 1920×1080 24fps + AAC mono Chinese narration",
+    "subtitle_format": "SRT, UTF-8, Chinese",
+    "both_scene_keyframes_visually_reviewed": true,
+    "original_screenshots_visually_reviewed": true
+  },
+  "official_sources": {
+    "stock-card-host": {
+      "revision": "7b36c8afc2e4bad9dfa5d77692b6fd453f0b9785",
+      "working_tree_clean": true
+    },
+    "makepad": {
+      "revision": "d653bc4493619ab979ccff165cf48c0c63b77d19",
+      "working_tree_clean": true
+    },
+    "octoscript-makepad": {
+      "revision": "6cf2d90aa33ff4ae603f49c7557f3ecf986207f0",
+      "working_tree_clean": true
+    },
+    "octoscript": {
+      "revision": "2e37d9e657a246f16718d9a475e167ccd2d5b5fa",
+      "working_tree_clean": true
+    }
+  },
+  "build": "cargo build --locked --release -p octosense-card-host；官方Cargo.toml中的path patches解析到对应未修改官方依赖，无本地runtime覆盖",
+  "stock_check": {
+    "passed": true,
+    "checks": [
+      "空配置首屏说明可见",
+      "查询按钮不可用",
+      "输入回车不能绕过能力门",
+      "无原生脚本错误"
+    ],
+    "owned_instance_closed": true
+  }
+}

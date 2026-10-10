@@ -129,6 +129,20 @@ def no_secrets(data, values, label):
     require(not any(secret in data for secret in secrets(values)), f'{label} 检测到凭据；拒绝输出或打包，具体值省略。')
 
 
+
+def configured_secrets(config):
+    # 历史配置仍可能有旧模型 key；当前 key 只属于宿主 profile。
+    values = {'MINIMAX_API_KEY': config.get('minimax_api_key', ''),
+              'AMAP_API_KEY': config.get('amap_api_key', ''), 'DIDI_MCP_KEY': config.get('didi_mcp_key', '')}
+    path = CORE / 'profiles/_main.json'
+    if path.is_file():
+        profile = json.loads(path.read_bytes())
+        for name, value in profile.get('config', {}).get('env_vars', {}).items():
+            if isinstance(value, str) and not value.startswith('keychain:'):
+                values[name] = value
+    return values
+
+
 def host_env(hidden=False):
     env = dict(os.environ)
     for name in ('MAKEPAD_HOME', 'MAKEPAD_WM_ROOT', 'MAKEPAD_WM_THEME', 'MAKEPAD_REMOTE', 'MAKEPAD_HIDE_WINDOWS',
@@ -171,7 +185,7 @@ def apply_overlay(source, spec):
 
 def final_overlay(name):
     maps = LOCK['maps_overlays'][name]
-    return LOCK.get('font_document_overlay', maps) if name == 'app_hub' else LOCK.get('ui_widget_overlay', maps)
+    return LOCK.get('font_document_overlay', maps) if name == 'app_hub' else LOCK.get('model_chat_overlay', LOCK.get('ui_widget_overlay', maps))
 
 
 def verify_source():
@@ -187,12 +201,16 @@ def verify_source():
         require(hashlib.sha256((ROOT / overlays[name]['patch']).read_bytes()).hexdigest() == overlays[name]['patch_sha256'], '定位基线补丁摘要不符。')
         overlay = final_overlay(name)
         if name == 'octosense' and 'ui_widget_overlay' in LOCK:
-            require(overlay['base_tree'] == maps[name]['tree'], '控件接口覆盖补丁的 Maps 基线不符。')
+            ui_overlay = LOCK['ui_widget_overlay']
+            require(ui_overlay['base_tree'] == maps[name]['tree'], '控件接口覆盖补丁的 Maps 基线不符。')
             require(hashlib.sha256((ROOT / maps[name]['patch']).read_bytes()).hexdigest() == maps[name]['patch_sha256'], 'Maps 基线补丁摘要不符。')
-            require(hashlib.sha256((ROOT / overlay['makepad_patch']).read_bytes()).hexdigest() == overlay['makepad_patch_sha256'], '控件运行时补丁摘要不符。')
+            require(hashlib.sha256((ROOT / ui_overlay['makepad_patch']).read_bytes()).hexdigest() == ui_overlay['makepad_patch_sha256'], '控件运行时补丁摘要不符。')
         if name == 'app_hub' and 'font_document_overlay' in LOCK:
             require(overlay['base_tree'] == maps[name]['tree'], '字体文档覆盖补丁的 Maps 基线不符。')
             require(hashlib.sha256((ROOT / maps[name]['patch']).read_bytes()).hexdigest() == maps[name]['patch_sha256'], 'Maps 基线补丁摘要不符。')
+        if name == 'octosense' and 'model_chat_overlay' in LOCK:
+            require(overlay['base_tree'] == LOCK['ui_widget_overlay']['tree'], '模型服务覆盖补丁的控件基线不符。')
+            require(hashlib.sha256((ROOT / ui_overlay['patch']).read_bytes()).hexdigest() == ui_overlay['patch_sha256'], '控件接口补丁摘要不符。')
         verify_overlay(source, overlay)
     for name, expected in [('Cargo.lock', maps['octosense']['cargo_lock_sha256']),
                            ('runtime-patches.lock.json', spec['runtime_patches_lock_sha256'])]:
@@ -397,14 +415,18 @@ def bootstrap():
         command('git', 'fetch', '--depth', '1', 'origin', spec['revision'], cwd=hub)
         command('git', 'checkout', '--detach', 'FETCH_HEAD', cwd=hub)
     for name, source in [('app_hub', hub), ('octosense', SOURCE)]:
-        maps = LOCK['maps_overlays'][name]
-        final = final_overlay(name)
+        layers = [LOCK['location_overlays'][name], LOCK['maps_overlays'][name]]
+        if name == 'app_hub' and 'font_document_overlay' in LOCK:
+            layers.append(LOCK['font_document_overlay'])
+        if name == 'octosense':
+            for key in ('ui_widget_overlay', 'model_chat_overlay'):
+                if key in LOCK:
+                    layers.append(LOCK[key])
         tree = output('git', 'write-tree', cwd=source)
-        if tree != final['tree']:
-            if tree != maps['tree']:
-                apply_overlay(source, LOCK['location_overlays'][name])
-            apply_overlay(source, maps)
-        apply_overlay(source, final)
+        completed = next((i + 1 for i, layer in enumerate(layers) if tree == layer['tree']), 0)
+        for layer in layers[completed:]:
+            apply_overlay(source, layer)
+        verify_overlay(source, layers[-1])
     # An existing checkout may already have the stock reviewed runtime stack.
     # Apply just our extra layer; fresh checkouts are reconstructed by setup.
     if 'ui_widget_overlay' in LOCK:
@@ -446,14 +468,21 @@ def configure(values, jail, location_mode="live", trace=False):
                           'route': {'base_url': values['MINIMAX_BASE_URL'], 'api_key_env': 'MINIMAX_API_KEY', 'api_type': 'openai'}},
                           'fallbacks': []}, 'env_vars': {'MINIMAX_API_KEY': values['MINIMAX_API_KEY']}}}
     write_private(CORE / 'profiles/_main.json', json_bytes(profile))
+    # 只改隔离开发应用的宿主额度；当日已用调用和 tokens 原样保留。
+    ledger_path = HOME_DIR / 'apps/.host/model/ledger.json'
+    ledger = json.loads(ledger_path.read_bytes()) if ledger_path.is_file() else {'day': 0, 'apps': {}, 'limits': {}}
+    manifest = json.loads((ROOT / 'bundle/manifest.json').read_bytes())
+    app_id = manifest['id'] if manifest['id'].startswith('os.') else 'os.' + manifest['id']
+    ledger.setdefault('limits', {})[app_id] = {'per_minute': 20, 'calls_per_day': 100, 'tokens_per_day': 1_000_000}
+    write_private(ledger_path, json_bytes(ledger))
+
     trace_session = uuid.uuid4().hex if trace else None
     if trace:
         private_dir(jail / 'dev-trace' / trace_session)
         write_private(jail / 'dev-trace' / trace_session / 'instance-counter.json', json_bytes({'next': 1}))
     write_private(jail / 'private-config.json', json_bytes({
-        'amap_api_key': values['AMAP_API_KEY'], 'minimax_api_key': values['MINIMAX_API_KEY'],
+        'amap_api_key': values['AMAP_API_KEY'],
         'didi_mcp_key': values.get('DIDI_MCP_KEY', ''),
-        'minimax_base_url': values['MINIMAX_BASE_URL'], 'minimax_model': LOCK['model'],
         'location_mode': location_mode,
         'development_trace': trace, 'development_trace_session': trace_session,
         'development_trace_metadata': {
@@ -788,8 +817,7 @@ def read_trace(session_id=None, instance=None):
     require(isinstance(instance, str) and re.fullmatch(r'vm-[0-9]+', instance), 'trace instance 标识无效。')
     directory = trace_directory(jail, session_id, instance, historical=host_session is None)
     values = env_values(required=False)
-    configured = {'MINIMAX_API_KEY': config.get('minimax_api_key', ''), 'AMAP_API_KEY': config.get('amap_api_key', ''),
-                  'DIDI_MCP_KEY': config.get('didi_mcp_key', '')}
+    configured = configured_secrets(config)
     status_path = directory / 'status.json'
     require(status_path.is_file() and not status_path.is_symlink(), 'trace 状态尚未写入；不采用旧事件作为当前证据。')
     status_data = status_path.read_bytes()
@@ -838,9 +866,7 @@ def trace_output(action, session_id=None, instance=None, destination=None):
             host_log = Path(status['host_log']['source']).read_bytes()
             no_secrets(host_log, env_values(required=False), 'trace 宿主日志')
             config = json.loads((jail_path() / 'private-config.json').read_bytes())
-            no_secrets(host_log, {'MINIMAX_API_KEY': config.get('minimax_api_key', ''),
-                                  'AMAP_API_KEY': config.get('amap_api_key', ''),
-                                  'DIDI_MCP_KEY': config.get('didi_mcp_key', '')}, 'trace 宿主日志')
+            no_secrets(host_log, configured_secrets(config), 'trace 宿主日志')
             status['host_log'].update(included=True, export_file=destination.with_suffix('.host.log').name)
         write_private(destination, payload)
         if host_log is not None:

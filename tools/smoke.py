@@ -328,7 +328,7 @@ fn trace_failure_completion(token){
 fn trace_fixture(){
  if trace_fixture_started {return} trace_fixture_started=true
  start_task()
- let probe={text:"trace-fixture-secret trace-map-secret" value:"before"}
+ let probe={text:"didi-fixture-secret trace-map-secret" value:"before"}
  trace_emit("snapshot_probe",probe,nil) probe.value="after" start_timeout(0.1,||trace_bulk(0))
 }
 fn smoke_request(task,input,schema,token,record,done){
@@ -763,7 +763,7 @@ def main():
   manifest=json.loads((mount/'manifest.json').read_text());manifest['id']='os.agentic26-navigation';(mount/'manifest.json').write_text(json.dumps(manifest));(mount/'main.splash').write_text(source)
   subprocess.run([str(ROOT.parent/'.octosense-agentic26/OctoSense-App-Hub/target/release/hub'),'stamp',str(mount)],stdout=subprocess.DEVNULL,check=True)
   a.init_demo();jail=a.jail_path();a.materialize_skills(ROOT/'bundle',jail);(jail/'private-config.json').write_text('{"location_mode":"demo"}');(jail/'trip.json').write_text('historical fixture ignored');(jail/'agent-run.json').write_text('historical audit ignored')
-  if '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'trace-fixture-secret','amap_api_key':'trace-map-secret','didi_mcp_key':'didi-fixture-secret'}))
+  if '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'didi-fixture-secret','amap_api_key':'trace-map-secret','didi_mcp_key':'didi-fixture-secret'}))
   if '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   launch('native');report=None
@@ -923,11 +923,12 @@ def main():
    a.SESSION.write_text(json.dumps({'pid':process.pid,'process_stamp':a.process_stamp(process.pid),'port':port,'trace_session':'0123456789abcdef0123456789abcdef','log':str(w/'native.log')}))
    selected=a.read_trace();assert selected[1]==current
    for file in list(sessions.rglob('*.json'))+list(sessions.rglob('*.jsonl')):
-    assert 'trace-fixture-secret' not in file.read_text() and 'trace-map-secret' not in file.read_text()
+    assert 'didi-fixture-secret' not in file.read_text() and 'trace-map-secret' not in file.read_text()
    last=events[-1]['seq'];run=events[-1]['run']
    segments=list((sessions/current).glob('segment-*.jsonl'));assert len(segments)>=2 and all(x.stat().st_size<=1048576 for x in segments)
    assert sum(x['event']=='burst' for x in events)>=300
-   assert len(list(jail.rglob('*')))<40
+   # 静态技能资料独立增长；这里核验的是动态 trace 分段避免逐事件文件膨胀。
+   assert len(list(sessions.rglob('*')))<40
    status=json.loads((sessions/current/'status.json').read_text());(sessions/current/f'segment-{status["segments"]+1:06}.jsonl').mkdir()
    (jail/('trace-fail-'+current+'.json')).write_text('{}')
    for _ in range(100):

@@ -2,20 +2,20 @@
   "capabilities": [
     "storage",
     "net",
-    "location"
+    "location",
+    "model"
   ],
   "id": "agentic26-navigation",
   "integrity": {
-    "bundle_blake3": "3579572593d669ab4a2d9b05904750471cd4b173b9370d139ed1dd08c94a8619"
+    "bundle_blake3": "d8b2cf08db0860f9405cc419ce2effca0991628ec6c35fb6f6484262d3dd31a3"
   },
   "name": "Agentic26 Navigation",
   "network": {
     "hosts": [
       "restapi.amap.com",
-      "api.minimax.cn",
       "mcp.didichuxing.com"
     ]
   },
   "schema": 1,
-  "version": "0.13.0"
+  "version": "0.14.0"
 }

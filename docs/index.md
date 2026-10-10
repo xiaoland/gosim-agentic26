@@ -19,7 +19,7 @@
 
 ## 当前任务
 
-[最新OctoSense与完整验收](../tasks/runtime-upgrade/packet.md)保存赛事最新工具链、宿主硬预算调查、详情交付修正及App Hub提交兼容的接续入口。
+[官方宿主与初赛反馈](../tasks/runtime-upgrade/packet.md)保存 #116 的首屏兼容、宿主模型服务迁移与降级演示；早期工具链、预算、详情及初赛交付证据由该任务入口链接。
 
 [统一Route身份与报价派生](../tasks/route-identity/packet.md)保存已有路线直接附价、完整与未完成路线统一读取及在线验收的实施边界。
 

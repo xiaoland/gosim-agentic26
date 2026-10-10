@@ -197,6 +197,9 @@ let NavBold = theme.font_bold{font_family: FontFamily{latin := FontMember{res: h
 let ink = #x162e35
 let muted = #x5e747b
 let teal = #x06796f
+// 已核对的扩展宿主提供此类型；官方原版不具备本应用的区块、布局和地图接口。
+let native_ui_available = route_get(mod.widgets, "AutoNaviMapView") != nil
+let missing_runtime_message = "当前宿主缺少 Navigation 所需的原生扩展，查询暂不可用。\n需要区块寻址、布局测量、渲染诊断和交互地图接口；请使用 README 中注明的配套宿主。官方原版首屏仅展示兼容说明。"
 let run_id = 0
 let phase = "idle"
 let received_at = 0
@@ -1630,7 +1633,7 @@ fn trace_initialize(){
     if !ordinal.is_number() || ordinal<1 || ordinal%1!=0 {trace_initialization_error="实例标识计数缺失或无效；开发记录不完整" trace_marker() return}
     try {fs.write(counter_path,{next:ordinal+1}.to_json())} {trace_initialization_error="实例标识写入失败；开发记录不完整" trace_marker() return}
     let keys=[]
-    for name in ["minimax_api_key" "amap_api_key" "didi_mcp_key"] {let key=route_get(config,name) if key.is_string() && key!="" {keys.push(key) keys.push(key.url_encode())}}
+    for name in ["amap_api_key" "didi_mcp_key"] {let key=route_get(config,name) if key.is_string() && key!="" {keys.push(key) keys.push(key.url_encode())}}
     trace_state={session:session instance:"vm-"+ordinal directory:"dev-trace/"+session+"/vm-"+ordinal seq:0 written_seq:0 segment:0 segment_bytes:0 run:run_id incomplete:false keys:keys}
     try {fs.write(trace_state.directory+"/status.json",trace_status(trace_state).to_json())} {trace_state.incomplete=true}
     trace_emit("instance_started",{metadata:route_get(config,"development_trace_metadata")},nil)
@@ -1649,77 +1652,54 @@ fn request_stage(record, stage){
 }
 fn minimax_request(task, input, schema, token, record, done){
     request_stage(record, "entry")
-    let config = read_text("private-config.json")
-    if config == nil { request_finished(record, "config_error") request_failed(record, "本机尚未配置模型服务") return }
-    let private = nil
-    try { private = config.parse_json() } { request_finished(record, "config_error") request_failed(record, "本机模型配置无效") return }
-    request_stage(record, "config_read")
-    let key = route_get(private, "minimax_api_key")
-    if route_get(private, "minimax_base_url") != "https://api.minimax.cn/v1" || route_get(private, "minimax_model") != "MiniMax-M3" || !key.is_string() || key.trim() == "" || regex("[\r\n]", "").test(key) {
-        request_finished(record, "config_error") request_failed(record, "本机模型配置无效") return
-    }
-    let body = {model: "MiniMax-M3" stream: false thinking: {type: "disabled"}
-        messages: input tools: schema tool_choice: "auto"}
-    request_stage(record, "body_object")
-    let serialized_body = body.to_json()
-    trace_emit_run("model_request",{step:record.step body:serialized_body},nil,token)
-    request_stage(record, "body_json")
-    let body_bytes = serialized_body.to_bytes()
-    request_stage(record, "body_bytes")
+    let body = {messages: input tools: schema tool_choice: "auto" thinking: {type: "disabled"}}
+    trace_emit_run("model_request",{step:record.step service:"model.chat" body:body.to_json()},nil,token)
     let waiting = {settled: false}
     record.dispatch_started_at = nil record.dispatch_returned_at = nil record.dispatch_returned = false record.http_status = nil
-    request_stage(record, "before_net")
-    // 请求准备已完成；派发入口重新取得宿主的单入口预算。
     start_timeout(0.01, || {
         if !request_current(token, record) || waiting.settled { return }
         record.dispatch_started_at = time_now()
-        trace_emit_run("model_dispatch",{step:record.step started_at:record.dispatch_started_at},nil,token)
+        trace_emit_run("model_dispatch",{step:record.step service:"model.chat" started_at:record.dispatch_started_at},nil,token)
+        request_stage(record, "before_host")
         try {
-        net.http_request(net.HttpRequest{url: "https://api.minimax.cn/v1/chat/completions" method: net.HttpMethod.POST
-            headers: {"Content-Type": ["application/json"] "Authorization": ["Bearer " + key]} body: body_bytes}) do net.HttpEvents{
-            on_response: |res| {
+            record.host_request_id = host.request("model.chat", body, fn(reply){
                 if waiting.settled { return }
-                waiting.settled = true record.http_status = res.status_code request_finished(record, "returned") request_stage(record, "response_entry")
-                let response_text = res.body.to_string()
-                trace_emit_run("model_response",{step:record.step status:res.status_code body:response_text current:request_current(token,record)},nil,token)
+                waiting.settled = true
+                request_finished(record, if reply.is_ok {"returned"} else {"host_error"})
+                // 终止只屏蔽本地迟到结果，不能据此声称远端请求已取消。
+                trace_emit_run("model_response",{step:record.step service:"model.chat" is_ok:reply.is_ok body:if reply.is_ok {reply.data.to_json()} else {reply.error} current:request_current(token,record)},nil,token)
                 if !request_current(token, record) { return }
-                try {
-                    if res.status_code != 200 { record.state = "http_error" request_failed(record, "模型服务未能完成请求，请稍后重试") return }
-                    // 宿主每次入口64ms：响应解析与动作执行各用独立timer入口。
-                    start_timeout(0.01, || {
-                        if !request_current(token, record) { return }
-                        try {
-                            let data = response_text.parse_json()
-                            request_stage(record, "response_json")
-                            start_timeout(0.01, || {
-                                if !request_current(token, record) { return }
-                                try {
-                                    let usage = route_get(data, "usage")
-                                    record.meta = {prompt_tokens: route_get(usage, "prompt_tokens") completion_tokens: route_get(usage, "completion_tokens") total_tokens: route_get(usage, "total_tokens")}
-                                    record.protocol = model_protocol(data)
-                                    request_stage(record, "model_action")
-                                    done(data)
-                                } { record.state = "invalid_response" request_failed(record, "模型响应格式无效，请重新规划") }
-                            })
-                        } { record.state = "invalid_response" request_failed(record, "模型响应格式无效，请重新规划") }
-                    })
-                } { record.state = "invalid_response" request_failed(record, "模型响应格式无效，请重新规划") }
-            }
-            on_error: |err| {
-                if waiting.settled { return }
-                waiting.settled = true request_finished(record, "network_error")
-                if request_current(token, record) { request_failed(record, "模型网络请求失败，请稍后重试") }
-            }
-        }
-        record.dispatch_returned = true record.dispatch_returned_at = time_now()
-        request_stage(record, "after_net")
-    } {
-        waiting.settled = true request_finished(record, "request_rejected")
-        if request_current(token, record) { request_failed(record, "本机模型请求派发未完成，远端状态未知，请重新查询") }
+                if !reply.is_ok {
+                    record.host_error=reply.error
+                    let error=if reply.error.is_string() {reply.error} else {""}
+                    let message=if error.search("no service answers")>=0 || error.search("there is no model.chat")>=0 {"当前宿主未提供 Navigation 所需的 model.chat 服务"}
+                        elif error.search("no_provider:")>=0 {"宿主尚未配置可用的主模型，请在 AI providers 中配置"}
+                        elif error.search("rate:")>=0 {"宿主模型调用过于频繁，请稍后重新查询"}
+                        elif error.search("budget:")>=0 {"本应用已达到宿主模型额度，请检查宿主配置"}
+                        elif error.search("capability:")>=0 {"宿主尚未授权本应用使用模型服务"}
+                        else {"宿主模型服务未能完成请求，请稍后重试"}
+                    request_failed(record,message) return
+                }
+                start_timeout(0.01, || {
+                    if !request_current(token, record) { return }
+                    try {
+                        let data=route_get(reply.data,"response")
+                        if !data.is_object() {record.state="invalid_response" request_failed(record,"宿主模型响应格式无效，请重新查询") return}
+                        let usage=route_get(data,"usage")
+                        record.meta={prompt_tokens:route_get(usage,"prompt_tokens") completion_tokens:route_get(usage,"completion_tokens") total_tokens:route_get(usage,"total_tokens")}
+                        record.host_meta=route_get(reply.data,"meta") record.protocol=model_protocol(data)
+                        request_stage(record,"model_action") done(data)
+                    } {record.state="invalid_response" request_failed(record,"宿主模型响应格式无效，请重新查询")}
+                })
+            })
+            record.dispatch_returned = true record.dispatch_returned_at = time_now()
+            request_stage(record,"after_host")
+        } {
+            waiting.settled = true request_finished(record,"request_rejected")
+            if request_current(token,record) {request_failed(record,"宿主模型请求未能派发，请重新查询")}
         }
     })
 }
-
 
 
 fn start_task(){
@@ -2088,7 +2068,7 @@ fn agent_execute_next(token){
  } {agent_tool_result({success:false error:"工具参数或数据执行错误" status:runtime_status})}
 }
 
-let runtime_status = ""
+let runtime_status = if native_ui_available {""} else {missing_runtime_message}
 let generated_source = ""
 let ui_blocks=[]
 let inline_blocks=[]
@@ -2151,7 +2131,7 @@ fn clear_generated(){
 fn stop_interface(){interface_revision+=1 interface_inflight=false clear_generated() render_content()}
 fn invalidate_interface(){ stop_interface() clear_generated() interface_error = "" }
 fn shell_busy(){ return agent_active || phase == "picking" }
-fn shell_action(){ if shell_busy(){cancel_task()} else {query_task()} }
+fn shell_action(){ if !native_ui_available {show_status(missing_runtime_message) return} if shell_busy(){cancel_task()} else {query_task()} }
 
 fn ui_route(ref){ if ref == "viewed" { return viewed_route() } for candidate in candidates { if candidate.id == ref || route_get(candidate,"geometry_ref")==ref { return candidate } } return nil }
 
@@ -2199,7 +2179,7 @@ fn interface_route_facts(candidate, check){
     return fact
 }
 fn interface_facts(){
-    try {let area = ui.content.rect() if area != nil && area.width>0 && area.height>0 {ui_viewport=area ui_overlay_top=area.y-ui.sentence.rect().y+12}} {}
+    if native_ui_available {let area = ui.content.rect() if area != nil && area.width>0 && area.height>0 {ui_viewport=area ui_overlay_top=area.y-ui.sentence.rect().y+12}}
     render_probe_mark("source_check_entered")
     let routes = [] let source_valid = sources_current() let sources = []
     render_probe_mark("source_check_returned")
@@ -2395,7 +2375,7 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
     sentence := TextInput{width: Fill height: 48 on_return: || shell_action() text: "40 分钟内到机场，预算 50，尽量便宜。" empty_text: "描述本次行程、时限与预算"
         draw_text +: {text_style: NavRegular color: ink color_hover: ink color_focus: ink color_empty: muted}}
     control := View{width: Fill height: Fit on_render: || {
-        ButtonFlat{draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: if shell_busy() { "终止" } else { "查询" } width: 120 height: 36 on_click: || shell_action()}
+        ButtonFlat{enabled:native_ui_available draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: if !native_ui_available {"查询（不可用）"} elif shell_busy() { "终止" } else { "查询" } width: 160 height: 36 on_click: || shell_action()}
     }}
     content := ScrollYView{width: Fill height: Fill flow: Down spacing: 8
         feedback := View{width: Fill height: Fit on_render: || {
@@ -2421,4 +2401,4 @@ trace_overlay := View{width:1 height:1 flow:Overlay
 trace_identity := Label{visible:trace_enabled width:1 height:1 padding:0 text:trace_identity_json() draw_text +: {color:#x0000 text_style:NavRegular{font_size:0.5}}}
 }
 }
-start_timeout(0.1, || { trace_initialize() if trace_enabled {try {ui.trace_identity.set_text(trace_identity_json())} {}} trace_marker() try { ui_viewport = ui.content.rect() } {} render_content() poll_generated() })
+start_timeout(0.1, || { trace_initialize() if trace_enabled {try {ui.trace_identity.set_text(trace_identity_json())} {}} trace_marker() if native_ui_available {ui_viewport = ui.content.rect()} render_content() if native_ui_available {poll_generated()} })

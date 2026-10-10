@@ -14,7 +14,7 @@ path dependencies 不一致，Cargo 拒绝构建。按官方 QUICKSTART 的不�
 arm64、rustc/cargo 1.93.0、Python 3.12.10（以 verification.md 实测为准）。
 构建依赖遵从各自许可证；本仓库的 Apache-2.0 不重新许可外部依赖。
 
-支持 `model.complete` 的本地开发路径另外锁定在 `agent-runtime.lock.json`。
+提供宿主模型服务的本地开发路径锁定在 `agent-runtime.lock.json`；Navigation 使用其中新增的 `model.chat` 覆盖，原有 `model.complete` 保持单次结构化调用。
 它构建官方 OctoSense desktop 的 `app-hub` feature，关闭默认 features；
 不需要构建 Octos 内核、Rinx 或 Terminal。原有 card-host 命令和版本保持独立。
 初次完整编译约十分钟，改应用后的打包、增量编译和链接实测约一分钟。
@@ -30,7 +30,7 @@ make agent-dev
 ```
 
 `agent-bootstrap` 默认在仓库同级 `.octosense-agentic26-host-bridge/` 准备固定源码，
-按定位覆盖、Maps 覆盖、控件接口覆盖及字体文档 gate 覆盖的顺序验证源码树，再使用官方 `tools/setup.py --no-hub` 应用已锁定的运行时补丁并执行 `cargo build --locked`。
+按锁文件验证定位、Maps、控件接口、模型聊天服务及字体文档 gate 覆盖的源码树，再使用官方 `tools/setup.py --no-hub` 应用已锁定的运行时补丁并执行 `cargo build --locked`。
 可用 `AGENTIC26_AGENT_TOOLCHAIN` 指定另一隔离目录。启动器拒绝版本或源码摘要不符，
 不会覆盖旧工具链或个人全局模型配置。
 
@@ -43,17 +43,15 @@ make agent-dev
 
 `agent-init-demo` 明确重置三份互相独立的模拟来源，将模板时间替换为当前东八区时间，
 航班设为两小时后；`agent-dev` 和 `agent-hidden` 保留已编辑的日历与笔记，默认位置模式为 live；`make agent-demo` 明确使用模拟位置，模拟位置过期需重新 `agent-init-demo`。
-私有数据在 `.local-state/agent/`：官方宿主的 `octos/profiles/_main.json` 保留单个 M3 provider，
-兼容 `model.complete` 探针；当前应用通过 stock `net.http_request` 直接调用 M3 和高德。
-仅这个应用的 jail 内 `private-config.json` 提供 `amap_api_key`、`minimax_api_key`、
-`minimax_base_url`、`minimax_model`、`location_mode` 与可选 `didi_mcp_key` 运行时字段。
-目录权限为 0700、这两个文件为 0600；两份配置不进入应用包、Git 或启动参数。
-模型配置固定一个 MiniMax-M3 provider，fallbacks 为空；其它模型配置会被拒绝。
-M3 地址只允许已实测的 `api.minimax.cn` HTTPS 主机、默认或 443 端口和 `/v1` 路径，
-不接受 URL 账号、查询参数或片段；启动器将尾斜杠和显式 443 规范为上述 Base URL。
-应用请求固定 `/v1/chat/completions`，用 Authorization header 传 key，并关闭 thinking；
-应用清单仍须声明这个 HTTPS 主机，应用本身也须核对私有配置中的模型和地址。
-高德、M3和可选滴滴 key 对应用运行时可见，费用、时效及路线是否满足用户条件由应用计算。`DIDI_MCP_KEY` 来自滴滴正式个人MCP账号；启动器写入私有配置并覆盖日志／导出凭据检查，缺省不阻断高德查询。应用仅调用滴滴地点搜索和询价，没有订单接口。
+私有数据在 `.local-state/agent/`：官方宿主的 `octos/profiles/_main.json` 保存单个 MiniMax-M3 provider、地址与密钥，fallbacks 为空；应用 jail 内的 `private-config.json` 只保留高德、可选滴滴 key、位置模式与开发诊断配置，不再提供模型鉴权或选路配置；开发诊断元数据仍记录模型名称。目录为0700，私有文件为0600，均不进入包、Git或启动参数。
+
+应用调用 `host.request("model.chat", ...)`，提交完整 messages、tools、`tool_choice: "auto"` 与关闭 thinking 的参数。宿主返回原始 provider response 和 usage／budget 元数据；应用继续保存 assistant/tool 历史与执行工具。该接口由 `octosense-model-chat.patch` 提供，是待上游接纳的本地扩展；官方 `model.complete` 不支持原生工具调用或历史，不能用 JSON 动作模拟替代。
+
+聊天扩展复用同一 ModelHost、主提供方凭据、HTTP transport、授权和 ledger。它只使用实际 primary，主项未配置或缺 key 时直接失败，不挑选 fallback；当前支持 OpenAI 兼容协议。完整消息不裁剪，不附加 one-shot 的结构化输出提示或 URL 拒绝规则。宿主原有请求大小、HTTP响应和服务等待边界仍适用。取消查询会屏蔽迟到回调，不保证远端HTTP已经中止或停止计费。
+
+开发启动器仅给隔离 Navigation 应用设置每分钟20次、每日100次和100万 tokens 的宿主额度，保留当天已用计数和其它应用设置，不改变宿主默认值。依据是现有实际运行达到每分钟11次、单任务约41万 tokens；默认6次／分钟和10万 tokens／日无法承载该任务。预算仍由宿主准入与计费，应用不能自行上调。模型服务拒绝会结束本轮并呈现具体类别，不暗中改直连或重试。
+
+模型配置仍固定 MiniMax-M3 与 `https://api.minimax.cn/v1`，启动器验证地址、模型与单一主提供方。M3出网和Authorization归宿主；应用manifest只声明高德与滴滴网络主机，并在锁定版本申请model能力。`DIDI_MCP_KEY` 来自正式个人MCP账号，缺省不阻断高德查询；应用仅调用地点搜索与询价，不下单。高德和滴滴key留在应用私有配置，模型key只留在宿主profile。
 本轮撤掉应用自行添加的输入／输出、工具步数、自动阶段和纠正次数上限，直接生成 Splash 界面；宿主和服务端的实际能力及错误以运行结果为准。
 技能包归`bundle/assets/skills/`，每个技能使用独立目录与`SKILL.md`。打包和启动时从frontmatter生成`catalog.json`，按原目录递归复制引用资料到私有jail；初始模型消息只载入名称和描述，正文由`read_skill`按需取得。上游来源、固定revision与文件摘要归[技能锁文件](skills.lock.json)，不在开发启动时下载技能。
 当前应用按独立查询运行，不保存或恢复Trip、用户历史与模型会话，不进行问题澄清。正常live不依赖模拟来源初始化；demo文件只在显式演示模式使用。启动器配置、已打包技能及宿主调试记录不作为业务恢复入口。
@@ -74,6 +72,24 @@ localhost 端口。`.local-state/agent/session.json` 记录 PID、端口、进�
 固定官方宿主已实测 M3 两次回调：先选读文件工具，再回传请求后独立读取的随机 nonce；
 高德真实参数失败与网络策略拒绝均未在 host log、远程 log、snapshot 或 tree 中出现精确 key。
 历史 Navigation 曾完成 M3 七轮约 21 秒、在线公共交通选择、确认保存读回及 stock 重启恢复；该基线没有混合候选；补充真实任务以七轮约 30 秒完成 ¥19／2063 秒的打车接地铁方案确认读回。完整条件、失败状态与源码版本对应关系见任务包，不以模型探针代替业务证据。
+
+## 官方原版首屏与宿主扩展边界
+
+2026-10-10 使用官方 App Hub `7b36c8afc2e4bad9dfa5d77692b6fd453f0b9785` 的未修改 `card-host` 验证首屏。原稿启动时直接调用该宿主未提供的 `ui.content.rect()`，即使外层有 `try` 也会触发 Makepad VM 空栈错误。应用现在先区分已验证的 Navigation 扩展宿主；原版不调用缺失方法，不启动查询或生成区块轮询，而是显示具体能力缺失说明。
+
+这里通过 `AutoNaviMapView` 类型注册识别本项目已验证的扩展组合，不将一个类型的存在当成所有未来宿主的通用能力保证。官方 `card-host` 使用390×844手机视口，既不是Android模式，也不是Android真机。能渲染首屏只证明降级路径成立，不证明它能够定位、查询模型或完成路线规划。
+
+后续与上游对齐应按能力处理已有补丁：
+
+| 能力 | 当前归属与上游对齐边界 |
+| --- | --- |
+| 区块寻址、布局测量、渲染诊断 | `octosense-ui-widget.patch` 与 `makepad-ui-find-rect.patch`；应落在通用 Splash／UI API，应用不凭类型名假设方法可调用。 |
+| 地图视口 | 同一 UI 覆盖提供 `AutoNaviMapView`；相机和手势属于原生控件，高德查询与路线身份留在应用。 |
+| 模型工具调用 | `octosense-model-chat.patch`；作为 model 服务的方法扩展复用宿主凭据、授权和账本，不替换应用的自主工具循环。 |
+| 实时定位 | `octosense-location.patch` 与 App Hub 对应覆盖；需保留权限等待、真实采样时刻和取消语义。 |
+| 字体许可文档 | `app-hub-font-document-gate.patch`；保留完整许可证，不删除许可内容以绕过原版检查。 |
+
+以上仍是仓库内可回放的宿主覆盖；尚未得到维护者合并或官方发行版支持的确认。新增宿主能力不得放入应用 bundle，也不能把本地检查通过表述为官方原版安装兼容。
 
 ## 实时定位宿主补丁
 

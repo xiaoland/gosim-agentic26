@@ -1,0 +1,136 @@
+# 最新 OctoSense 与完整出行验收
+
+状态：2026-10-06，用户要求继续修正，应用与宿主稳定owner并行调查。
+
+用户转达赛事提醒更新最新OctoSense、阅读README了解App Hub提交；并明确“既然完整验收未通过，那就继续开发、修正”。授权必要应用、运行时、工具链与文档修改、隔离升级实验及在线验收。用户23:08进一步明确“授权你自由推送”，要求Android样式演示视频、README和必要App Hub交付，授权本次源码／视频提交推送、固定发布版本及按官方流程提交审核；不自行创建或公开签名私钥。临时模拟定位和充足M3在线验收授权继续有效。
+
+当前应用main d65188d4…／0.13.0已冻结。最后正常在线轮滴滴JSON询价及报价附加已完成，首次渲染因三份来源重读331.798ms超过64ms预算中止。来源投影已改为本次快照，仅继续检查当前定位有效性；主动来源读取不变。12条实际Route回归8项通过，移走资料目录后首次事实构造13.759ms、读取为零，原生Android样式实际显示、compare及定位／Route TTL过期检查均通过。未在此修正后再跑完整模型任务，不宣称完整混合任务通过。
+
+此前14M3正常轮已通过双候选详情、三paths单页与八paths两页、真实PNG、拖动刷新与返回，但无公共交通与打车接驳检索且静态叙述有误。失败块生命周期已按complete状态修正，官方原版安装兼容仍未通过。固定发布源码、视频与Hub审核提交由root收尾。
+
+统一Route定向二十一项通过，来源与真实新旧报价证据见[路线任务](../route-identity/packet.md)。64ms硬预算失败已在da93首render真实复现，此前正常轮没有复现，最终来源重读根因已有针对修复与原生回归，不宣称完整任务通过。最新版官方原版的核心脚本接口与定位仍不齐，隔离寻址补丁通过不等于App Hub可安装。具体证据与已执行修正按下文接续，不能继续以接口检查替代完整验收。
+
+原应用owner接续当前几何目录与正常在线，原宿主owner负责必要的正式封包交接；最新版隔离能力调查已完成有界证据，未整体迁移。预算调查不凭耗尽IP断言全部耗时根因，不提高预算／加看门狗掩盖，不盲缓存全状态，不把模拟位置冒称实时位置。各owner保完整私有请求／响应／工具／DSL／诊断与自有实例清理，只操作本任务实例。
+
+官方最新Hub README与PUBLISHING要求按精确bundle提交：stamp、截图后restamp、check／scan、可选首次签名、公共repo的tag与完整SHA，然后在Hub开Submit issue；已登记签名key后更新必须同key。catalog／index／artifacts由维护者publish，不由应用repo直接修改。流程核对归现有长期来源与toolchain操作文档，不重写产品README为操作手册。
+
+提交兼容是必要判别：bundle不含nativecode，需要新原生运行时代码须纳入shell release。当前location／AutoNaviMapView／动态查找与diagnostics／字体gate有本地覆盖，必须与最新stock逐项核，不能只在patchedhost验收后宣称最新AppHub可安装。尚未确定升级选择或正式可提交能力；证据原始材料归ignored build/research/runtime-upgrade/。
+
+实际官方源码main OctoSense4081c30e…／Hub78dfda5f…，Makepad basec155f61…／reviewedtreeb93c3353…。隔离bare clones保存，旧工具链不动。latest仍64ms脚本wall预算，Image没有AutoNaviMapView、Splash无diagnostics、异步ui无自维护find／rect；shell未注册本地LocationService／maps_pick。预算异常位置不能单独证明fs占全部耗时。应用薄位置回调仅两短检查，前序network body parse等也计入入口，owner做有界测量而非继续旧host盲加缓存。
+
+采用advisor的交付判断：优先latest stock最小能力闭环实验（动态Splash、控件寻址／事件、详情、定位、地图真实拖动缩放刷新），保持patchedhost对照但不计AppHub安装验收。开发diagnostics缺失与核心业务能力分别判断；不能直接把一张静态图当已满足交互地图。已验证替代可在用户本轮授权内实现与锁定。若核心原语只能由newnative提供，先准备最小上游补丁与本地证据，再呈用户等待官方发布或调整范围的具体决定；外部PR与应用提交的授权分别处理，合并不等于已发布可安装。
+
+能力调查修正：普通View／Image未导出手势不能推出stock不可实现地图；latest GestureView明确有on_pan／on_pinch，Image有image_pan／image_scale及async bytes，正在release tag desktop-v0.1.0-beta.1（peeled4a54177…）构建thin原型。stock sys.gps为已授权lastknown／poll fix，不等于本地host.location.get一次采样语义，Mac运行另核。
+
+预算根因判别：同VM with_script_vm_id→with_vm，以及HTTP response→install→stdnet callback→call路径未必建立fresh预算，不能坚持“每入口一定fresh”。隔离诊断仅记录数值age／parse／城市／FS耗时，禁止payload／路径／key，预算不改。公开合成城市响应在fresh timer下parse与完整校验0／2KiB／16KiB约0.803／0.160／0.323ms，十检查通过（jea6d0go，自有关闭），只能证明薄业务无需盲缓存；首次fixture在自己生成padding循环超时不作为应用因果证据。等待HTTP入口budgetage与阻塞对照。
+
+官方release4a54177原生构建成功，无本地runtime overlay；thin实际显示两个Splash并set_text更新，父ui.first.state.text跨子VM读取成功，GestureView真实鼠标down／move／up产生三pan回调，sys.gps为无样本0。安全报告stock-run/result-safe.json，自有关闭；负向缺方法调用触发empty-stack污染后续报告，正向拆开重测，不以此误判动态UI缺失。children／pinch／新viewport图像仍待实测。
+
+诊断版真实公开HTTP主Maps VM on_response入口run_budget=None，转值约0.060ms／退出0.118ms；fixture误用array.from_bytes未完成城市刻度（产品原用to_string），不作为应用错误。主VM无budget不能推出Navigation子VM相同，下一步用相同公开HTTPSJSON移入子Splash测with_isolate预算。诊断与stock实例均独立，自有清理，正式旧工具链未动。
+
+子Splash真实公开HTTP三样本入口也均run_budget=None，转值0.016–0.067ms、调用退出0.052–0.163ms；ui.marker.set_text异步让步后解析与正则均不到0.3ms，city_ok均成立，budget-run/result-safe.json，自有关闭。这不支持直接HTTP继承过期预算的假设，不能据此前静态源码推断去改边界。实际故障可能在随后queued续执行或同步FS墙钟，尚未定位。
+
+采用下一判别实验：在数值诊断构建中加载准确8a299应用包，正常入口跑一次显式demo＋在线M3／交通，保全trace并关联入口／续执行／FS耗时，禁止手工工具推进或补生成稿。诊断host仍有本地覆盖，不能计官方安装验收；若本轮正常结束则实际检查详情与地图，否则按实际时间链定位必要修复，不再用更多薄fixture代替根因。
+
+该轮诊断binary963bfab7…已正常越过定位并取得11条Route；首次区块出现实际DSL语法错误，正在由同一Agent循环收到诊断后自行修改。尚未完成，不能计完整验收。当前HTTP入口预算均None，响应初段最高约20.29ms，同步FS约16.86ms，首次父／子wrapper约28–42.5ms；没有hardhit。同步FS占墙钟已实测，但不是单独根因证明，旧失败仍未复现。
+
+stock动态寻址仍是独立必要判别：固定具名跨子VM读取可行，而运行时字符串UIhandle括号读取实际触发empty-stack。现有安装依赖generated_area.child(index).child(0)，children替代尚未实证。固定map_state通道只在已经取得区块handle后成立，不能掩盖该前置缺口；不加入固定槽位上限或文件IPC。GestureView内普通View与Image的真实地图刷新薄实验继续，手势回调成功不等于新视口像素成功。
+
+最新Hub文本gate仍扫描普通txt／md中的URL，完整字体OFL与来源README因此存在独立准入障碍。保留原许可证，不通过删除许可或沿用patchedgate来声称官方可安装；需在实际stock结果之后准备最小可审阅的兼容解决方案。
+
+诊断在线轮已正常结束，5区块语法错误通过同一Agent下一轮修到diagnostic0，generated／rendered为true，无hard64；但点击公交详情未显示。实际工具省略id时创建route_detail，列表复制技能示例发送show_block到details，不存在目标被父层静默忽略。view_route成功，隐藏详情收到facts并注册地图，但未显示所以没有camera／图片请求。这是默认ID契约与示例不一致的已定位缺陷，不是地图网络失败。授权范围内由原应用owner统一工具默认ID说明与技能示例，未知目标返回真实本地错误，不加alias或手改当前生成稿；修后定向行为回归及正常在线详情／地图验收。
+
+上述在线轮两候选实际点击后自有实例已关闭，结果与完整trace位于e2e/demo-diagnostic/。补充数值诊断：一个同步FS调用64.557ms、同wrapper65.052ms，但hardhit仍0；不能以此将未复现的旧定位失败归因，正在以现有日志判别调用类别，避免把诊断自身阻塞当产品原因。
+
+现有FS hook只有elapsed，没有op／caller，无法从已留日志确认该峰是append还是read。两次FS（64.557／0.373ms）的形态与trace_emit独立timer的append→status.write吻合，但仅为推断；不改预算，也不为此盲采样。详情窄修已经落地：全部区块工具说明与id schema明确默认真实ID，未知show_block目标调用来源区块block_error，技能主例用route_detail、详情返回用block_id。原应用owner进行默认创建／点击／返回／未知目标的定向检查，不重复整套Route测试。
+
+stock-map-run首个实际像素检查失败：HTTP200、手势回调成立，但before／after均为空白，尚无PNG decode证据。frames计数只是提交加载，request代际淘汰也已观察；宿主owner继续核隔离fixture重绘后的Image实例保留，先等首帧再拖动，不增加地图样本、不冒称通过。
+
+独立children判别完成：在三个HTTP回调之后单独调用ui.gesture.canvas.children()，native明确报widget method children not found，before-call文件存在、after-call不存在。Rust trait forwarding不等于脚本导出，不能以children()[index]替代现有child安装路径。advisor据已有证据判断是否值得一个纯DSL寻址判别，否则直接整理必要runtime差异供上游集成审阅，不遍历更多未实现API。
+
+地图空白的供应商语义继续核对：未出现对应尺寸PNG decode，先前“HTTP返回PNG”的解释不足，正在用响应头与前四字节区分HTTP200 JSON错误／body类型／重绘问题。请求／frames计数仍不算图片成功，安全报告不能含带key的请求URL。
+
+地图空白已定位为隔离fixture请求错误：HTTP200 body56B、magic[123,34,115,116]，实际JSON status0／infocode20003／UNKNOWN_ERROR，没有PNG。fixture paths多了逗号且未复用产品url_encode；宿主owner对齐产品已成功格式及编码，再检查当前一张新视口图片。不能据该fixture推断产品Image或stock纹理故障。
+
+采用advisor判断：区块缺口是runtime实例身份，不是通信格式。无具体源码证据的纯DSL候选，停止继续寻址试探；拆既有find／rect patch中的必要child(index)／find(name)在latest release隔离集成，保持区块架构与无数量上限。用动态追加／独立更新／替换一块保持其它输入状态／隐藏详情打开返回不串facts的最小证据关闭此缺口。地图、定位、diagnostics各自按实证必要性处理，不把全部覆盖一概认定必要。本地补丁不等于stock App Hub可安装，外部PR和发布另需授权。
+
+默认详情修正定向11项通过（navigation-harness-5b1dwj29，自有关闭，合成图非在线）：真实render_tool_params创建默认routes／route_detail、按钮打开、事实更新、返回保留滚动及未知目标本地错误。main冻结7ac6b9f5…、UI技能79bcdd38…，交宿主owner重嵌后正常在线验证；此次未重复整套Route测试。
+
+诊断轮业务缺口同样有实证：11条直查Route的assessment均未通过，模型未探索接驳或滴滴，但静态文案称唯一40分钟方案／稳妥选项。在线重启前据此只补query／compare描述与navigation-data已有语义段：直查只说明已查范围，依据真实legs／completion／当前assessment解释，耗时单值不保证准时；按目标缺口探索真实接驳与可用供应商报价，不规定顺序或必调工具。最终maind8d9fe18…、data7bfe396a…／UI79bcdd38…冻结，说明修改不重复控制行为测试，须以随后正常在线探索／展示结果验收。
+
+正确参数stock地图薄原型实际像素已通过：before真实深圳底图／蓝折线／标记，拖动100px标记随预览移动，释放后frame2补全新区域，zoom12→13的frame3显示新街区PNG。owner查看四图，primary查看after-zoom；stock-map-run安全报告与四张截图保存，官方release4a541777…／Makepad官方tree3eadf628…，无本地native覆盖。此为桌面fixture，不计Android或Navigation完整验收，pinch未实触；拖动中旧图越界有sampler条带，使用现成Image透明边界参数局部验证，不新增shader。地图原语可用不解决动态区块寻址缺口。
+
+最终d8d9正常在线轮已启动，诊断binary9ced438d…／actualruntime bd9f4e46…／sources60cfe751…，专用metadata不改旧锁或全局build.json。实际mount31文件及23skills逐字节一致、原句与demo定位明确，无手工工具或DSL注入。当前同轮已得到滴滴20元报价，extend原taxi route1_16以步行补终点得到route1_17（32元），attach leg:route1_16与quote18派生route1_18（20元、derived_from1_17）；get_route原1_17仍32元。派生保持连接unknown／full_journey_amount=nil，不以询价提升可行性。尚未完整生成与点击，不能计最终界面或公共交通接驳通过。
+
+该轮15个M3步骤正常结束、无hard64。实际route16默认详情打开并绑定地图，真实PNG已查看，拖动产生新camera request3→HTTP200→新PNG并加载，返回正确。但原17／新18按钮rect0不可见：render_routes.source额外闭括号净-5、29行起负depth，逃出父block_source拼接wrapper，被解析为另层结构却diagnostics0。保留原body与完整wrapper／rect／零诊断证据，不手补稿当通过；完整多方案查看仍失败。比较输出没有best／rank字段，全部passed0，新18等待／连接／deadline未知，因此文案“最优”不由代码保证。另kind_label将所有mixed固定称打车＋公共交通，使taxi＋walk标签错误，已授权按真实legs窄修。
+
+源码边界问题由原应用owner接续稳定advisor判断native完整source／EOF或独立fragment编译诊断；保持任意DSL，不新增业务UI校验器／机械regex限制。primary唤醒advisor遇threadlimit，应用owner的既有子advisor已成功接续，不创建新owner或重复调查。
+
+latest release最小寻址补丁本地隔离5项通过：动态child取得区块并更新、追加保已有输入、同名子state独立、替换B保A输入、隐藏详情打开返回保持输入／facts。native错误0、自有关闭，桌面fixture无M3／交通，不计Android完整应用。minimal-addressing.patch（72d8e0b4…）仅widget_async.rs的child／find，50增21删；release4a541777…＋官方tree3eadf628…，不含rect／diagnostics／map／location／font／budget修改，正式锁与旧工具链不动。stock-target现带此本地patch不再叫原版；原版地图binary另保留。原版地图UV越界透明参数已局部验证。
+
+宿主owner完整消费调查：旧parser parse／parse_streaming循环均在state提前空时结束，未报剩余token；streaming还自动闭合开放结构。Splash eval_streaming只将实际parse_errors交diagnostic sink。validate_splash_body仍采用流式路径，不是严格fragment入口。当前失败可能既有wrapper逃逸也有提前消费结束，不能只对拼后的整稿加EOF检查，因为合法逃逸仍可改变结构；待advisor选定独立片段完整编译语义，不改全局流式容错。
+
+提交兼容当前结论：release的动态Splash／固定名getter与基础地图原语可用；任意区块child／find已用最小本地patch补足但未发布；rect可否用布局重组替代尚未产品验证；诊断与严格片段编译缺口需按实际失败修；实时location样本时间／request／cancel仍缺，不能用sys.gps读取时刻代替采样时刻；maps.pick未使用无需迁；完整字体许可的Hub gate问题独立。没有依据提高64ms预算或移植全部旧覆盖，正式锁暂不改。证据含stock-map-run／stock-addressing-run／diagnostic-final-package-safe报告。
+
+kind_label窄修已通过现有mixed组11检查（navigation-harness-1bj454pi，自有关闭）：完整Route事实边界展示真实legs.mode去重顺序，打车＋步行不再称公共交通，打车＋公共交通仍对应真实方式。taxi统一称打车，估价／报价归费用依据，不混入方式标签。金额／assessment内核未改，待fragment修后合并冻结，不单独重复模型采样。
+
+独立fragment诊断接续：primary已成功唤醒原native owner负责既有tokenizer／parser的最小入口、runtime patch与包交接；原应用owner负责render调用与回执并接续其稳定advisor。拟在clear_generated／旧区块set_text空／revision变更之前编译提交片段，语法失败返回原生位置错误供同一Agent修稿，保已有正确稿。接口与必要结构判据待实际源码确定，不自写regex或改全局streaming，不新增业务UI规则。
+
+采纳advisor后的确定方案为ui.validate_fragment(source)->string，复用Makepad既有tokenizer检查EOF词法状态与完整token delimiter配对。它是安装片段的原生结构诊断，不执行用户代码、不创建preview VM，不做业务UI判定；拼前失败走原render工具回执，保旧稿。正常挂载原有诊断仍保留。合法fragment依赖父注入facts／bridge，不能当独立应用eval；全局parse提前结束尾token消费是另问题，本次不宣称修复。原生owner与应用owner各持稳定职责开始实施，不再模型盲采样。
+
+应用调用点已接入，待原生配套稿38e0cf12…不得用旧宿主验收。document／批量片段在破坏动作前检查，失败保持原revision／source／maps并返回含blockid的错误。准备真实69行坏body与合法事实绑定的四项回归，不访问供应商；空诊断仅说明词法收尾与token结构完整，不证明完整语法或运行成功。
+
+d8d9完整在线轮数值hook收尾：840次同步FS合计641.968ms、单次峰21.027ms、hardhit0，budget-safe保存。该轮机械阻断是fragment逃壳，不是旧64ms失败重现；不能将这一轮正常结束当间歇故障根因修复。
+
+原生片段接口11个公开结构case通过，真实坏BODY报fragment:29:6: unexpected closing }，fragment-structure-result-safe与477ed0c6…可审阅补丁保存。应用四项定向通过（navigation-harness-pa6nx1kp，自有关闭）：真实坏片段／批量保旧／错误整稿保旧／正常facts绑定。main冻结38e0cf12…；接口空串仅说明结构完整，后续原diagnostics仍负责语法／运行错误。
+
+修复已经纳入正式开发工具链：复用ui overlay两patch与lock维护，原上游revision不变，仅必要fragment原语，不移植latest寻址实验或数值budgethooks；Makepad tree175dfa2f…／hosttree04c69c83…，verify_source通过，check／formalbuild／doctor进行中。下一唯一正常在线采用formal最终binary与metadata，应用自身完整trace足够，不再额外编数值诊断包。当前latest官方原版仍无新增原语，不能混淆正式本地开发工具链与App Hub发布兼容。
+
+38e0正式封装check／build／doctor通过：binary9e3f9e3e…／sourcee443bea9…／runtime79634a1a…，31包文件与23skill一致、decoded bundle7,632,443B。唯一正常Android样式demo在线轮11次M3正常结束，五块首稿均diag0，无hard64。滴滴23元附到原32元路线得新route1_7，原1_6金额独立；全部assessment仍未通过，末端／连接／候车未知。真实23元详情、PNG、拖动新camera请求／新PNG、返回已查看；列表的报价与公交按钮均实际可见，不再结构逃壳。
+
+第二公交按钮选中route1_2，父facts已转，生成共用详情却硬写detail_id=route1_7，describe与map target仍取首条报价，因此文案／地图没有切换。完整trace／detail-body／父facts／interaction-safe均保存，自有已关闭，fullE2E=false。原生诊断0不应被当作业务绑定正确，不新增业务validator。appowner获授权仅补render_route_detail说明：共用块由当前snapshot.viewed_route_id同时取文案与地图；独立静态候选页仍合法，但必须不同id且列表对应打开。view_route只改事实，不替DSL切内容。原框架事实与动态例已定向通过，不重复测试组，下一同源formal封包后正常在线双候选检验。原native owner已成功接续封包，无新的runtime修改或诊断构建。
+
+描述窄修最终main02312eec…正式check／build／doctor通过，source474a871e…／runtime284b535a…／binaryf48aaea8…，31stage／embed及23skills一致；本次宿主owner未另开安装实例，下一原句Android样式demo在线driver统一核actualmountedbytes。该轮已由原应用owner启动，保持真实M3／交通，不注入生成稿，不再重复原生回归，重点双候选文字／地图绑定。
+
+02312同轮截至12次M3已真实get11→extend步行补终点12→滴滴23元attach派生13，实际legs为打车＋步行，原32元与新小计23元独立，连接／候车未知及全程金额nil保留，不冒称公交接驳。首次UI稿发生正常原生语法错误Expected expression after，错误已进同一循环，模型正在自行修稿，无hard64／人工补稿。尚未结束，不计最终交互通过。
+
+该轮14次M3自行修完五块后正常结束，原生语法回执闭环成立。两候选真实选择正确：quote13打车＋步行／已查段23元／约27min，公交2为5元／41min并说明超期，父viewed_id、文字与map target均随选择变化；默认详情、返回正常。没有强制交付可行，连接／候车未知保留。地图两目标均HTTP200返回20003 JSON而非PNG，完整地图仍失败，自有已关闭。
+
+map-count-safe实证quote13六条独立paths（点数10／79／79／4／2／8），公交2七条（2／56／2／6／41／5／13），两绑定path_indices=nil。model两次读native-ui明确每图最多4，但只读取旧route11的三条目录，新组合13与公交2的map_paths惰性nil，生成稿没有取得当前目标目录／分图。一次受控供应商诊断保持原quote13其它参数，仅六条换前四条，HTTP200返回真实PNG且已查看；首次Python TLS信任失败未达HTTP，使用既有certifi后仅一次实际HTTP。未注入UI，不将诊断样本算正常地图通过。路径数是明确因果，不再provider盲采样。
+
+下一窄修沿原owner：复用get_route与lazy cache，在短输出／相关工具描述明确目录未读状态、nil不能推断不超过4、当前Route目录读取与每图4条能力；延长改变几何时旧目录不能当新目录，同源报价几何仍可复用。render_route_detail直接说明path_indices按实际目标目录，多张独立命名地图的选择合计覆盖全部真实路径，张数／布局仍由Agent决定。不自动截断／分图／补连接，不eager解析全部Routes，不增业务validator或固定序列；修后一次formal封包与正常双候选地图验收。
+
+目录窄修已落实：map_metadata仅catalog_status／path_count／max_paths_per_image，canonical owner内部；未读不等于0，quote同源目录复用且公开事实仍新Route ID，extend不冒用旧目录。selected_map_geometry取得真实几何时一次缓存目录，不重复raw解析。三项原生边界通过（navigation-harness-lcxw2e13，自有关闭，无外服务），已并入既有mixed组。main92ec1d73…／UI技能25388b47…冻结，formal check／build／doctor通过，sourcecb9d108d…／runtime7fe3c276…／binary8ff38690…、31embed／23skill一致。宿主owner未另启动，下一正常driver统一核actualmount。
+
+92ec轮十次M3正常结束，五块首稿diag0，无hard64；model实际读取原11三条目录和公交5五条目录，quote28派生13复用三条。报价13已查段28元／24min真实PNG、拖动新PNG与返回通过；公交5正确显示15元／42min超期及当前数据过期，map target同5，却未用path_indices、全五条仍20003。目录ready／count5／max4已进入model历史，不能再说信息未给。主例对单候选直接全路线单图，与后面的限制相冲突，被泛化复制；保完整trace、interaction-safe并自有关闭，fullE2E=false。
+
+advisor机制判断采纳A：用单命名Map＋Agent DSL本地分段翻页更新可运行主例，页数由真实目录决定，无固定两页上限；view_route只按需计算当前目录再推facts，复用get_route缓存，无网络／全候选eager／业务分组。其他多Map布局仍自由，不规定分页为产品模板。B本地矢量overlay是可考虑的原语抽象，但当前涉及投影／裁剪／相机／native绘制及stock交付范围扩大；C不能凭隐藏未请求地图预知迟到错误，不加第二回执／自动唤醒／preview VM。
+
+A由原应用／UI owners实施：先九路径第三页→切三路径的target／indices／返回原生回归，再唯一正常双候选每页真实PNG和至少一页drag。若仍忽略已运行主例，停止纯措辞采样，进入B具体设计判断；不加自动截断／组图保底或工作流。无需新runtime原语／锁变更。
+
+A实际主例直接抽取运行，Android样式五项通过（navigation-harness-_92wz_tp，自有关闭，无服务）：九路径页1[0..3]／页2[4..7]／页3[8]，普通facts更新不增load，切三路径重置[0,1,2]／单页Next不越界，返回保输入。首次fixture缺geometry_ref已仅修夹具，不算产品错误。main只在view_route当前目标读取目录，技能示例分页不是产品强制UI；工具说明仍允许多个独立Map。main3a9385c1…／skillba1d3a29…冻结，formal check／build／doctor及31embed／23skill一致，source371e6fec…／runtime0c374529…／binary364008b5…。原应用owner已启动正常demo-map-paging，driver核actualmount、原句与Android样式，不使用诊断host或服务回放。
+
+3a938唯一正常在线收尾：12次M3、五块首稿diag0，详情已自行生成单Map与path_indices上一段／下一段分页。两个实际候选按钮均发送show_block routes（误用当前来源block_id），分别随后正确view_route报价12／公交2，详情overlay仍隐藏且map_requests=0。safe证据为build/research/runtime-upgrade/e2e/demo-map-paging/interaction-safe.json及route-identity-safe.json，完整trace与DSL私有保存；两截图已由owner查看、自有实例关闭。没有人工注入动作，full_e2e_passed=false。既有低层主例确已分别列出literal route_detail打开与block_id返回，因此下一修复不能继续宣称缺示例或重复措辞采样；原应用owner接续既有advisor判断来源／目标身份原语歧义的最小改动。
+
+采用advisor的通用本地导航函数：show_block(target_id)打开明确目标、hide_self()不需模型填写来源身份；原raw事件处理保留，bridge内部改source_block_id/source_block_revision，不注入旧裸block_id变量。权威例SHA f03d8f29…，main da93de1a…。定向6检查见build/smoke/navigation-harness-06so4rl2/report.json；root按既有make check→agent-build→agent-doctor封包通过，source62daed48…／binary096b59a9…，无runtime源码变化。原应用owner唯一正常Android样式demo-block-handles核实际31mount后运行真实M3／高德／滴滴；root未启动额外实例、未改冻结bundle。gate同时发现listing发布者／支持／隐私URL占位与旧release_notes，待本轮后按真实事实更新再盖摘要，未授权外部发布。
+
+da93正常在线新失败：10M3第10响应HTTP200完整toolcalls，render_summary seq191被派发，却没有tool结果／子Splash eval／render_result；父VM报script time budget exceeded IP103。模型响应已返回，因此不是请求pending或模型漏生成。IP位于route_reasons函数结束，只是耗尽位置，不足以定根因。原应用owner保完整trace与首render事实规模，先接续既有advisor选择复用数值诊断、真实事实离线重放或最小分段测量；禁止提高预算／看门狗／盲缓存全状态／再请求供应商掩盖。入口函数六项回归通过不等于本轮完整验收通过。
+
+首render离线分段基线：正式binary、7Route／42segments真实投影代理（非原heap逐字节），sources_current0.276ms／三read0.199ms，逐Route facts合4.40ms（35次reasons），剩余facts0.641ms，JSON0.428ms，首次mount共6.586ms、stage6无hard且child正常；safe build/smoke/navigation-harness-y0cb472g/report.json，自有关闭。因此不采用盲assessment／来源cache，不把重复计算次数当超时原因。advisor采用下一必要正常轮轻量内存阶段与预排独立取证timer，先短probe确认hard后timer仍运行；不在被测entry写取证FS，成功／hard后小report与分Route私有after-attempt heap，标cache冷热且不含key/config。仅取证、不替业务续跑；nativebudget age仍不可观测，若阶段不足解释实际hard才加最小数值nativehook，不凭应用elapsed宣称fresh。
+
+首render取证稿冻结5fc19a90…，权威技能仍f03d8f29…；只有trace启用的首render记录内存阶段，原64ms预算不变，事后独立timer标after-attempt／cache冷热／nativeage未观测，不业务恢复。一次同7Route42segment代理实测阶段完整至mount_returned，context／七Route dump_complete=true，safe build/smoke/navigation-harness-xpvu_6d2/report.json、自有关闭；runner配置／初始化错误已修fixture，不冒充产品错误。root现正式check/build/doctor通过，stamp b873e2b3…／sourcee694a309…／binarybd987031…；listing占位与旧行为说明已按当前真实边界修订，支持Issues、隐私归toolchain既有说明，未签名／发布。下一唯一真实正常Android样式demo由原应用owner核actualmount后取证；当前未宣称根因或完整E2E修复。
+
+5fc19唯一正常demo-first-render-evidence已结束14M3，JSX／font_size／frozenvec三稿均在同loop真实自修，最终五块diag0。首render真实10.485ms未hard；context与七Route私有文件逐个存在／JSON完整／ID唯一，after-attempt／nativeage未观测标识保留。报价原6 33元→派生7 28元，full_journey_amount=nil、duration1505s独立；实际详情三paths单页、PNG及drag新request3／新PNG通过。公交5八paths分[0..3]与[4..7]两页真实PNG完整覆盖，双返回保列表位置／文案／目标；owner已查看，root也实际查看transit-page1.png。safe interaction-safe／snapshot-safe／first-render-safe归e2e/demo-first-render-evidence，自有关闭、最终trace export成功。机械交互通过不等于完整业务通过：静态打车称符合时效但deadline_status未知；公交称全部超过原始40min但最快35min，详情真实reason含当前期限超限／已过期；首失败__document残余混入最终五块；本轮无extend，不能称混合接驳验证。稳定owner继续失败块生命周期窄修判断及模型技能／工具语义调查；区分剩余deadline、候车／连接未知与TTL失效，不加业务validator／固定workflow，不提高预算或虚构总体通过。
+
+失败区块生命周期已按advisor窄修：实际显示须本revision显示意图与complete成功锁存同时成立，安装／show／声明visible／overlay遮挡统一；首次失败部分树隐藏，成功后局部错误／其它成功块保留，不回滚已销毁旧修订。render回执含complete／visible（实际显示），原生诊断仍保留。七边界实际通过见build/smoke/navigation-harness-uymgp761/report.json、自有关闭。语义调查确认navigation/native技能完整进入后续modelmessages，首次query有38真实new_nodes，不是缺信息；工具描述把new_nodes可直接extend.to_ref、origin种子到中转再换mode延长明确，skill区分直达超限与未查混合、passed与各unknown状态，系统分类仅一短句、不强流程或模板。收到到finish156.442s、最早源龄146s未过TTL，quote看时235s仍新鲜，公交看时329s已过TTL且剩2060s<该2099s，详情reason正确、静态全部超40仍错，算法／TTL未修改。最终main20a9…／navigation skill9be4cb6b…／nativeUI f03d8f29…正式check/build/doctor通过，source392840b0…／binarya2efb937…；下一唯一正常Android/demo语义＋生命周期由原owner执行，不重复已过全部套件或供应商回放。
+
+23:08用户交付授权改变优先级：无时间人工验收，授权自由推送、制作Android样式视频并更新README、按官方说明必要AppHub交付。视频已制作96.45s／1080p／H264 AAC／2.5MB，实际旧已通过14M3场景截图剪辑、中文旁白、八镜头、字幕；root查看contact sheet及两张地图实际截图，声音／完整decode由视频owner验证；明确demo位置／日历／笔记、真实服务、非真机、条件结果，不虚称混合已测或最新稿全面通过。媒体归demo/，不放bundle；包截图改为实际两页地图并重新stamp。20a9正常语义轮7M3／17toolcall16return后quote未完成、无render／extend，独立trace timer在line.to_bytes().len耗预算并缺seq144；不能归因业务回调硬停。最终c8d192d6仅机械补日志nativeUTF8 len（三VM checks）与Didi非streaming Accept:application/json，真实HTTP200JSON0.589s及实际应用七车型回调通过；无新模型整轮，不宣称此前pending已完整重演或混合任务完成。所有自有实例关闭。公开参赛交付指南目前允许公开源码与可运行宿主扩展材料，不要求等待Hub上架；外部维护者录入／评奖不由本机预检证明。
+
+最终初赛源码封包：mainc8d192d6…／sourcee52165cd…／binary51087e50…，包摘要cdce323e…；两真实分页截图32文件已重盖摘要，check（含最新catalog continuity）／build／doctor通过。hub scan生成七题review packet，不冒称外部reviewer通过；原始packet仍ignored build。公开demo含96s视频／SRT／旁白／真实核验JSON／完整本地gate输出，无私有rawtrace。待提交51文件凭据原值／编码值扫描0匹配，不含.env／build／.local-state。源码含已完成技能标准化作为运行依赖，保持侧改动。用户新授权下开始当前源码与媒体commit／push及固定版本交付；外部Hub仍需维护者人工审查。
+
+
+最终来源投影修复证据：build/research/runtime-upgrade/source-projection-final-safe.json；8项回归见build/smoke/navigation-harness-o_c7si8o/report.json。所有自有实例已关闭。
+
+最终封包check／build／doctor通过：source a9645a7588e0ddcb89c5940dcbd2c494d4eded13cb6713bba585ee528f00577b，binary 0daef8b826b0284b5afaf6a3f6db6d7f2082037cd4ffc2cdcb082f3861a1d906，bundle 3579572593d669ab4a2d9b05904750471cd4b173b9370d139ed1dd08c94a8619。最新catalog continuity check通过，scan七题完成作者自评，不冒称独立review。公开最终来源投影回归已脱除私有路径，归demo/source-projection-check.json。
+
+2026-10-06 23:42交付完成：main公开推送，v0.13.0固定702ea6cfca8240e6c3222b8dc5f375b8ca009866；Release非draft公开8附件，源码包与96s视频上传成功。App Hub issue116已实际创建，七题作者自评、完整本地gate、unsigned及官方兼容未通过明确列出。README补公开入口；维护者审核／商店录入尚未完成，不冒称成功验收。

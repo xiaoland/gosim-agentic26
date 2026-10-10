@@ -1,0 +1,237 @@
+diff --git a/apps/ai-providers/host-service/src/complete/chat.rs b/apps/ai-providers/host-service/src/complete/chat.rs
+new file mode 100644
+index 0000000..dffe993
+--- /dev/null
++++ b/apps/ai-providers/host-service/src/complete/chat.rs
+@@ -0,0 +1,105 @@
++//! Native function-calling transport. The app owns its transient conversation
++//! and tool execution; the host owns the primary provider, key and shared budget.
++use super::{Code, ModelHost, Refusal, Refused, Usage};
++use crate::model::{effective_api_type, effective_base_url, effective_model};
++use octosense_llm_config::ApiType;
++use serde_json::{json, Value};
++
++fn bad(message: &str) -> Refusal { Refusal::new(Code::BadRequest, message) }
++
++fn function(call: &Value) -> bool {
++    call["id"].as_str().is_some_and(|s| !s.is_empty())
++        && call["type"] == "function"
++        && call["function"]["name"].as_str().is_some_and(|s| !s.is_empty())
++        && call["function"]["arguments"].is_string()
++}
++
++fn check(args: &Value) -> Result<(), Refusal> {
++    let object = args.as_object().ok_or_else(|| bad("chat arguments must be an object"))?;
++    if object.keys().any(|k| !["messages", "tools", "tool_choice", "thinking"].contains(&k.as_str())) {
++        return Err(bad("chat takes only messages, tools, tool_choice and thinking"));
++    }
++    let messages = args["messages"].as_array().filter(|m| !m.is_empty()).ok_or_else(|| bad("messages must be a nonempty array"))?;
++    for message in messages {
++        let role = message["role"].as_str().unwrap_or("");
++        if !["system", "user", "assistant", "tool"].contains(&role)
++            || !(message["content"].is_string() || (role == "assistant" && message["content"].is_null())) {
++            return Err(bad("each message needs a supported role and text content"));
++        }
++        if role == "tool" && !message["tool_call_id"].as_str().is_some_and(|s| !s.is_empty()) {
++            return Err(bad("a tool result needs its tool_call_id"));
++        }
++        if let Some(calls) = message.get("tool_calls") {
++            if role != "assistant" || !calls.as_array().is_some_and(|c| c.iter().all(function)) {
++                return Err(bad("assistant tool_calls must contain native function calls"));
++            }
++        }
++    }
++    let tools = args["tools"].as_array().ok_or_else(|| bad("tools must be an array"))?;
++    for tool in tools {
++        let f = &tool["function"];
++        if tool["type"] != "function" || !f["name"].as_str().is_some_and(|s| !s.is_empty()) || !f["parameters"].is_object() {
++            return Err(bad("each tool needs a function name and parameter schema"));
++        }
++    }
++    if args["tool_choice"] != "auto" || args["thinking"] != json!({"type":"disabled"}) {
++        return Err(bad("chat requires tool_choice auto and thinking disabled"));
++    }
++    Ok(())
++}
++
++impl ModelHost {
++    /// One native OpenAI-compatible function-call step, without JSON-output
++    /// prompting, fallback, retries or conversation persistence.
++    pub fn chat(&self, app: &str, args: &Value) -> Result<Value, Refusal> {
++        check(args)?;
++        let candidate = self.providers.as_ref()
++            .ok_or_else(|| Refusal::new(Code::NoProvider, "No primary AI provider is set up."))?
++            .primary().map_err(|e| Refusal { detail: Some(e), ..Refusal::new(Code::NoProvider, "The primary AI provider could not be read.") })?
++            .ok_or_else(|| Refusal::new(Code::NoProvider, "No primary AI provider is set up."))?;
++        let provider = &candidate.provider;
++        if crate::model::key_required(&provider.family) && candidate.key.is_none() {
++            return Err(Refusal::new(Code::NoProvider, "The primary AI provider has no usable key."));
++        }
++        if effective_api_type(provider) != ApiType::OpenAi {
++            return Err(bad("chat requires an OpenAI-compatible primary provider"));
++        }
++        let base = effective_base_url(provider).ok_or_else(|| bad("the primary provider needs an endpoint"))?;
++        if !base.starts_with("https://") { return Err(bad("chat requires an HTTPS provider endpoint")); }
++        let model = effective_model(provider).ok_or_else(|| bad("the primary provider needs a model"))?;
++        let mut body = args.clone();
++        body["model"] = json!(model);
++        body["stream"] = json!(false);
++        let serialized = body.to_string();
++        let admitted = self.ledger.lock().unwrap().admit(app, (self.clock)(), (serialized.len() / 3) as u64);
++        if let Err(refused) = admitted {
++            let budget = self.budget(app);
++            return Err(match refused {
++                Refused::Rate { retry_after_s } => Refusal::new(Code::Rate, format!("This app may make {} model calls a minute; try again in {retry_after_s} s.", budget.per_minute)),
++                Refused::Calls => Refusal::new(Code::Budget, format!("This app used its {} model calls for today.", budget.calls_per_day)),
++                Refused::Tokens => Refusal::new(Code::Budget, "This call would pass the app's daily token budget."),
++            });
++        }
++        let failure = |detail: String| Refusal { detail: Some(detail), ..Refusal::new(Code::Provider, "The primary AI provider did not complete the request.") };
++        let key = candidate.key.as_deref();
++        let prepared = super::wire::prepare(provider, key, "", "").map_err(|e| bad(&e))?;
++        let (status, raw) = self.transport.post(&prepared.url, &prepared.headers, &serialized)
++            .map_err(|e| failure(crate::probe::describe_error(&e, key)))?;
++        if let Some(error) = crate::probe::describe_response(status, &raw, key) { return Err(failure(error)); }
++        let response: Value = serde_json::from_slice(&raw).map_err(|_| failure("The provider's answer was not JSON.".into()))?;
++        let usage = &response["usage"];
++        let reported = usage["prompt_tokens"].as_u64().zip(usage["completion_tokens"].as_u64());
++        let used = match reported {
++            Some((input_tokens, output_tokens)) => Usage { input_tokens, output_tokens, estimated: false },
++            None => Usage { input_tokens: (serialized.len() / 3) as u64, output_tokens: (raw.len() / 3) as u64, estimated: true },
++        };
++        self.ledger.lock().unwrap().charge(app, (self.clock)(), used.total());
++        let choice = response["choices"].as_array().and_then(|c| c.first()).ok_or_else(|| failure("The provider returned no choice.".into()))?;
++        let message = &choice["message"];
++        if message["role"] != "assistant" || !(message["content"].is_string() || message["content"].is_null())
++            || message.get("tool_calls").is_some_and(|v| !v.as_array().is_some_and(|c| c.iter().all(function))) {
++            return Err(failure("The provider returned an invalid assistant message.".into()));
++        }
++        Ok(json!({"response": response, "meta": {"usage": {"input_tokens": used.input_tokens, "output_tokens": used.output_tokens, "estimated": used.estimated}, "budget": self.budget(app).to_json()}}))
++    }
++}
+diff --git a/apps/ai-providers/host-service/src/complete/mod.rs b/apps/ai-providers/host-service/src/complete/mod.rs
+index 8d0fe69..7ac5d58 100644
+--- a/apps/ai-providers/host-service/src/complete/mod.rs
++++ b/apps/ai-providers/host-service/src/complete/mod.rs
+@@ -10,6 +10,7 @@
+ //! |---|---|---|
+ //! | `model.complete` | `{task, input, schema, class?, allow_urls?}` | `{output, meta: {class, requested, attempts, usage: {input_tokens, output_tokens, estimated}, budget}}` |
+ //! | `model.budget` | – | the caller's `budget` alone |
++//! | `model.chat` | `{messages, tools, tool_choice: "auto", thinking: {type: "disabled"}}` | `{response, meta: {usage, budget}}` (native function calls; primary only; see [`chat`]) |
+ //!
+ //! - `task` (1 to [`TASK_MAX`] bytes): what to do, in words.
+ //! - `input` (any JSON, at most [`INPUT_MAX`] bytes): what to do it on.
+@@ -66,6 +67,7 @@ use std::path::{Path, PathBuf};
+ use std::sync::{Arc, Mutex};
+ use std::time::Duration;
+ 
++pub mod chat;
+ pub mod ledger;
+ pub mod schema;
+ pub mod wire;
+@@ -336,6 +338,10 @@ impl std::fmt::Debug for Candidate {
+ /// Where the providers come from: the person's profile, in its order.
+ pub trait Providers: Send + Sync {
+     fn candidates(&self) -> Result<Vec<Candidate>, String>;
++    /// The actual primary, even when its key is missing; chat never falls back.
++    fn primary(&self) -> Result<Option<Candidate>, String> {
++        Ok(self.candidates()?.into_iter().next())
++    }
+ }
+ 
+ /// The kernel's profile and its vault: the same providers AI providers
+@@ -347,6 +353,10 @@ pub struct ProfileProviders {
+ }
+ 
+ impl Providers for ProfileProviders {
++    fn primary(&self) -> Result<Option<Candidate>, String> {
++        let store = ProfileStore::open(self.path.clone(), self.vault.clone())?;
++        Ok(store.list.first().map(|p| Candidate { provider: p.clone(), key: store.key(p) }))
++    }
+     fn candidates(&self) -> Result<Vec<Candidate>, String> {
+         let store = ProfileStore::open(self.path.clone(), self.vault.clone())?;
+         Ok(store
+@@ -694,6 +704,16 @@ impl HostService for ModelService {
+         self.host.attach(&call.host_dir);
+         match call.method() {
+             "budget" => reply.send(Ok(self.host.budget(&call.app_id).to_json())),
++            "chat" => {
++                let host = self.host.clone();
++                std::thread::spawn(move || {
++                    let answer = host.chat(&call.app_id, &call.args);
++                    if let Err(Refusal { detail: Some(detail), code, .. }) = &answer {
++                        eprintln!("model: {} refused ({}): {detail}", call.app_id, code.as_str());
++                    }
++                    reply.send(answer.map_err(|r| r.to_string()));
++                });
++            }
+             "complete" => {
+                 let request = match Request::from_args(&call.args) {
+                     Ok(r) => r,
+diff --git a/apps/ai-providers/host-service/tests/chat.rs b/apps/ai-providers/host-service/tests/chat.rs
+new file mode 100644
+index 0000000..3dfd283
+--- /dev/null
++++ b/apps/ai-providers/host-service/tests/chat.rs
+@@ -0,0 +1,61 @@
++//! Native tool history and host policy via actual dispatch, with no network.
++use octosense_appstore::services::{dispatch,take_replies_for,ServiceCall,ServiceHost};
++use octosense_llm_config::Provider;
++use octosense_llm_service::complete::{self,ledger::Limits,Candidate,Providers,Transport};
++use octosense_llm_service::{model::ProfileStore,vault::MemoryVault};
++use serde_json::{json,Value};
++use std::{collections::{BTreeMap,VecDeque},sync::{Arc,Mutex},time::{Duration,Instant}};
++#[derive(Default)]
++struct Fake { answers:Mutex<VecDeque<Value>>, seen:Mutex<Vec<Value>> }
++impl Transport for Fake {
++ fn post(&self,_:&str,_:&[(String,String)],body:&str)->Result<(u16,Vec<u8>),String>{
++  self.seen.lock().unwrap().push(serde_json::from_str(body).unwrap());
++  Ok((200,self.answers.lock().unwrap().pop_front().expect("unexpected network dispatch").to_string().into_bytes()))
++ }
++}
++struct Fixed;
++impl Providers for Fixed {
++ fn candidates(&self)->Result<Vec<Candidate>,String>{
++  let mut p=Provider::new("minimax-cn",Some("MiniMax-M3".into()));
++  p.base_url=Some("https://api.minimax.cn/v1".into());p.api_type=Some(octosense_llm_config::ApiType::OpenAi);
++  Ok(vec![Candidate{provider:p,key:Some("fixture-key".into())}])
++ }
++}
++struct NoSheets;
++impl ServiceHost for NoSheets {fn open_sheet(&mut self,_:String){} fn close_sheet(&mut self){}}
++fn call(dir:&std::path::Path,app:&str,method:&str,args:Value,id:usize)->Result<Value,String>{
++ dispatch(ServiceCall{app_id:app.into(),service:format!("model.{method}"),args,from_sheet:false,may_prompt:true,host_dir:dir.join(".host")},id,1,&mut NoSheets);
++ let deadline=Instant::now()+Duration::from_secs(5);
++ loop {if let Some((_,_,r))=take_replies_for(&[id]).pop(){return r.map(|r|serde_json::from_str(&r).unwrap())} assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(5));}
++}
++fn args(messages:Value)->Value{json!({"messages":messages,"tools":[{"type":"function","function":{"name":"nonce","parameters":{"type":"object","properties":{}}}}],"tool_choice":"auto","thinking":{"type":"disabled"}})}
++#[test]
++fn native_history_and_shared_policy(){
++ let dir=std::env::temp_dir().join(format!("model-chat-{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();
++ let fake=Arc::new(Fake::default());
++ let assistant=json!({"role":"assistant","content":null,"reasoning_content":"preserved".repeat(5000),"tool_calls":[{"id":"call_nonce","type":"function","function":{"name":"nonce","arguments":"{}"}}]});
++ fake.answers.lock().unwrap().extend([
++  json!({"model":"MiniMax-M3","choices":[{"message":assistant,"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}),
++  json!({"choices":[{"message":{"role":"assistant","content":"nonce-returned"},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":6}}),
++  json!({"choices":[{"message":{"content":"{\"ok\":true}"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}})]);
++ let host=complete::register_with(complete::Options::default().providers(Arc::new(Fixed)).transport(fake.clone()).grants(|app,_|app=="allowed").limits(Limits{per_minute:6,calls_per_day:3,tokens_per_day:100000}).clock(||1_790_000_000_000));
++ let initial=json!([{"role":"system","content":"Use nonce."},{"role":"user","content":"Read it."}]);
++ assert!(call(&dir,"denied","chat",args(initial.clone()),91001).unwrap_err().starts_with("capability:"));assert!(fake.seen.lock().unwrap().is_empty());
++ let first=call(&dir,"allowed","chat",args(initial.clone()),91002).unwrap();assert_eq!(first["response"]["choices"][0]["message"],assistant);
++ let mut history=initial.as_array().unwrap().clone();history.push(first["response"]["choices"][0]["message"].clone());history.push(json!({"role":"tool","tool_call_id":"call_nonce","content":"{\"nonce\":\"nonce-returned\"}"}));
++ let second=call(&dir,"allowed","chat",args(json!(history)),91003).unwrap();assert_eq!(second["response"]["choices"][0]["message"]["content"],"nonce-returned");
++ let seen=fake.seen.lock().unwrap();assert_eq!(seen[1]["messages"],json!(history));assert_eq!(seen[1]["model"],"MiniMax-M3");assert!(seen[1].get("max_tokens").is_none());assert!(seen[1].get("response_format").is_none());drop(seen);
++ call(&dir,"allowed","complete",json!({"task":"Return ok.","input":null,"schema":{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}}),91004).unwrap();
++ assert_eq!(host.budget("allowed").calls_today,3);assert_eq!(host.budget("allowed").tokens_today,46);
++ assert!(call(&dir,"allowed","chat",args(initial),91005).unwrap_err().starts_with("budget:"));assert_eq!(fake.seen.lock().unwrap().len(),3);
++ let persisted:Value=serde_json::from_slice(&std::fs::read(dir.join(".host/model/ledger.json")).unwrap()).unwrap();assert_eq!(persisted["apps"]["allowed"]["tokens"],46);std::fs::remove_dir_all(dir).unwrap();
++}
++#[test]
++fn missing_primary_key_does_not_select_fallback(){
++ let dir=std::env::temp_dir().join(format!("model-chat-primary-{}",std::process::id()));let vault=Arc::new(MemoryVault::default());
++ let mut store=ProfileStore::open(dir.join("profile.json"),vault.clone()).unwrap();
++ store.save(vec![Provider::new("minimax-cn",Some("MiniMax-M3".into())),Provider::new("openai",Some("gpt-4.1".into()))],&BTreeMap::from([("OPENAI_API_KEY".into(),"fallback-fixture-key".into())])).unwrap();
++ let providers=complete::ProfileProviders{path:dir.join("profile.json"),vault};assert_eq!(providers.candidates().unwrap().len(),1);assert!(providers.primary().unwrap().unwrap().key.is_none());
++ let fake=Arc::new(Fake::default());let host=complete::ModelHost::new(&complete::Options::default().providers(Arc::new(providers)).transport(fake.clone()));
++ assert_eq!(host.chat("allowed",&args(json!([{"role":"user","content":"Go"}]))).unwrap_err().code,complete::Code::NoProvider);assert!(fake.seen.lock().unwrap().is_empty());assert_eq!(host.budget("allowed").calls_today,0);std::fs::remove_dir_all(dir).unwrap();
++}

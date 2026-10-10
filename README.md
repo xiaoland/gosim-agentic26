@@ -6,6 +6,8 @@
 
 [观看演示视频](https://github.com/xiaoland/gosim-agentic26/releases/download/v0.13.0/Navigation-demo.mp4) · [字幕](demo/Navigation-demo.srt) · [演示核验记录](demo/evidence.json) · [最终修正回归](demo/source-projection-check.json)
 
+[官方无补丁宿主：30秒降级演示](https://github.com/xiaoland/gosim-agentic26/raw/refs/heads/main/demo/Navigation-stock-demo.mp4) · [补充字幕](demo/Navigation-stock-demo.srt) · [版本与核验记录](demo/Navigation-stock-evidence.json)
+
 这句话看起来简单，却包含了一个需要检索、计算和判断的任务：从哪里出发，去哪个机场，预算使用什么币种，有没有便宜且赶得上的接驳组合？用户没有指定机场或币种，系统只能从本次取得的位置、背景资料或有依据的假设中补足这些信息，并保留它们的来源。
 
 Navigation 是 GOSIM Agentic App 2026 的出行作品，实现方向为**帝王蟹能力层**。我们希望把出行能力交给 Agent 使用，而不只是给地图套一层自然语言表单。地图擅长回答确定起终点之间怎么走；Agent 还需要结合目标与上下文，决定查什么、尝试什么组合，以及怎样向用户解释结果。当前先直连真实交通与报价服务，验证这条业务链，再逐步接入生态中的上下文能力。
@@ -22,7 +24,7 @@ Navigation 已实现一个自主工具循环、确定性的路线组合与比较
 
 ### Agent 选择行动，工具计算结果
 
-标准 function-calling loop 保留模型返回的 `assistant.tool_calls`，按 `call_id` 执行工具，将结果作为 `role:tool` 消息提交，再继续模型。模型自行选择查询、多步探索、资料读取和呈现时机；没有工具调用时结束本轮。技能是按需读取的语言与能力资料，不是必须遵循的流程攻略，也没有固定的“先公交、再打车、最后展示”workflow。
+应用通过配套宿主的 `model.chat` 提交单次模型请求，MiniMax 密钥由宿主持有；该接口是本仓库待上游接纳的扩展。标准 function-calling loop 保留模型返回的 `assistant.tool_calls`，按 `call_id` 执行工具，将结果作为 `role:tool` 消息提交，再继续模型。模型自行选择查询、多步探索、资料读取和呈现时机；没有工具调用时结束本轮。技能是按需读取的语言与能力资料，不是必须遵循的流程攻略，也没有固定的“先公交、再打车、最后展示”workflow。
 
 `query_route` 以 `transit`／`taxi` 选择公交查询或高德出租车估价；`extend_route` 从本轮 Route 与真实地点、站点继续检索下一段，逐步形成接驳图。查询、延长与附价使用同一种 Route 身份，Agent 引用路线和路段，代码保管耗时、金额与几何。Agent 决定扩展哪个节点、使用哪种交通方式，代码负责计算下一段出发时间、核对实际连接并累计费用。完整公交区间使用供应商返回的整段票价，不按距离或站数切摊；候车未知时，后续查询只能说明最早出发场景，不能保证接得上。
 
@@ -46,17 +48,19 @@ M3 不只选择交通工具，也编写实际 Makepad／Splash DSL。固定外�
 
 当前每次输入都是独立查询，没有澄清问答、任务结果持久化或跨次恢复。正常运行使用实时位置，尚未接入真实日历、笔记或邮件账户；显式 demo 的位置、日历和笔记是独立模拟来源，交通与模型服务仍使用真实请求。未来希望通过用户授权的跨应用背景和偏好学习减少表达，并探索动态工具与子 Agent 协作；这些仍是愿景，不是当前能力。
 
-应用运行在 macOS Apple Silicon 的锁定官方 OctoSense 宿主及本仓库覆盖上，手机交互检查使用宿主 Android 样式，不冒称 Android 真机验证。确定性工具和原生区块接口已经具备，验收同时使用隔离原生检查与真实M3、定位和交通服务。模型探索与生成质量仍有边界：真实测试曾出现遗漏可点击详情、没有继续探索混合接驳及错误转述数值。0.13.0的统一Route通过定向检查，真实询价也验证了新旧Route金额独立；真实在线一轮已经通过两候选详情、完整地图分页、拖动后新视口图片与返回；生成中的 DSL 错误由同一个 Agent 循环自行修正。但该轮未探索混合接驳，部分静态摘要与路线事实不符，失败整稿的残余已按成功区块状态修正，仍不能称为完整任务验收通过。最后一轮定位到渲染时来源文件重读耗时约332ms，已改为本次快照投影；12条真实Route的原生回归通过，未再进行修复后的完整模型任务。最新版官方原版的动态区块寻址也缺少必要脚本接口，不能将本地覆盖上的通过视为App Hub可安装。工具调用成功不能证明完整出行任务交付，当前依据见[最新宿主与完整验收](tasks/runtime-upgrade/packet.md)，路线数据依据见[路线任务](tasks/route-identity/packet.md)。
+完整能力运行在 macOS Apple Silicon 的锁定 OctoSense 配套宿主上，交互检查使用 Android 样式，不冒称真机验证。针对初赛反馈，官方原版 card-host 已能显示首屏和能力缺失说明，缺少必要扩展时查询不可用；完整定位、模型、动态区块与地图能力仍需配套宿主，首屏降级通过不等于 App Hub 完整安装验收。
+
+模型迁移已通过真实 M3 的工具往返，随后一次 Navigation 查询完成17次宿主模型请求与38次工具调用，使用了路线扩展和滴滴询价。但最终界面出现空白：离线回放确认生成稿顶层滚动容器在内容自适应父区域中高度为零，详情事件也引用了不存在的控件。内部“已渲染”状态不能替代用户可见结果；当前仍不能称为完整任务验收通过。历史演示中的详情、地图分页、拖动刷新和返回有独立实际证据，模型仍可能遗漏方案或误述事实。当前修正与剩余问题见[宿主与初赛反馈任务](tasks/runtime-upgrade/packet.md)，路线计算依据见[路线任务](tasks/route-identity/packet.md)。
 
 ## 初赛交付与复现
 
-固定版本为 [`v0.13.0`](https://github.com/xiaoland/gosim-agentic26/releases/tag/v0.13.0)，完整源码 SHA 为 `702ea6cfca8240e6c3222b8dc5f375b8ca009866`。Release 提供精确 bundle 源码包、视频、字幕和核验资料。已按官方流程提交 [App Hub 审核 #116](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/116)，目前等待维护者审核，尚未上架。
+初赛提交固定版本为 [`v0.13.0`](https://github.com/xiaoland/gosim-agentic26/releases/tag/v0.13.0)，完整源码 SHA 为 `702ea6cfca8240e6c3222b8dc5f375b8ca009866`。Release 提供精确 bundle 源码包、视频、字幕和核验资料。已按官方流程提交 [App Hub 审核 #116](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/116)。赛事方于 2026-10-09 确认该版本初赛入围，评分 65/100，并要求改进官方宿主兼容、模型服务接入和降级演示；[评审回复](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/116#issuecomment-6077995438)不等于 App Hub 上架。
 
 应用源码位于 `bundle/`，运行时覆盖与精确版本由 `toolchain/agent-runtime.lock.json` 和 `toolchain/patches/` 维护。演示使用 macOS Apple Silicon 上的锁定 OctoSense 宿主、Android 手机样式；这不是 Android 真机测试，也不是在未修改的官方桌面发行版上直接安装的证明。初赛交付为 OctoScript 应用源码及可构建的配套宿主，Rust 覆盖不放进 Hub bundle。
 
 复现入口是 `make agent-bootstrap`、`make agent-doctor`，在本地 `.env` 配置高德、MiniMax M3 与可选滴滴 MCP 后运行 `make agent-init-demo`、`make agent-demo`，切换 Android 样式并输入开头原句。默认的 `make agent-dev` 请求实时定位，需要系统授权。详细依赖、配置及命令见[工具链说明](toolchain/README.md)，数据发送与诊断记录见[数据与隐私](toolchain/README.md#数据与隐私)。密钥与原始私有日志不随源码交付。
 
-视频由实际在线运行截图剪辑而成，包含中文旁白和镜头变化。位置、日历和笔记采用明确的演示资料，M3、高德和滴滴调用真实服务；展示了报价、新旧路线金额独立、方案详情、地图刷新、八条路径分两页及本地返回。它展示已验证的交互，不声称已保证准时到达或完成全局最省钱搜索。本轮没有公共交通与打车的实际接驳检索；生成叙述的错误和间歇脚本预算问题仍有未决项。最终稿修复了日志字节计数的多余转换、滴滴 JSON-only 询价和渲染时来源文件重读；12条真实Route的首次渲染、比较及过期状态回归通过，不能把定向通过当作整轮任务通过。
+视频由实际在线运行截图剪辑而成，包含中文旁白和镜头变化。位置、日历和笔记采用明确的演示资料，M3、高德和滴滴调用真实服务；展示了报价、新旧路线金额独立、方案详情、地图刷新、八条路径分两页及本地返回。它展示已验证的交互，不声称已保证准时到达或完成全局最省钱搜索。该视频所示轮次没有公共交通与打车的实际接驳检索，不能代替当前源码的完整验收。补充的30秒视频专门展示未修改官方 card-host 的首屏与缺能力反馈，使用390×844手机视口，不是Android模式。
 
 [赛事交付指南](https://github.com/gosimfoundation/hackathon-agenticapp26/blob/main/docs/app-hub-submission.md)目前以公开源码与可运行作品评审，不要求等待 Hub 上架。App Hub 收录另走[提交审核流程](https://github.com/OctoSense-org/OctoSense-App-Hub/blob/main/docs/PUBLISHING.md#submitting)；本地预检通过不等于官方兼容、维护者录入或评委验收。
 

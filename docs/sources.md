@@ -41,7 +41,7 @@ Project 中 ChatGPT 给出的架构/赛事解释是二手材料。“最晚出�
 - [OctoSense Cargo.toml](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/Cargo.toml)：本次调查提交 d405d5c，配套 octos ae230ce 和 App Hub 58c3c8a，实施时必须沿用宿主兼容组合。
 - [AI 宿主注册](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/crates/ai-host/src/lib.rs)与[应用 peer](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/crates/ai-host/src/contained.rs)：已注册 model 与 octos，当前 shipped 策略默认等待用户同意；不能照搬旧说明中默认关闭的状态。
 - [脚本应用工具执行器](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/crates/shell/src/host_tools/script_apps.rs)和 [News 工具示例](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/news/bundle/tools.json)：读取经准入检查的 tools.json，host-service 工具走服务调用与结果队列；声明 implemented_by 为 app 不代表该执行器已经能执行脚本工具。该限制不禁止 OctoScript 自行调用脚本函数。此原生工具集成路径暂不作为初赛前置。
-- [model.complete 参数与选择逻辑](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/ai-providers/host-service/src/complete/mod.rs)及[请求封装](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/ai-providers/host-service/src/complete/wire.rs)：只接受 task、input、schema、class、allow_urls；拒绝额外字段。它按宿主提供方顺序与 fast／strong 分类选模型，可能尝试其他提供方；本项目隔离配置只允许 MiniMax-M3 且无 fallback。返回经 schema 校验的 JSON，没有原生工具调用或历史透传；应用侧 callback 循环已完成两轮真实调用与工具结果回传。该版本不透传 thinking／extra_body；input、schema 上限分别为 32、8 KiB，宿主服务等待上限为 60 秒。
+- [model.complete 参数与选择逻辑](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/ai-providers/host-service/src/complete/mod.rs)及[请求封装](https://github.com/OctoSense-org/OctoSense/blob/d405d5ca53012cb6bf606ed9323c68baf12c7ec6/apps/ai-providers/host-service/src/complete/wire.rs)：只接受 task、input、schema、class、allow_urls；拒绝额外字段。它按宿主提供方顺序与 fast／strong 分类选模型，可能尝试其他提供方；本项目隔离配置只允许 MiniMax-M3 且无 fallback。返回经 schema 校验的 JSON，没有原生工具调用或历史透传；应用侧 callback 循环已完成两轮真实调用与工具结果回传。该版本不透传 thinking／extra_body；input、schema 上限分别为 32、8 KiB，该模型服务等待上限为 270 秒，单次供应商 HTTP 为120秒；不要与通用 host.request 的60秒默认值混同。
 - [当前锁定 SCRIPT-API](https://github.com/OctoSense-org/OctoScript-App-Design-Flow/blob/e08517254d9b2c316352eec4f959810d9ad22d40/docs/SCRIPT-API.md#network)记录 `net.http_request` 的 HTTPS 请求及 `fs` 的应用隔离存储访问。接口存在不等于模型凭据通道或多源文件导入已实现；网络主机声明及权限仍须满足。
 
 ## 0.2 应用联动调查
@@ -99,3 +99,9 @@ Apple 平台事件明确使用 WGS84，并携带系统采样时间与精度；�
 [滴滴官方开发文档](https://mcp.didichuxing.com/api)提供正式MCP、个人账号激活key、地点查询及taxi_estimate。询价参数坐标来自maps_textsearch，价格来自structuredContent.items[].priceText（元）；生产与sandbox分开，后者Mock不能作实时报价。坐标系在该文档未声明，不能假定高德点可直接替代。当前已接入正式询价并验证报价派生，不接创建／取消订单，证据归[路线任务](../tasks/route-identity/packet.md)。接入使用正式独立key，不能以高德key替代。
 
 [腾讯出行MCP接入指南](https://tms-web-1g1czzwka2fd06f2-1301126013.ap-shanghai.app.tcloudbase.com/api/18-doc-mcp-guide.html)提供独立应用KEY及询价工具，是备选调查结果，尚未实现或验证腾讯报价。优先接滴滴，避免两套提供方适配在截止前重复建设。
+
+## 初赛评审反馈（2026-10-09）
+
+[App Hub #116 的赛事方回复](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/116#issuecomment-6077995438)评审 v0.13.0／702ea6c，结果为初赛入围、65/100。改进优先级依次为官方 card-host 首屏 empty-stack 错误、MiniMax 迁移宿主 model 服务、无补丁宿主降级演示。评论未提供评审宿主 SHA 或启动命令；本次需在明确版本的官方原版复现，不将历史 patched host 通过套用于 stock。落实状态归[当前任务](../tasks/runtime-upgrade/packet.md)。
+
+截至2026-10-10核对 [OctoSense 40ca21da 的model服务](https://github.com/OctoSense-org/OctoSense/tree/40ca21da/apps/ai-providers/host-service/src/complete)，官方complete仍为单次结构化任务，不支持messages/tools；[SCRIPT-API](https://github.com/OctoSense-org/OctoScript-App-Design-Flow/blob/main/docs/SCRIPT-API.md#host-services)说明card-host无提供方服务。因此本次model.chat归本地窄覆盖，不能表述为官方已有接口。首屏实际核验官方AppHub7b36c8af，依赖版本与证据见[无补丁演示记录](../demo/Navigation-stock-evidence.json)。

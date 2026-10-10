@@ -78,5 +78,13 @@
     "makepad_base_tree": "e9520ccb3740f3af8629d981d06d7e53aad48c06",
     "makepad_patch": "toolchain/patches/makepad-ui-find-rect.patch",
     "makepad_patch_sha256": "83b36bf1e936bc423428465baa049350aea01f4f49df88c11c69c59d2a043a92"
+  },
+  "model_chat_overlay": {
+    "url": "https://github.com/OctoSense-org/OctoSense.git",
+    "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
+    "base_tree": "04c69c838e530ae92f82c98a1f095bac49f2d815",
+    "patch": "toolchain/patches/octosense-model-chat.patch",
+    "patch_sha256": "4bf1458d75d64824d23c81f2c03fe8bf5806f3fc59769434089492aec554cc01",
+    "tree": "e6bc431a21bdf27ee50c5bf173c3563b75276820"
   }
 }
