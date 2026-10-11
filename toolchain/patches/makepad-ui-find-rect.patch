@@ -91,7 +91,7 @@ index f179eb4..6e539d8 100644
      fn unicode_identifier_does_not_underflow_its_token_position() {
          let mut heap = ScriptHeap::default();
 diff --git a/platform/script/src/vm.rs b/platform/script/src/vm.rs
-index c579c89..f11b4ac 100644
+index c579c89..d26957f 100644
 --- a/platform/script/src/vm.rs
 +++ b/platform/script/src/vm.rs
 @@ -772,7 +772,7 @@ pub fn drain_errors(&mut self) {
@@ -103,7 +103,22 @@ index c579c89..f11b4ac 100644
                  }
                  if self.bx.silence_errors {
                      continue;
-@@ -1750,6 +1750,8 @@ pub struct ScriptVmBase {
+@@ -1666,9 +1666,12 @@ pub fn eval_with_append_source(
+             let prev_len = body.source_len;
+             // Check if the content has diverged (not just appended to).
+             // Compare the new code's prefix against what the tokenizer already has.
++            // A previous source byte length can fall inside a new UTF-8 character.
++            // Such a prefix cannot be unchanged; re-tokenize the complete source.
++            let new_prefix = code.get(..prev_len);
++            let old_prefix = body.tokenizer.original.get(..prev_len);
+             let content_changed = prev_len > 0
+-                && (code.len() < prev_len
+-                    || code[..prev_len] != body.tokenizer.original[..prev_len]);
++                && (new_prefix.is_none() || new_prefix != old_prefix);
+ 
+             if content_changed {
+                 // Content changed entirely — reset and re-tokenize from scratch
+@@ -1750,6 +1753,8 @@ pub struct ScriptVmBase {
      /// eval/call, take after, to feed diagnostics back to a host (e.g. an AI
      /// agent editing the script live).
      pub captured_errors: Option<Vec<String>>,
@@ -112,7 +127,7 @@ index c579c89..f11b4ac 100644
      /// Uncaught errors, including those suppressed from logs.
      pub uncaught_error_count: usize,
      pub run_budget: Option<ScriptRunBudget>,
-@@ -1774,6 +1776,7 @@ pub fn empty() -> Self {
+@@ -1774,6 +1779,7 @@ pub fn empty() -> Self {
              silence_errors: false,
              allow_debug_output: true,
              captured_errors: None,
@@ -120,7 +135,7 @@ index c579c89..f11b4ac 100644
              uncaught_error_count: 0,
              run_budget: None,
              last_limit_consumed: 0,
-@@ -1812,6 +1815,7 @@ pub fn new() -> Self {
+@@ -1812,6 +1818,7 @@ pub fn new() -> Self {
              silence_errors: false,
              allow_debug_output: true,
              captured_errors: None,

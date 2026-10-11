@@ -151,7 +151,7 @@ render_ui 的 blocks 回执逐块返回 id、revision、diagnostics、notified�
 
 地图事件 target 也可直接引用 query_route 返回的 geometry_ref（polyline_…）；父应用按同一候选的真实几何加载，不由模型传折线坐标。原路线 id、viewed 和 path_indices 仍可用；新查询使上一轮引用失效。
 
-守护业务事实在snapshot().guardian中，包含goal、proposal、last_check和remaining_budget_cents。propose_goal/report_goal_check是父Agent工具，不是子VM方法；emit不支持确认保存、替换或更新费用。待确认提案由父应用可靠确认区显示完整目标、真实估计原因、选定依据与差额，真实按钮点击才保存。生成页面可解释这些事实与风险，不能声称render成功就已获得用户确认。新查询仍建立独立模型历史，只有确认业务状态跨次保存。
+守护业务事实在snapshot().guardian中，包含goal、proposal、last_check和remaining_budget_cents。propose_goal/report_goal_check是父Agent工具，不是子VM方法；emit不支持确认保存、替换或更新费用。待确认提案由父应用可靠确认区显示完整目标、真实估计原因、选定依据与差额，真实按钮点击才保存。生成页面可解释这些事实与风险，不能声称render成功就已获得用户确认。新查询仍建立独立模型历史，出行列表还保存普通规划详情的成功原始区块DSL与历史事实，但不保存模型会话或未确认提案。重开时父应用显示历史时刻，重新构造展示实例，snapshot().history.current为false；历史facts不重算为当前assessment。历史只接阅读/地图/区块切换动作，不能提出或确认旧提案，需用户主动重新核验。父左侧出行栏负责新建、选择和删除，index页面显示所选出行详情。
 
 使用target:"saved_goal_route"可以查看已确认路线快照的实际几何；get_route({id:"saved_goal_route"})取得其目录，source_ts仍为旧查询时间，不是当前交通证据。新候选和比较仍只来自本轮查询。
 

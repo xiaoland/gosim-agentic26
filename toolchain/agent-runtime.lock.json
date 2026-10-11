@@ -4,14 +4,14 @@
     "url": "https://github.com/OctoSense-org/OctoSense.git",
     "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
     "cargo_lock_sha256": "b89ff117a6adca8341e428d6c7254e96f52c02109a1c49b00c142aa5d06560cd",
-    "runtime_patches_lock_sha256": "995416ae8940844297095c602ed0995bdc3bf72bc775776db87d2800581dec68"
+    "runtime_patches_lock_sha256": "1c14ac8737df9530c992024dae336b05cb5ba680b92741cd257ca7f03b8d0f39"
   },
   "app_hub_revision": "58c3c8aed8fc811a16d67c5f784a8a44214ff876",
   "octos_revision": "ae230ce04d57f3c29cf6c2518e5956a86c07d788",
   "runtime": {
     "octoscript_makepad": "e0df0b5177f9cb0d8ad0ad0225d40ebcf8389a1b",
     "makepad_base": "e29a0eaa68781231eb9ec582e5f02648c6dad7e9",
-    "makepad_patched_tree": "175dfa2fd45f6b28fe20a50ff99185362c5c748d",
+    "makepad_patched_tree": "2635589c0280e8f02fd957abed28a40dfe72ed36",
     "octoscript": "dbd48cfb799551c11e30970c393777d29644a605"
   },
   "build": {
@@ -73,18 +73,18 @@
     "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
     "base_tree": "5c0eb81682e04efe131db6f83e1879c974bf4eba",
     "patch": "toolchain/patches/octosense-ui-widget.patch",
-    "patch_sha256": "71336ff95ac9897189002cd69c7c5022a04bba93d5d1848914b64d7d471b8f35",
-    "tree": "04c69c838e530ae92f82c98a1f095bac49f2d815",
+    "patch_sha256": "44f0c2a2b9783a6bf6b12c8cd7c8bf3ec1677bf4a5fab74c73864c92f990ef80",
+    "tree": "aaf3ab827e4b1aec51066357d5623c7c555c833b",
     "makepad_base_tree": "e9520ccb3740f3af8629d981d06d7e53aad48c06",
     "makepad_patch": "toolchain/patches/makepad-ui-find-rect.patch",
-    "makepad_patch_sha256": "83b36bf1e936bc423428465baa049350aea01f4f49df88c11c69c59d2a043a92"
+    "makepad_patch_sha256": "3176fe44a8874fae40ae26f75bfdcd65c0441bb30e9a78c4dc5ae252e5f223b1"
   },
   "model_chat_overlay": {
     "url": "https://github.com/OctoSense-org/OctoSense.git",
     "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
-    "base_tree": "04c69c838e530ae92f82c98a1f095bac49f2d815",
+    "base_tree": "aaf3ab827e4b1aec51066357d5623c7c555c833b",
     "patch": "toolchain/patches/octosense-model-chat.patch",
     "patch_sha256": "4bf1458d75d64824d23c81f2c03fe8bf5806f3fc59769434089492aec554cc01",
-    "tree": "e6bc431a21bdf27ee50c5bf173c3563b75276820"
+    "tree": "ead94e577b449252b311b1808f58e55373e99cf7"
   }
 }

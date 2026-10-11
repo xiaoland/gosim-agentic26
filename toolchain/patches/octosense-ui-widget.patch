@@ -1,5 +1,5 @@
 diff --git a/runtime-patches.lock.json b/runtime-patches.lock.json
-index 71aa0ad..0bc58ce 100644
+index 71aa0ad..b4a027c 100644
 --- a/runtime-patches.lock.json
 +++ b/runtime-patches.lock.json
 @@ -4,7 +4,7 @@
@@ -7,38 +7,39 @@ index 71aa0ad..0bc58ce 100644
      "patch": "tools/runtime-patches/makepad-settings.patch",
      "sha256": "1bf3c9d5367bb35a0e2ab0eb92b614507817066d31d8030404cbb0655c758268",
 -    "tree": "e9520ccb3740f3af8629d981d06d7e53aad48c06",
-+    "tree": "175dfa2fd45f6b28fe20a50ff99185362c5c748d",
++    "tree": "2635589c0280e8f02fd957abed28a40dfe72ed36",
      "product_fixes": [
        "Settings integration: Android IME synchronization, accessibility and reduced motion, GLES program-cache validation, obscured-gesture cancellation and scroll-position observation.",
        "Contained-app isolation and secret-input restrictions come from the pinned upstream runtime; the Settings overlay preserves those gates.",
-@@ -12,7 +12,9 @@
+@@ -12,7 +12,10 @@
        "A cancelled search's keyboard hides once: an editor session going inactive retires its input connection without restarting input, which brought the keyboard back empty while it was hiding (Android 11).",
        "Windows remote grabs send raw RGBA pixels to the bounded PNG worker before presenting, keeping full-size encoding off the UI thread and scaling before encoding.",
        "Windows frame completion: backport Makepad work c508ab0c8 GPU completion polls around native and hosted repaint so upload buffers can retire.",
 -      "A map that is not drawn (Maps sent to the background) no longer asks for a frame and a full redraw every frame, nor ticks its tile fades every 16 ms, while it waits to draw (OctoSense-org/makepad#79)."
 +      "A map that is not drawn (Maps sent to the background) no longer asks for a frame and a full redraw every frame, nor ticks its tile fades every 16 ms, while it waits to draw (OctoSense-org/makepad#79).",
 +      "Navigation runtime overlay: confined ui.find(name), direct ui.child(index) instance handles and WidgetRef.rect() read-only drawn clipped geometry. Splash.diagnostics() exposes raw current-instance execution diagnostics to its parent.",
-+      "Navigation fragment structure diagnostics use the existing tokenizer to check complete lexical endings and token delimiter boundaries without executing source or changing streaming evaluation."
++      "Navigation fragment structure diagnostics use the existing tokenizer to check complete lexical endings and token delimiter boundaries without executing source or changing streaming evaluation.",
++      "Navigation restored UTF-8 source: incremental recompilation treats an invalid prefix character boundary as full content replacement instead of panicking."
      ],
      "stacked": [
        {
-@@ -34,6 +36,10 @@
+@@ -34,6 +37,10 @@
        {
          "patch": "tools/runtime-patches/makepad-map-hidden-no-frame-loop.patch",
          "sha256": "e89a4776c617d48242c4a33495972e1566036016584c81f58f8cb4affc535d8f"
 +      },
 +      {
 +        "patch": "tools/runtime-patches/makepad-ui-find-rect.patch",
-+        "sha256": "83b36bf1e936bc423428465baa049350aea01f4f49df88c11c69c59d2a043a92"
++        "sha256": "3176fe44a8874fae40ae26f75bfdcd65c0441bb30e9a78c4dc5ae252e5f223b1"
        }
      ]
    }
 diff --git a/tools/runtime-patches/makepad-ui-find-rect.patch b/tools/runtime-patches/makepad-ui-find-rect.patch
 new file mode 100644
-index 0000000..2ce9446
+index 0000000..d4f6861
 --- /dev/null
 +++ b/tools/runtime-patches/makepad-ui-find-rect.patch
-@@ -0,0 +1,614 @@
+@@ -0,0 +1,629 @@
 +diff --git a/platform/script/src/tokenizer.rs b/platform/script/src/tokenizer.rs
 +index f179eb4..6e539d8 100644
 +--- a/platform/script/src/tokenizer.rs
@@ -132,7 +133,7 @@ index 0000000..2ce9446
 +     fn unicode_identifier_does_not_underflow_its_token_position() {
 +         let mut heap = ScriptHeap::default();
 +diff --git a/platform/script/src/vm.rs b/platform/script/src/vm.rs
-+index c579c89..f11b4ac 100644
++index c579c89..d26957f 100644
 +--- a/platform/script/src/vm.rs
 ++++ b/platform/script/src/vm.rs
 +@@ -772,7 +772,7 @@ pub fn drain_errors(&mut self) {
@@ -144,7 +145,22 @@ index 0000000..2ce9446
 +                 }
 +                 if self.bx.silence_errors {
 +                     continue;
-+@@ -1750,6 +1750,8 @@ pub struct ScriptVmBase {
++@@ -1666,9 +1666,12 @@ pub fn eval_with_append_source(
++             let prev_len = body.source_len;
++             // Check if the content has diverged (not just appended to).
++             // Compare the new code's prefix against what the tokenizer already has.
+++            // A previous source byte length can fall inside a new UTF-8 character.
+++            // Such a prefix cannot be unchanged; re-tokenize the complete source.
+++            let new_prefix = code.get(..prev_len);
+++            let old_prefix = body.tokenizer.original.get(..prev_len);
++             let content_changed = prev_len > 0
++-                && (code.len() < prev_len
++-                    || code[..prev_len] != body.tokenizer.original[..prev_len]);
+++                && (new_prefix.is_none() || new_prefix != old_prefix);
++ 
++             if content_changed {
++                 // Content changed entirely — reset and re-tokenize from scratch
++@@ -1750,6 +1753,8 @@ pub struct ScriptVmBase {
 +     /// eval/call, take after, to feed diagnostics back to a host (e.g. an AI
 +     /// agent editing the script live).
 +     pub captured_errors: Option<Vec<String>>,
@@ -153,7 +169,7 @@ index 0000000..2ce9446
 +     /// Uncaught errors, including those suppressed from logs.
 +     pub uncaught_error_count: usize,
 +     pub run_budget: Option<ScriptRunBudget>,
-+@@ -1774,6 +1776,7 @@ pub fn empty() -> Self {
++@@ -1774,6 +1779,7 @@ pub fn empty() -> Self {
 +             silence_errors: false,
 +             allow_debug_output: true,
 +             captured_errors: None,
@@ -161,7 +177,7 @@ index 0000000..2ce9446
 +             uncaught_error_count: 0,
 +             run_budget: None,
 +             last_limit_consumed: 0,
-+@@ -1812,6 +1815,7 @@ pub fn new() -> Self {
++@@ -1812,6 +1818,7 @@ pub fn new() -> Self {
 +             silence_errors: false,
 +             allow_debug_output: true,
 +             captured_errors: None,

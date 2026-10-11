@@ -10,6 +10,11 @@ def source(original):
 
 
 def run(work, jail, request, stop, launch, original, injected):
+    def stored_goal():
+        index = json.loads((jail / 'navigation-trips.json').read_text())['data']
+        entry = next(e for e in index['trips'] if e['id'] == index['selected_id'])
+        return json.loads((jail / entry['file']).read_text())['data']['goal']
+
     def wait_file(name):
         until = time.monotonic() + 30
         while time.monotonic() < until:
@@ -25,7 +30,7 @@ def run(work, jail, request, stop, launch, original, injected):
         (work / f'{name}.png').write_bytes(request('g', raw=1))
         return rows
 
-    def click(text):
+    def click(text, last=False):
         for attempt in range(5):
             rows = capture('before-click')
             visible = [row for row in rows if row.get('ty') == 'Button' and row.get('t') == text and row['r'][3] >= 20]
@@ -34,9 +39,10 @@ def run(work, jail, request, stop, launch, original, injected):
             request('m', k='scroll', x=220, y=700, dy=300, precise=1, wait=1)
             time.sleep(.2)
         assert visible, f'{text} 未实际可见'
-        row = visible[0]
+        row = visible[-1] if last else visible[0]
         x, y, width, height = row['r']
         request('click', x=x + width / 2, y=y + height / 2, wait=1)
+        time.sleep(.4)
 
     def signal(name):
         rows = json.loads(request('snap', q='trace_identity'))['s']
@@ -78,11 +84,11 @@ def run(work, jail, request, stop, launch, original, injected):
     click('用当前查看方案准备替代')
     time.sleep(.3)
     capture('local-replacement-proposal')
-    assert json.loads((jail / 'guardian-goal.json').read_text())['goal']['selected_route']['id'] == 'guardian-a'
+    assert stored_goal()['selected_route']['id'] == 'guardian-a'
     click('拒绝提案')
     time.sleep(.3)
     capture('local-replacement-rejected')
-    assert json.loads((jail / 'guardian-goal.json').read_text())['goal']['selected_route']['id'] == 'guardian-a'
+    assert stored_goal()['selected_route']['id'] == 'guardian-a'
     click('用当前查看方案准备替代')
     time.sleep(.3)
     capture('replacement')
@@ -93,13 +99,17 @@ def run(work, jail, request, stop, launch, original, injected):
     row = next(row for row in capture('progress') if row.get('i') == 'guardian_spent' and row.get('ty') == 'TextInput')
     x, y, width, height = row['r']
     request('click', x=x + width / 2, y=y + height / 2, wait=1)
-    request('k', c='KeyA', cmd=1, wait=1)
+    for _ in range(len(row.get('val', row.get('t', ''))) + 3):
+        request('k', c='Backspace', wait=1)
+        request('k', c='Delete', wait=1)
     request('t', t='45', wait=1)
-    click('确认进度/费用')
+    request('k', c='Escape', wait=1)
+    time.sleep(.3)
+    click('确认进度/费用', last=True)
     wait_file('guardian-test-storage-ready.json')
     check_rows = capture('current-check-reasons')
     # 匿名父Label不进入remote snapshot；保留实际截图人工核对，fixture同时记录文案。
-    goal_path = jail / 'guardian-goal.json'
+    goal_path = jail / 'navigation-trips.json'
     backup = jail / 'guardian-test-goal-backup.json'
     goal_path.rename(backup)
     goal_path.mkdir()
@@ -132,13 +142,16 @@ def run(work, jail, request, stop, launch, original, injected):
                   model_called=False, synthetic_routes=True, real_native_controls=True,
                   source_sha256=hashlib.sha256(original.encode()).hexdigest(),
                   injected_sha256=hashlib.sha256(injected.encode()).hexdigest())
+    report['native_utf8_panic'] = any('not a char boundary' in path.read_text(errors='replace') for path in work.glob('*.log'))
     (work / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
+    assert not report['native_utf8_panic'], '历史中文 DSL 重挂触发宿主 UTF8 panic，详见原生日志'
     assert all(check['passed'] for check in report['checks']), report
     print(f'PASS: {len(report["checks"])} 项目标守护检查；{work / "report.json"}')
 
 
 FIXTURE = r'''
 let gt_stage=0 let gt_checks=[] let gt_version=0 let gt_original=nil let gt_evidence={} let gt_local_pending_checked=false let gt_local_rejected=false
+fn gt_saved_text(){let saved=trip_read("navigation-trips.json") if saved==nil {return nil} for trip in saved.data.trips {if trip.id==saved.data.selected_id {return {goal:trip.goal}.to_json()}} return {goal:nil}.to_json()}
 fn blocks_mount(params){interface_revision+=1 return mount_ui_blocks(params,run_id,interface_revision)}
 fn gt_layout(case){
  clear_generated() interface_error=""
@@ -162,6 +175,7 @@ fn gt_route(id,price,duration){
  return route
 }
 fn gt_context(){
+ if trip_selected_id==nil {trip_new()} trip_replay=false trip_history=nil
  received_at=time_now() arrive_by=received_at+2400
  constraints={budget_cents:5000 currency:"CNY"} user_limits={minutes:40 budget_cents:5000}
  destination_record={name:"合成目的地" longitude:114.03 latitude:22 city:"深圳市" citycode:"0755" adcode:"440306" currency:"CNY" source:"synthetic-fixture"}
@@ -179,7 +193,7 @@ fn gt_poll(){
   let rejected=blocks_mount({blocks:[{id:"guardian-bad-scroll" source:"ScrollYView{width:Fill height:Fill flow:Down Label{text:\"没有有限父高度\"}}"}]})
   gt_check("无有限高度的inline滚动容器明确拒绝",rejected==nil && block_by_id("guardian-bad-scroll")==nil)
   blocks_mount({blocks:[{id:"guardian-finite-scroll" height:180 source:"scroll_fixture := ScrollYView{width:Fill height:Fill flow:Down Label{text:\"有限高度原生滚动区域\"} for i in 8 {Label{text:\"守护布局检查第\"+i+\"行\"}}}"}]})
-  gt_check("未确认提案不落盘",proposal.success && guardian_goal==nil && read_text("guardian-goal.json")==nil)
+  gt_check("未确认提案不落盘",proposal.success && guardian_goal==nil && gt_saved_text().parse_json().goal==nil)
   fs.write("guardian-test-proposed.json",{proposal:proposal checks:gt_checks}.to_json()) gt_stage=1
  }
  if gt_stage==1 && guardian_goal!=nil {
@@ -209,7 +223,7 @@ fn gt_poll(){
   gt_check("同线路新用时和费用仍匹配原计划",guardian_plan_key(repriced)==guardian_plan_key(route))
   let different=route.to_json().parse_json() different.segments[0].bus={buslines:[{id:"bus-new" name:"不同公交线路" departure_stop:{id:"stop-a" name:"A"} arrival_stop:{id:"stop-b" name:"B"}}]}
   gt_check("不同公交线路不能认原计划成立",guardian_plan_key(different)!=guardian_plan_key(route))
-  gt_propose("guardian-b") gt_check("替代提案不改已确认路线",guardian_goal.to_json()==gt_original && read_text("guardian-goal.json").parse_json().goal.selected_route.id=="guardian-a")
+  gt_propose("guardian-b") gt_check("替代提案不改已确认路线",guardian_goal.to_json()==gt_original && gt_saved_text().parse_json().goal.selected_route.id=="guardian-a")
   gt_version=guardian_pending.proposal_version guardian_reject()
   gt_check("拒绝提案保留原状态",guardian_pending==nil && guardian_goal.to_json()==gt_original)
   gt_propose("guardian-b")
@@ -249,13 +263,13 @@ fn gt_poll(){
  }
  if gt_stage==5 && read_text("guardian-test-storage-restored.json")!=nil {
   let before=guardian_goal.to_json()
-  fs.write("guardian-goal.json","{corrupt") guardian_goal=nil guardian_loaded=false guardian_load()
+  fs.write("navigation-trips.json","{corrupt") guardian_goal=nil trip_load()
   gt_evidence.recovery={before:before after:if guardian_goal!=nil {guardian_goal.to_json()} else {nil} error:guardian_error}
   gt_check("主记录损坏从确认备份恢复且明确说明",guardian_goal!=nil && guardian_error!="")
   guardian_store(guardian_goal)
   gt_check("结束后不能主动核验",guardian_finish() && guardian_goal.state=="ended" && !guardian_recheck())
-  gt_check("删除清除可恢复目标",guardian_delete() && guardian_goal==nil && read_text("guardian-goal.json").parse_json().goal==nil)
-  guardian_loaded=false guardian_load()
+  gt_check("删除清除可恢复目标",guardian_delete() && guardian_goal==nil && gt_saved_text().parse_json().goal==nil)
+  trip_load()
   gt_check("删除后再次读取不会从备份复活",guardian_goal==nil)
   clear_generated()
   blocks_mount({blocks:[{id:"guardian-inline-isolated" height:180 source:"inline_scroll := ScrollYView{width:Fill height:Fill flow:Down for i in 8 {Label{text:\"独立inline检查\"}}}"}]})

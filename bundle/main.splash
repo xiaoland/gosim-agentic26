@@ -257,6 +257,14 @@ let teal = #x06796f
 // 已核对的扩展宿主提供此类型；官方原版不具备本应用的区块、布局和地图接口。
 let native_ui_available = route_get(mod.widgets, "AutoNaviMapView") != nil
 let missing_runtime_message = "当前宿主缺少 Navigation 所需的原生扩展，查询暂不可用。\n需要区块寻址、布局测量、渲染诊断和交互地图接口；请使用 README 中注明的配套宿主。官方原版首屏仅展示兼容说明。"
+let trip_records=[]
+let trip_selected_id=nil
+let trip_next_id=1
+let trip_generation=0
+let trip_sidebar_open=false
+let trip_replay=false
+let trip_history=nil
+let trip_saved_run=-1
 let guardian_goal=nil
 let guardian_pending=nil
 let guardian_sequence=0
@@ -436,6 +444,7 @@ let map_generation = 0
 let ui_render_generation = 0
 fn invalidate_map(){ map_generation += 1 for id slot in map_slots { slot.request += 1 slot.bytes = nil slot.state = "stale" slot.status = "地图数据已过期" trace_map("map_stale",slot) } }
 fn map_candidate(target){
+    if trip_replay {let historical=trip_history_route(target) if historical!=nil {return historical}}
     if target == "saved_goal_route" && guardian_goal!=nil {return guardian_goal.selected_route}
     if target == "destination" && destination_record != nil { return {id: "destination:" + destination_record.id segments: [] requested_origin: nil requested_destination: coord_text(destination_record)} }
     if target == "preview" && picker_preview_poi != nil { return {id: "preview:" + picker_preview_poi.id segments: [] requested_origin: nil requested_destination: coord_text(picker_preview_poi)} }
@@ -550,6 +559,7 @@ fn accept_map_slot(slot, bytes, token, request, target_id, detail){
 
 
 fn view_route(id){
+    if trip_replay {let route=trip_history_route(id) if route!=nil {map_path_catalog(route) viewed_route_id=id ui_facts_revision+=1 load_interface_map() render_content()} return}
     for candidate in candidates { if candidate.id == id { map_path_catalog(candidate) viewed_route_id = id ui_facts_revision+=1 load_interface_map() render_content() guardian_refresh() return } }
 }
 
@@ -1770,19 +1780,225 @@ fn minimax_request(task, input, schema, token, record, done){
 }
 
 
+// 业务列表只保存详情输入、成功原稿与事实；不保存模型会话或运行实例。
+fn trip_by_id(id){for trip in trip_records {if trip.id==id {return trip}} return nil}
+fn trip_state(){return {schema:1 selected_id:trip_selected_id next_id:trip_next_id generation:trip_generation trips:trip_records}}
+// 不复制未变化的大事实/几何；提交前只修改独立记录头，snapshot与goal替换而不原地改写。
+fn trip_edit_state(){
+ let records=[] for old in trip_records {records.push({id:old.id title:old.title input:old.input created_at:old.created_at updated_at:old.updated_at status:old.status goal:old.goal snapshot:old.snapshot _record_file:route_get(old,"_record_file") _dirty:false})}
+ return {schema:1 selected_id:trip_selected_id next_id:trip_next_id generation:trip_generation trips:records}
+}
+fn trip_save_before_navigation(){
+ let trip=trip_by_id(trip_selected_id)
+ if trip_replay || (trip!=nil && trip.snapshot!=nil && !agent_active && trip_saved_run==run_id) {return true}
+ return trip_save_current(if agent_active {"interrupted"} else {phase})
+}
+
+fn trip_encode(data){return "{\"schema\":1,\"saved_at\":"+time_now().to_json()+",\"data\":"+data.to_json()+",\"complete\":\"navigation-trips-v1\"}"}
+fn trip_valid(data){
+ if !data.is_object() || data.schema!=1 || !data.trips.is_array() || !data.next_id.is_number() || data.next_id<1 || data.next_id%1!=0 {return false}
+ let seen={} let selected=data.selected_id==nil
+ for trip in data.trips {
+  if !trip.is_object() || !trip.id.is_string() || trip.id=="" || seen[trip.id]==true || !trip.input.is_string() || !trip.title.is_string() || !trip.status.is_string() || !trip.created_at.is_number() || !trip.updated_at.is_number() {return false}
+  if trip.goal!=nil && !guardian_valid_goal(trip.goal) {return false}
+  if trip.snapshot!=nil && (!trip.snapshot.is_object() || !trip.snapshot.facts.is_object() || !trip.snapshot.blocks.is_array() || !trip.snapshot.route_data.is_array() || !trip.snapshot.captured_at.is_number()) {return false}
+  seen[trip.id]=true if trip.id==data.selected_id {selected=true}
+ }
+ return selected
+}
+fn trip_disk_index(data){let entries=[] for trip in data.trips {entries.push({id:trip.id file:trip._record_file})} return {schema:1 selected_id:data.selected_id next_id:data.next_id generation:data.generation trips:entries}}
+fn trip_read_json(path,marker){
+ let text=nil let parsed=nil
+ try {text=read_text(path)} {guardian_error="出行记录无法读取" return nil}
+ if text==nil {return nil}
+ if text.strip_suffix(",\"complete\":\""+marker+"\"}")==text {guardian_error="出行记录不完整" return nil}
+ try {parsed=text.parse_json()} {guardian_error="出行记录无法解析" return nil}
+ if !parsed.is_object() || parsed.complete!=marker || !parsed.saved_at.is_number() {guardian_error="出行记录格式无效" return nil}
+ return parsed
+}
+fn trip_read(path){
+ let parsed=trip_read_json(path,"navigation-trips-v1")
+ if parsed==nil {return nil}
+ let index=parsed.data
+ if !index.is_object() || !index.trips.is_array() || !index.generation.is_number() || index.generation<1 {guardian_error="出行索引格式无效" return nil}
+ let records=[]
+ for entry in index.trips {
+  if !entry.is_object() || !entry.id.is_string() || !entry.file.is_string() || !regex("^navigation-trip-trip-[0-9]+-[0-9]+[.]json$","").test(entry.file) {guardian_error="出行记录引用无效" return nil}
+  let record=trip_read_json(entry.file,"navigation-trip-v1")
+  if record==nil || !record.data.is_object() || record.data.id!=entry.id {guardian_error="出行详情缺失或损坏" return nil}
+  record.data._record_file=entry.file record.data._dirty=false records.push(record.data)
+ }
+ let data={schema:1 selected_id:index.selected_id next_id:index.next_id generation:index.generation trips:records}
+ if !trip_valid(data) {guardian_error="出行列表格式无效" return nil}
+ parsed.data=data return parsed
+}
+fn trip_commit(data){
+ if !trip_valid(data) {guardian_error="出行记录格式无效，未保存" return false}
+ let generation=trip_generation+1 let written=[] let old_previous=nil
+ let previous_index=trip_disk_index(trip_state())
+ if route_get(data,"deleted_id")!=nil {
+  let kept=[] for entry in previous_index.trips {if entry.id!=data.deleted_id {kept.push(entry)}} previous_index.trips=kept
+  if previous_index.selected_id==data.deleted_id {previous_index.selected_id=data.selected_id}
+ }
+ try {
+  old_previous=trip_read_json("navigation-trips.previous.json","navigation-trips-v1")
+  for trip in data.trips {
+   let old=trip_by_id(trip.id)
+   if old!=nil && route_get(trip,"_dirty")!=true {trip._record_file=old._record_file}
+   else {
+    let file="navigation-trip-"+trip.id+"-"+generation+".json"
+    trip._record_file=file trip._dirty=false written.push(file)
+    fs.write(file,"{\"schema\":1,\"saved_at\":"+time_now().to_json()+",\"data\":"+trip.to_json()+",\"complete\":\"navigation-trip-v1\"}")
+   }
+  }
+  data.generation=generation
+  if trip_generation>0 {fs.write("navigation-trips.previous.json",trip_encode(previous_index))}
+  fs.write("navigation-trips.json",trip_encode(trip_disk_index(data)))
+ } {
+  for file in written {try {if fs.exists(file) {fs.remove(file)}} {}}
+  guardian_error="保存出行失败；现有记录仍保留（含容量或写入错误），没有截断详情" return false
+ }
+ trip_records=data.trips trip_selected_id=data.selected_id trip_next_id=data.next_id trip_generation=generation guardian_error=""
+ // 只清理两份有效索引都不再引用的旧revision，失败不会影响已提交详情。
+ if old_previous!=nil && route_get(old_previous.data,"trips").is_array() {for entry in old_previous.data.trips {
+  let keep=false for trip in trip_records {if trip._record_file==entry.file {keep=true}} for item in previous_index.trips {if item.file==entry.file {keep=true}}
+  if !keep {try {if fs.exists(entry.file) {fs.remove(entry.file)}} {}}
+ }}
+ return true
+}
+fn trip_apply_goal(){
+ let trip=trip_by_id(trip_selected_id)
+ guardian_goal=if trip!=nil {trip.goal} else {nil}
+ guardian_check=if guardian_goal!=nil {route_get(guardian_goal,"last_check")} else {nil}
+ guardian_pending=nil guardian_mode=false guardian_reported_run=-1 guardian_progress_open=false
+}
+fn trip_load(){
+ let primary=trip_read("navigation-trips.json")
+ if primary!=nil {trip_records=primary.data.trips trip_selected_id=primary.data.selected_id trip_next_id=primary.data.next_id trip_generation=primary.data.generation trip_apply_goal() return}
+ let previous=trip_read("navigation-trips.previous.json")
+ if previous!=nil {trip_records=previous.data.trips trip_selected_id=previous.data.selected_id trip_next_id=previous.data.next_id trip_generation=previous.data.generation trip_apply_goal() guardian_error="主列表损坏，恢复较早备份（"+guardian_deadline(previous.saved_at)+"）；请核对是否最新" return}
+ if fs.exists("navigation-trips.json") || fs.exists("navigation-trips.previous.json") {return}
+ guardian_load_legacy()
+ if guardian_goal!=nil {
+  let goal=guardian_goal let created=goal.confirmed_at
+  let trip={id:"trip-1" title:goal.destination.name input:"已确认的出行目标" created_at:created updated_at:time_now() status:if goal.state=="ended" {"ended"} else {"confirmed"} goal:goal snapshot:nil _dirty:true}
+  if trip_commit({schema:1 selected_id:trip.id next_id:2 trips:[trip]}) {trip_apply_goal()}
+ }
+}
+fn trip_capture(){
+ let routes=[] for candidate in candidates {let saved=guardian_materialize(candidate) saved.history_geometry_ref=route_get(candidate,"geometry_ref") routes.push(saved)}
+ let blocks=[] for block in ui_blocks {if block.complete && route_get(block,"raw_source").is_string() {blocks.push({id:block.id source:block.raw_source overlay:block.overlay height:block.height visible:block.visible document:block.document})}}
+ let facts=interface_facts() if facts.guardian!=nil {facts.guardian.proposal=nil}
+ return {captured_at:time_now() answer:answer_text facts:facts route_data:routes blocks:blocks}
+}
+fn trip_save_current(status){
+ let old=trip_by_id(trip_selected_id) if old==nil || trip_replay {return true}
+ let data=trip_edit_state()
+ for trip in data.trips {if trip.id==trip_selected_id {trip.updated_at=time_now() trip.status=status trip.snapshot=trip_capture() trip._dirty=true}}
+ let success=trip_commit(data)
+ if success {trip_saved_run=run_id}
+ if native_ui_available {ui.trip_rows.render() ui.trip_header.render()}
+ return success
+}
+fn trip_reset_runtime(){
+ agent_active=false active_tool=nil run_id+=1 cancel_pending_location() invalidate_interface() invalidate_map()
+ if task_timer!=nil {stop_timer(task_timer) task_timer=nil}
+ picker_request+=1 picker_open=false
+ agent_active=false active_tool=nil agent_messages=[] agent_calls=[]
+ candidates=[] chosen=nil viewed_route_id="" route_nodes={} route_prefixes={} didi_places={} didi_quotes={}
+ position_record=nil destination_record=nil constraints=nil user_limits=nil source_records=[] source_snapshots=[]
+ answer_text="" request_text="" phase="idle" runtime_status="" interface_error=""
+ trip_replay=false trip_history=nil guardian_pending=nil guardian_mode=false guardian_reported_run=-1
+ ui_facts_revision+=1
+}
+fn trip_refresh_shell(){
+ ui.trip_header.render() ui.trip_rows.render()
+ ui.trip_sidebar.set_visible(trip_sidebar_open)
+ guardian_refresh() render_content()
+}
+fn trip_new(){
+ if !trip_save_before_navigation() {trip_refresh_shell() return false}
+ let data=trip_edit_state() let now=time_now() let id="trip-"+data.next_id
+ data.next_id+=1 data.selected_id=id
+ data.trips.push({id:id title:"新出行" input:"" created_at:now updated_at:now status:"draft" goal:nil snapshot:nil _dirty:true})
+ if !trip_commit(data) {trip_refresh_shell() return false}
+ trip_reset_runtime() trip_apply_goal() trip_sidebar_open=false ui.sentence.set_text("") trip_refresh_shell() return true
+}
+fn trip_restore(){
+ let trip=trip_by_id(trip_selected_id)
+ if trip==nil {return}
+ ui.sentence.set_text(trip.input)
+ trip_apply_goal()
+ if trip.snapshot==nil {trip_refresh_shell() return}
+ trip_replay=true trip_history=trip.snapshot
+ answer_text=if trip_history.answer.is_string() {trip_history.answer} else {""}
+ phase="history" request_text=trip.input viewed_route_id=route_get(trip_history.facts,"viewed_route_id")
+ if !viewed_route_id.is_string() {viewed_route_id=""}
+ ui_facts_revision+=1
+ let params={blocks:[]}
+ for block in trip_history.blocks {if block.document {params.source=block.source} else {params.blocks.push({id:block.id source:block.source overlay:block.overlay height:block.height visible:false})}}
+ if native_ui_available && (params.blocks.len()>0 || route_get(params,"source")!=nil) {
+  let revision=interface_revision
+  let changed=mount_ui_blocks(params,run_id,revision)
+  if changed==nil {runtime_status="历史界面恢复失败："+interface_error}
+  else {for block in changed {for saved in trip_history.blocks {if saved.id==block.id {block.visible=if block.overlay {false} else {saved.visible}}}}}
+ }
+ trip_refresh_shell()
+}
+fn trip_select(id){
+ if id==trip_selected_id {trip_sidebar_open=false trip_refresh_shell() return true}
+ if trip_by_id(id)==nil {return false}
+ if !trip_save_before_navigation() {trip_refresh_shell() return false}
+ let data=trip_edit_state() data.selected_id=id
+ if !trip_commit(data) {trip_refresh_shell() return false}
+ trip_reset_runtime() trip_sidebar_open=false trip_restore() return true
+}
+fn trip_delete(id){
+ let removed=trip_by_id(id) if removed==nil {return false}
+ let data=trip_edit_state() let kept=[]
+ for trip in data.trips {if trip.id!=id {kept.push(trip)}} data.trips=kept
+ let deleting_current=id==trip_selected_id
+ if deleting_current {data.selected_id=if kept.len()>0 {kept[kept.len()-1].id} else {nil}}
+ data.deleted_id=id
+ if !trip_commit(data) {trip_refresh_shell() return false}
+ // 两份有效索引均已排除删除项；同时回收未进入旧备份索引的最新revision。
+ try {if fs.exists(removed._record_file) {fs.remove(removed._record_file)}} {guardian_error="出行已删除；详情文件清理失败，占用空间尚未释放"}
+ if deleting_current {trip_reset_runtime() trip_apply_goal() ui.sentence.set_text("") trip_restore()}
+ trip_refresh_shell() return true
+}
+fn trip_begin(text){
+ let trip=trip_by_id(trip_selected_id)
+ if trip==nil || trip.goal!=nil || trip.input!="" {if !trip_new() {return false}}
+ let data=trip_edit_state()
+ for item in data.trips {if item.id==trip_selected_id {item.input=text item.title=text item.status="running" item.updated_at=time_now() item.snapshot=nil item._dirty=true}}
+ if !trip_commit(data) {trip_refresh_shell() return false}
+ trip_replay=false trip_history=nil ui.sentence.set_text(text) trip_refresh_shell() return true
+}
+fn trip_label(){
+ let trip=trip_by_id(trip_selected_id)
+ if trip==nil {return "新建或输入一句话开始出行"}
+ let text=trip.title
+ if trip_replay {text+="\n历史详情 · "+guardian_deadline(trip_history.captured_at)+"；不是当前交通核验，需主动重新规划或核验"}
+ elif trip.status=="running" && !agent_active {text+="\n上次查询已中断，未自动继续"}
+ elif trip.snapshot==nil && trip.goal!=nil {text+="\n已恢复确认目标；请主动核验查看当前交通"}
+ return text
+}
+fn trip_history_route(ref){
+ if !trip_replay || trip_history==nil {return nil}
+ let id=if ref=="viewed" {viewed_route_id} else {ref}
+ for route in trip_history.route_data {if route.id==id || route_get(route,"history_geometry_ref")==id || (route.id.strip_prefix("route_")!=route.id && "polyline_"+route.id.strip_prefix("route_")==id) {return route}}
+ return nil
+}
+
 // 仅本应用自写记录使用固定末尾标记，检测截断；不保证任意篡改完整性。
 // 手工固定外封装顺序，避免宿主parse_json/to_json重排对象字段导致误拒。
 fn guardian_encode(goal){return "{\"schema\":1,\"saved_at\":"+time_now().to_json()+",\"goal\":"+goal.to_json()+",\"complete\":\"navigation-goal-v1\"}"}
 fn guardian_store(goal){
- // fs.write是截断写且没有rename；保留一份已确认快照供损坏时明确恢复。
- try {
-   if guardian_goal!=nil {fs.write("guardian-goal.previous.json",guardian_encode(guardian_goal))}
-   fs.write("guardian-goal.json",guardian_encode(goal))
- }
- {guardian_error="保存失败；原目标仍保留，必要时可从已确认备份恢复" guardian_refresh() return false}
- guardian_goal=goal guardian_error=""
- if goal==nil {try {if fs.exists("guardian-goal.previous.json") {fs.remove("guardian-goal.previous.json")}} {guardian_error="目标已删除；旧备份清理失败，删除记录仍阻止恢复"}}
- ui_facts_revision+=1 guardian_refresh() return true
+ let data=trip_edit_state() let found=false
+ for trip in data.trips {if trip.id==trip_selected_id {trip.goal=goal trip._dirty=true trip.updated_at=time_now() trip.status=if goal==nil {"planned"} elif goal.state=="ended" {"ended"} else {"confirmed"} found=true}}
+ if !found {guardian_error="请先新建或选择出行" guardian_refresh() return false}
+ if !trip_commit(data) {guardian_refresh() return false}
+ guardian_goal=goal ui_facts_revision+=1 guardian_refresh() ui.trip_rows.render() return true
 }
 fn guardian_read(path){
  let saved=nil let data=nil
@@ -1794,7 +2010,7 @@ fn guardian_read(path){
  if !data.is_object() || data.schema!=1 || !data.saved_at.is_number() || data.complete!="navigation-goal-v1" || (data.goal!=nil && !guardian_valid_goal(data.goal)) {guardian_error="守护记录格式或版本无效" return nil}
  return data
 }
-fn guardian_load(){
+fn guardian_load_legacy(){
  if guardian_loaded {return} guardian_loaded=true
  let data=guardian_read("guardian-goal.json")
  if data!=nil {guardian_goal=data.goal if data.goal!=nil {guardian_check=route_get(data.goal,"last_check")} return}
@@ -1836,23 +2052,23 @@ fn guardian_snapshot(){
  let remaining=nil if guardian_goal!=nil {remaining=guardian_goal.total_budget_cents-guardian_goal.spent_cents}
  let proposal=nil
  if guardian_pending!=nil {let p=guardian_pending proposal={proposal_version:p.proposal_version base_version:p.base_version created_at:p.created_at goal:guardian_public_goal(p.goal,false) assessment:p.assessment cost_delta_cents:p.cost_delta_cents}}
- return {goal:guardian_public_goal(guardian_goal,true) proposal:proposal last_check:guardian_check current_check:guardian_current_check() remaining_budget_cents:remaining error:guardian_error monitoring:"仅打开或主动重新核验；不会后台监控。上次核验不代表当前仍成立。"}
+ return {goal:guardian_public_goal(guardian_goal,true) proposal:proposal last_check:guardian_check current_check:guardian_current_check() remaining_budget_cents:remaining error:guardian_error monitoring:"打开只展示历史；仅主动重新核验，不会后台监控。上次核验不代表当前仍成立。"}
 }
 fn guardian_propose(p){
  let route=ui_route(route_get(p,"route_id"))
- if route==nil || destination_record==nil || constraints==nil {return {success:false error:"提案必须引用本轮真实Route和目的地"}}
+ if trip_replay || route==nil || destination_record==nil || constraints==nil {return {success:false error:"提案必须引用本轮真实Route和目的地；历史详情不能提出新提案"}}
  if !p.preferences.is_string() || !p.risk_acceptance.is_string() || !p.basis.is_string() || p.basis.trim()=="" {return {success:false error:"请明确偏好、风险与选定依据供用户确认"}}
  if guardian_goal!=nil && guardian_goal.state=="active" && !guardian_mode {return {success:false error:"已有活跃目标；请重新核验或结束/删除后再确认新目标"}}
  let deadline=arrive_by let total=constraints.budget_cents let spent=0 let progress="" let version=1
  if guardian_mode {deadline=guardian_goal.deadline_ts total=guardian_goal.total_budget_cents spent=guardian_goal.spent_cents progress=guardian_goal.progress version=guardian_goal.version+1}
  let assessment=guardian_assess(route,time_now(),deadline,total-spent)
- guardian_sequence+=1
- guardian_pending={proposal_version:guardian_sequence run:run_id base_version:if guardian_mode {guardian_goal.version} else {nil} created_at:time_now() goal:{schema:1 state:"active" version:version deadline_ts:deadline total_budget_cents:total currency:constraints.currency spent_cents:spent progress:progress preferences:if guardian_mode {guardian_goal.preferences} else {p.preferences} risk_acceptance:if guardian_mode {guardian_goal.risk_acceptance} else {p.risk_acceptance} destination:destination_record selected_route:guardian_materialize(route) selection_basis:p.basis confirmed_at:nil confirmations:[]} assessment:assessment cost_delta_cents:if guardian_mode && guardian_goal.progress=="" && guardian_goal.spent_cents==0 && route.price_cents!=nil && guardian_goal.selected_route.price_cents!=nil {route.price_cents-guardian_goal.selected_route.price_cents} else {nil}}
+ guardian_error="" guardian_sequence+=1
+ guardian_pending={trip_id:trip_selected_id proposal_version:guardian_sequence run:run_id base_version:if guardian_mode {guardian_goal.version} else {nil} created_at:time_now() goal:{schema:1 state:"active" version:version deadline_ts:deadline total_budget_cents:total currency:constraints.currency spent_cents:spent progress:progress preferences:if guardian_mode {guardian_goal.preferences} else {p.preferences} risk_acceptance:if guardian_mode {guardian_goal.risk_acceptance} else {p.risk_acceptance} destination:destination_record selected_route:guardian_materialize(route) selection_basis:p.basis confirmed_at:nil confirmations:[]} assessment:assessment cost_delta_cents:if guardian_mode && guardian_goal.progress=="" && guardian_goal.spent_cents==0 && route.price_cents!=nil && guardian_goal.selected_route.price_cents!=nil {route.price_cents-guardian_goal.selected_route.price_cents} else {nil}}
  ui_facts_revision+=1 guardian_refresh()
  return {success:true proposal:guardian_snapshot().proposal confirmation:"仅父应用的真实确认按钮可保存/替换；生成DSL事件不是用户确认"}
 }
 fn guardian_selected_candidate(){
- if guardian_goal==nil || guardian_goal.state!="active" || !guardian_mode || viewed_route_id=="saved_goal_route" {return nil}
+ if trip_replay || guardian_goal==nil || guardian_goal.state!="active" || !guardian_mode || viewed_route_id=="saved_goal_route" {return nil}
  return viewed_route()
 }
 fn guardian_prepare_selected(){
@@ -1861,8 +2077,9 @@ fn guardian_prepare_selected(){
  return guardian_propose({route_id:route.id preferences:guardian_goal.preferences risk_acceptance:guardian_goal.risk_acceptance basis:"用户选择本轮当前查看方案；可行性与风险以提案评估为准"})
 }
 fn guardian_confirm(version){
+ if trip_replay {guardian_error="历史详情不可确认旧提案，请先主动重新核验" guardian_refresh() return false}
  let pending=guardian_pending
- if pending==nil || pending.proposal_version!=version || pending.run!=run_id {guardian_error="提案已失效，请重新提出并确认" guardian_refresh() return false}
+ if pending==nil || pending.trip_id!=trip_selected_id || pending.proposal_version!=version || pending.run!=run_id {guardian_error="提案已失效，请重新提出并确认" guardian_refresh() return false}
  if pending.base_version!=nil && (guardian_goal==nil || guardian_goal.state!="active" || guardian_goal.version!=pending.base_version) {guardian_error="目标版本已变化，未替换路线" guardian_refresh() return false}
  let goal=pending.goal.to_json().parse_json() goal.confirmed_at=time_now()
  if pending.base_version!=nil {goal.confirmations=guardian_goal.confirmations.to_json().parse_json()}
@@ -1915,6 +2132,7 @@ fn guardian_saved_route_facts(){
  return fact
 }
 fn guardian_recheck(){
+ if !trip_save_before_navigation() {return false}
  if !native_ui_available || guardian_goal==nil || guardian_goal.state!="active" {return false}
  start_task_with("重新核验已确认的出行目标",true)
  return true
@@ -1929,7 +2147,7 @@ fn guardian_label(){
   let reasons="" for reason in check.reasons {if reasons!="" {reasons+="；"} reasons+=reason}
   if reasons!="" {text+="\n上次核验依据："+reasons}
  } else {text+=" · 尚未核验"}
- return text+"\n仅打开或主动核验，不会后台监控。"+if guardian_error!="" {"\n"+guardian_error} else {""}
+ return text+"\n打开只展示历史；仅主动核验，不会后台监控。"+if guardian_error!="" {"\n"+guardian_error} else {""}
 }
 fn guardian_deadline(epoch){let v=local_time(epoch+28800) return ""+v.year+"-"+v.month+"-"+v.day+" "+beijing_clock(epoch)}
 fn guardian_proposal_label(){
@@ -1943,8 +2161,10 @@ fn start_task(){start_task_with(ui.sentence.text().trim(),false)}
 fn start_task_with(text,recheck){
     render_probe=nil
     agent_tool_schema=nil
-    invalidate_interface()
     if text == "" { show_status("请用一句话说明行程、时限与预算") return }
+    if !recheck && !trip_begin(text) {return}
+    invalidate_interface()
+    trip_replay=false trip_history=nil
     guardian_mode=recheck guardian_pending=nil guardian_reported_run=-1
     if !recheck {guardian_check=nil}
     cancel_pending_location()
@@ -1967,7 +2187,7 @@ fn start_task_with(text,recheck){
     }
     agent_messages=[] agent_calls=[] agent_call_index=0 active_tool=nil tool_node_refs=[] tool_candidate_start=0 agent_active=true
     trace_initialize()
-    trace_emit("query_started",{input:text facts:interface_facts().to_json()},nil)
+    trace_emit("query_started",{trip_id:trip_selected_id input:text facts:interface_facts().to_json()},nil)
     trace_marker()
     source_records.push({id:"current-input" kind:"user" source:"explicit-current-input" mock:false raw:text read_at:received_at})
     render_content()
@@ -1980,6 +2200,7 @@ fn start_task_with(text,recheck){
 fn cancel_task(){
     let stopped_run=run_id let stopped_at=time_now()
     agent_active=false active_tool=nil
+    trip_save_current("cancelled")
     cancelled_input = ui.sentence.text().trim()
     stop_interface()
     cancel_pending_location()
@@ -2196,7 +2417,7 @@ fn agent_pump(token){
       agent_active=false active_tool=nil if phase=="running" {phase="waiting"}
       let ended={content:answer_text generated:generated_active rendered:generated_render_complete occurred_at:time_now()}
       start_timeout(0.01,||trace_emit_run("query_ended",ended,nil,token))
-      render_content() return
+      trip_save_current("completed") trip_refresh_shell() return
    }
    agent_calls=calls agent_call_index=0 start_timeout(0.01,||agent_execute_next(token))
  })
@@ -2352,7 +2573,7 @@ fn request_failed(record,text){
  agent_active=false active_tool=nil phase="failed"
  let token=run_id let failed_at=time_now()
  start_timeout(0.01,||trace_emit_run("transport_error",{step:record.step state:record.state error:text occurred_at:failed_at},nil,token))
- show_status(text)
+ show_status(text) trip_save_current("failed")
 }
 fn block_inner_height(block){if block.height!=nil {return Fill} if block.document {return Fill} return Fit}
 fn block_height(block){
@@ -2388,7 +2609,7 @@ fn invalidate_interface(){ stop_interface() clear_generated() interface_error = 
 fn shell_busy(){ return agent_active || phase == "picking" }
 fn shell_action(){ if !native_ui_available {show_status(missing_runtime_message) return} if shell_busy(){cancel_task()} else {query_task()} }
 
-fn ui_route(ref){ if ref == "viewed" { return viewed_route() } for candidate in candidates { if candidate.id == ref || route_get(candidate,"geometry_ref")==ref { return candidate } } return nil }
+fn ui_route(ref){ if trip_replay {return trip_history_route(ref)} if ref == "viewed" { return viewed_route() } for candidate in candidates { if candidate.id == ref || route_get(candidate,"geometry_ref")==ref { return candidate } } return nil }
 
 
 fn route_leg_facts(candidate){
@@ -2434,6 +2655,8 @@ fn interface_route_facts(candidate, check){
     return fact
 }
 fn interface_facts(){
+ if trip_replay && trip_history!=nil {let facts={} for key value in trip_history.facts {facts[key]=value} facts.history={captured_at:trip_history.captured_at current:false} facts.viewport=ui_viewport facts.viewed_route_id=viewed_route_id return facts}
+
     if native_ui_available {let area = ui.content.rect() if area != nil && area.width>0 && area.height>0 {ui_viewport=area ui_overlay_top=area.y-ui.sentence.rect().y+12}}
     render_probe_mark("source_check_entered")
     let routes = [] let source_valid = sources_current() let sources = []
@@ -2522,6 +2745,7 @@ fn mount_ui_blocks(params,token,revision){
    let kept={} for key slot in map_slots {if route_get(slot,"block_id")!=block.id {kept[key]=slot}} map_slots=kept
   }
   block.revision+=1 block.notified=false block.complete=false block.error="" block.mailbox_seen="" block.mailbox_lines=0 block.installed=false
+  block.raw_source=input.source
   block.source=block_source(block,input.source) block.source_revision=ui_facts_revision changed.push(block)
  }
  sync_block_state()
@@ -2562,6 +2786,7 @@ fn block_rendered(block){
  block.notified=true let diagnostic=block.handle.diagnostics()
  if diagnostic=="" {block.complete=true block.error=""} else {block.error=diagnostic}
  sync_block_state()
+ if !agent_active && !trip_replay {trip_save_current(phase)}
  trace_emit("render_notification",{block_id:block.id diagnostics:diagnostic rendered:block.complete revision:block.revision},nil)
  render_content()
  for key slot in map_slots {if route_get(slot,"block_id")==block.id {update_map_widget(slot)}}
@@ -2580,7 +2805,8 @@ fn ui_dispatch_action(action){
  let block_id=route_get(action,"block_id") if block_id==nil {block_id="__document"}
  let block=block_by_id(block_id)
  if block!=nil && route_get(action,"block_revision")!=nil && action.block_revision!=block.revision {return true}
- trace_emit("local_event",{event:action.to_json()},nil)
+ if trip_replay && action.action!="rendered" && action.action!="map" && action.action!="map_camera" && action.action!="map_fit" && action.action!="show_block" && action.action!="view_route" && action.action!="runtime_error" {return true}
+ trace_emit("local_event",{trip_id:trip_selected_id historical:trip_replay event:action.to_json()},nil)
  let name=route_get(action,"action") let id=route_get(action,"id")
  if name=="rendered" {block_rendered(block)}
  elif name=="map" {register_map_block(action.widget,action.target,route_get(action,"status_widget"),route_get(action,"interactive"),route_get(action,"path_indices"),block_id)}
@@ -2628,10 +2854,17 @@ fn update_map_widget(slot){
         }
     } { interface_error = "此图控件加载失败；其它图和行程保留" ui.feedback.render() }
 }
-guardian_load()
+trip_load()
 trace_initialize()
 View{width:Fill height:Fill flow:Overlay
 SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.color: #xf7f7f7
+    trip_header := View{width:Fill height:Fit flow:Down spacing:4 on_render:||{
+      View{width:Fill height:Fit flow:Right spacing:8
+        trip_menu := ButtonFlat{text:"☰ 出行列表" width:110 height:32 on_click:||{trip_sidebar_open=!trip_sidebar_open trip_refresh_shell()}}
+        Label{width:Fill height:Fit flow:Flow.Right{wrap:true} text:"Navigation · 出行详情" draw_text.text_style:NavRegular}
+      }
+      trip_title := Label{width:Fill height:Fit flow:Flow.Right{wrap:true} text:trip_label() draw_text.text_style:NavRegular}
+    }}
     sentence := TextInput{width: Fill height: 48 on_return: || shell_action() text: "40 分钟内到机场，预算 50，尽量便宜。" empty_text: "描述本次行程、时限与预算"
         draw_text +: {text_style: NavRegular color: ink color_hover: ink color_focus: ink color_empty: muted}}
     control := View{width: Fill height: Fit on_render: || {
@@ -2693,8 +2926,21 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
 block_overlay := View{width:Fill height:Fill flow:Overlay on_render:||{
  for block in overlay_blocks {View{width:Fill height:block_height(block) margin:Inset{top:ui_overlay_top} visible:block_actual_visible(block) flow:Down clip_x:true clip_y:true Splash{width:Fill height:Fill body:block.body}}}
 }}
+trip_sidebar := SolidView{width:310 height:Fill flow:Down padding:12 spacing:8 draw_bg.color:#xf2f4f3
+  View{width:Fill height:Fit flow:Right spacing:8
+    Label{width:Fill height:Fit text:"出行列表" draw_text.text_style:NavRegular}
+    trip_close := ButtonFlat{text:"关闭" width:64 height:32 on_click:||{trip_sidebar_open=false trip_refresh_shell()}}
+  }
+  trip_new_button := Button{text:"新建出行" width:Fill height:40 on_click:||trip_new()}
+  trip_rows := ScrollYView{width:Fill height:Fill flow:Down spacing:8 on_render:||{
+    for trip in trip_records {let id=trip.id
+      ButtonFlat{width:Fill height:Fit text:if id==trip_selected_id {"● "+trip.title} else {trip.title}+"\n"+guardian_deadline(trip.updated_at)+" · "+if trip.goal!=nil {if trip.goal.state=="active" {"已确认目标"} else {"已结束"}} else {if trip.status=="draft" {"草稿"} else {"规划记录"}} on_click:||trip_select(id)}
+    }
+  }}
+  trip_delete_button := ButtonFlat{text:"删除当前出行" width:Fill height:36 enabled:trip_selected_id!=nil on_click:||trip_delete(trip_selected_id)}
+}
 trace_overlay := View{width:1 height:1 flow:Overlay
 trace_identity := Label{visible:trace_enabled width:1 height:1 padding:0 text:trace_identity_json() draw_text +: {color:#x0000 text_style:NavRegular{font_size:0.5}}}
 }
 }
-start_timeout(0.1, || { trace_initialize() if trace_enabled {try {ui.trace_identity.set_text(trace_identity_json())} {}} trace_marker() if native_ui_available {ui_viewport = ui.content.rect()} render_content() if native_ui_available {poll_generated()} if guardian_goal!=nil && guardian_goal.state=="active" {start_timeout(0.2,||guardian_recheck())} })
+start_timeout(0.1, || { ui.trip_sidebar.set_visible(false) trace_initialize() if trace_enabled {try {ui.trace_identity.set_text(trace_identity_json())} {}} trace_marker() if native_ui_available {ui_viewport = ui.content.rect()} render_content() if native_ui_available {poll_generated()} trip_restore() })
