@@ -11,17 +11,15 @@ def source(original):
     return original
 
 
-def prepare(jail):
-    root = Path(os.environ.get('NAV_TRIP_REPLAY_STATE', 'build/research/journey-guardian/online/private-state/home/apps/os.agentic26-navigation'))
+def prepare(jail, root=None):
+    root = Path(root or os.environ.get('NAV_TRIP_REPLAY_STATE', 'build/research/journey-guardian/online/private-state/home/apps/os.agentic26-navigation'))
     assert (root / 'navigation-trips.json').exists(), '先提供真实保存记录：NAV_TRIP_REPLAY_STATE'
     for pattern in ('navigation-trips*.json', 'navigation-trip-trip-*.json', 'guardian-goal*.json'):
         for path in root.glob(pattern):
             shutil.copyfile(path, jail / path.name)
 
 
-def run(work, jail, request, stop, launch, original, injected):
-    checks = []
-
+def controls(work, request):
     def rows():
         return [r for r in json.loads(request('snap'))['s'] if r.get('ty') != 'Splash']
 
@@ -53,6 +51,13 @@ def run(work, jail, request, stop, launch, original, injected):
         request('t', t='Navigation', wait=1)
         request('k', c='enter', wait=1)
         time.sleep(1)
+
+    return rows, capture, click, android
+
+
+def run(work, jail, request, stop, launch, original, injected):
+    checks = []
+    rows, capture, click, android = controls(work, request)
 
     def disk():
         index = json.loads((jail / 'navigation-trips.json').read_text())['data']

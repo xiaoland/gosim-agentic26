@@ -731,8 +731,9 @@ def main():
  if '--guardian' in sys.argv:
   import test_goal_guardian as guardian
   source=guardian.source(original)
- if '--trips' in sys.argv or '--trips-replay' in sys.argv:
-  if '--trips-replay' in sys.argv:import test_trip_replay as trips
+ if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv:
+  if '--ux-shell' in sys.argv:import test_shell_ux as trips
+  elif '--trips-replay' in sys.argv:import test_trip_replay as trips
   else:import test_trip_list as trips
   source=trips.source(original)
  env=a.host_env(True);process=None;port=None
@@ -770,12 +771,12 @@ def main():
   manifest=json.loads((mount/'manifest.json').read_text());manifest['id']='os.agentic26-navigation';(mount/'manifest.json').write_text(json.dumps(manifest));(mount/'main.splash').write_text(source)
   subprocess.run([str(ROOT.parent/'.octosense-agentic26/OctoSense-App-Hub/target/release/hub'),'stamp',str(mount)],stdout=subprocess.DEVNULL,check=True)
   a.init_demo();jail=a.jail_path();a.materialize_skills(ROOT/'bundle',jail);(jail/'private-config.json').write_text('{"location_mode":"demo"}');(jail/'trip.json').write_text('historical fixture ignored');(jail/'agent-run.json').write_text('historical audit ignored')
-  if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--guardian' in sys.argv or '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'didi-fixture-secret','amap_api_key':'trace-map-secret','didi_mcp_key':'didi-fixture-secret'}))
-  if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--guardian' in sys.argv or '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
+  if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv or '--guardian' in sys.argv or '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:(jail/'private-config.json').write_text(json.dumps({'location_mode':'demo','development_trace':True,'development_trace_session':'0123456789abcdef0123456789abcdef','minimax_api_key':'didi-fixture-secret','amap_api_key':'trace-map-secret','didi_mcp_key':'didi-fixture-secret'}))
+  if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv or '--guardian' in sys.argv or '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
-  if '--trips' in sys.argv or '--trips-replay' in sys.argv:trips.prepare(jail)
+  if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv:trips.prepare(jail)
   launch('native');report=None
-  if '--trips' in sys.argv or '--trips-replay' in sys.argv:
+  if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv:
    trips.run(w,jail,q,stop,launch,original,source)
    return
   if '--guardian' in sys.argv:

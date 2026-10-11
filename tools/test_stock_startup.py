@@ -64,7 +64,8 @@ def main():
         assert any('当前宿主缺少 Navigation' in row.get('t', '') and row['r'][3] > 0 for row in rows)
         (work / 'first.json').write_text(json.dumps(rows, ensure_ascii=False, indent=2))
         (work / 'first.png').write_bytes(request('g', raw=1))
-        button = next(row for row in rows if row.get('ty') == 'Button' and row.get('t') == '查询（不可用）')
+        button = next(row for row in rows if row.get('ty') == 'Button' and row.get('i') == 'query_button')
+        assert button['enabled'] is False and button['r'][3] > 0, '规划控件必须实际禁用且可见'
         x, y, width, height = button['r']
         request('m', k='click', x=x + width / 2, y=y + height / 2, wait=1)
         entry = next(row for row in rows if row.get('ty') == 'TextInput')
@@ -72,17 +73,19 @@ def main():
         request('m', k='click', x=x + width / 2, y=y + height / 2, wait=1)
         request('k', c='KeyA', cmd=1, wait=1)
         request('t', t='去机场，预算 50 元', wait=1)
-        request('k', c='enter', wait=1)
+        request('k', c='enter', cmd=1, wait=1)
         time.sleep(.5)
         rows = snapshot()
         assert any('当前宿主缺少 Navigation' in row.get('t', '') and row['r'][3] > 0 for row in rows)
-        assert any(row.get('t') == '查询（不可用）' for row in rows)
+        button = next(row for row in rows if row.get('i') == 'query_button')
+        assert button['enabled'] is False and button['r'][3] > 0
+        assert not any(row.get('t') == '停止' or 'Agent正在处理' in row.get('t', '') for row in rows), '缺能力不能启动查询'
         (work / 'after-input.json').write_text(json.dumps(rows, ensure_ascii=False, indent=2))
         (work / 'after-input.png').write_bytes(request('g', raw=1))
         assert any(row.get('ty') == 'TextInput' and row.get('t') == '去机场，预算 50 元' for row in rows)
         errors = [line for line in log.read_text().splitlines() if '[E]' in line or 'panicked' in line]
         assert not errors, errors
-        report.update(passed=True, checks=['空配置首屏说明可见', '查询按钮不可用', '输入回车不能绕过能力门', '无原生脚本错误'])
+        report.update(passed=True, checks=['空配置首屏说明可见', '查询按钮不可用', '多行输入CmdEnter不能绕过能力门', '无原生脚本错误'])
     finally:
         if process and process.poll() is None:
             try:

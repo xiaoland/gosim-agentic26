@@ -254,6 +254,9 @@ let NavBold = theme.font_bold{font_family: FontFamily{latin := FontMember{res: h
 let ink = #x162e35
 let muted = #x5e747b
 let teal = #x06796f
+let NavPrimary = ButtonFlat{height:44 margin:0 draw_text +:{text_style:NavRegular{font_size:16} color:#xffffff color_hover:#xffffff color_down:#xffffff color_focus:#xffffff} draw_bg +:{color:#x28786f color_hover:#x216b63 color_down:#x195d56 color_focus:#x28786f border_size:0 border_radius:8}}
+let NavSecondary = ButtonFlat{height:44 margin:0 draw_text +:{text_style:NavRegular{font_size:14} color:ink color_hover:ink color_down:ink color_focus:ink} draw_bg +:{color:#xf0f4f3 color_hover:#xe6efec color_down:#xdde8e4 border_size:0 border_radius:8}}
+let NavMeta = Label{width:Fill height:Fit flow:Flow.Right{wrap:true} draw_text +:{text_style:NavRegular{font_size:13} color:muted}}
 // 已核对的扩展宿主提供此类型；官方原版不具备本应用的区块、布局和地图接口。
 let native_ui_available = route_get(mod.widgets, "AutoNaviMapView") != nil
 let missing_runtime_message = "当前宿主缺少 Navigation 所需的原生扩展，查询暂不可用。\n需要区块寻址、布局测量、渲染诊断和交互地图接口；请使用 README 中注明的配套宿主。官方原版首屏仅展示兼容说明。"
@@ -262,6 +265,11 @@ let trip_selected_id=nil
 let trip_next_id=1
 let trip_generation=0
 let trip_sidebar_open=false
+let composer_open=false
+let history_details_open=false
+let trip_manage_open=false
+let shell_delete_target=nil
+let shell_delete_kind=""
 let trip_replay=false
 let trip_history=nil
 let trip_saved_run=-1
@@ -675,7 +683,15 @@ fn sources_current(){
     return position_current(position_record)
 }
 fn render_content(){
-    ui.feedback.render() ui.control.render() ui.answer_area.render()
+    ui.feedback.render() ui.control.render() ui.answer_area.render() ui.trip_context.render()
+    ui.composer.set_visible(composer_open || shell_composer_default())
+    ui.control.set_visible(shell_busy() || composer_open || shell_composer_default())
+    ui.trip_context.set_visible(!shell_composer_default())
+    // 原版宿主不支持动态子控件寻址；其兼容页只使用静态外壳。
+    if native_ui_available {
+      ui.shell_state.set_text(shell_history_line()) ui.shell_state.set_visible(!trip_replay)
+      ui.history_info.set_text(shell_history_line()) ui.history_info.set_visible(trip_replay)
+    }
     if !generated_area_ready {ui.generated_area.render() generated_area_ready = true}
     ui.generated_area.set_visible(generated_active && (answer_text == "" || generated_render_complete))
     let overlay_open=false for block in overlay_blocks {if block_actual_visible(block) && block.installed {overlay_open=true}}
@@ -1909,11 +1925,12 @@ fn trip_reset_runtime(){
  position_record=nil destination_record=nil constraints=nil user_limits=nil source_records=[] source_snapshots=[]
  answer_text="" request_text="" phase="idle" runtime_status="" interface_error=""
  trip_replay=false trip_history=nil guardian_pending=nil guardian_mode=false guardian_reported_run=-1
+ composer_open=false history_details_open=false trip_manage_open=false shell_delete_target=nil shell_delete_kind=""
  ui_facts_revision+=1
 }
 fn trip_refresh_shell(){
- ui.trip_header.render() ui.trip_rows.render()
- ui.trip_sidebar.set_visible(trip_sidebar_open)
+ ui.trip_header.render() ui.trip_rows.render() ui.trip_context.render() ui.trip_management.render()
+ ui.trip_sidebar.set_visible(trip_sidebar_open) ui.trip_scrim.set_visible(trip_sidebar_open)
  guardian_refresh() render_content()
 }
 fn trip_new(){
@@ -1946,6 +1963,7 @@ fn trip_restore(){
  trip_refresh_shell()
 }
 fn trip_select(id){
+ shell_delete_target=nil shell_delete_kind="" trip_manage_open=false
  if id==trip_selected_id {trip_sidebar_open=false trip_refresh_shell() return true}
  if trip_by_id(id)==nil {return false}
  if !trip_save_before_navigation() {trip_refresh_shell() return false}
@@ -1973,6 +1991,41 @@ fn trip_begin(text){
  for item in data.trips {if item.id==trip_selected_id {item.input=text item.title=text item.status="running" item.updated_at=time_now() item.snapshot=nil item._dirty=true}}
  if !trip_commit(data) {trip_refresh_shell() return false}
  trip_replay=false trip_history=nil ui.sentence.set_text(text) trip_refresh_shell() return true
+}
+fn shell_composer_default(){let trip=trip_by_id(trip_selected_id) return trip==nil || (trip.input=="" && trip.goal==nil)}
+fn shell_trip_name(trip){
+ if trip==nil {return "新出行"}
+ if trip.goal!=nil {return trip.goal.destination.name}
+ if trip.snapshot!=nil {let destination=route_get(trip.snapshot.facts,"destination") if destination!=nil && route_get(destination,"name").is_string() {return destination.name}}
+ return trip.title
+}
+fn shell_title(){
+ if guardian_goal!=nil {return guardian_goal.destination.name}
+ if trip_history!=nil {let destination=route_get(trip_history.facts,"destination") if destination!=nil && route_get(destination,"name").is_string() {return destination.name}}
+ return if shell_composer_default() {"新出行"} else {"出行详情"}
+}
+fn shell_clock(epoch){return beijing_clock(epoch).strip_suffix("（北京时间）")}
+fn shell_short_time(epoch){let v=local_time(epoch+28800) return ""+v.month+"月"+v.day+"日 "+shell_clock(epoch)}
+fn shell_deadline(epoch){let v=local_time(epoch+28800) let now=local_time(time_now()+28800) return if v.year==now.year && v.month==now.month && v.day==now.day {shell_clock(epoch)} else {shell_short_time(epoch)}}
+fn shell_history_line(){
+ if trip_replay {return "历史 · "+shell_short_time(trip_history.captured_at)}
+ let trip=trip_by_id(trip_selected_id)
+ if trip!=nil && trip.status=="running" {return if shell_busy() {"正在规划"} else {"上次规划已中断"}}
+ if trip!=nil && trip.status=="cancelled" {return "规划已停止"}
+ if trip!=nil && trip.status=="failed" {return "规划未完成"}
+ return "规划记录"
+}
+fn shell_goal_summary(){
+ if guardian_goal==nil {return guardian_error}
+ let status=if guardian_goal.state=="ended" {"目标已结束"} elif guardian_check==nil {"尚未核验"} elif guardian_check.status=="valid" {"估计成立"} elif guardian_check.status=="invalid" {"约束失效 · 查看原因"} else {"证据不足 · 查看原因"}
+ return "截止 "+shell_deadline(guardian_goal.deadline_ts)+" · 剩余 "+money_text(guardian_goal.total_budget_cents-guardian_goal.spent_cents)+"\n"+status+if guardian_check!=nil {" · "+shell_clock(guardian_check.checked_at)} else {""}
+}
+fn shell_delete_request(kind){shell_delete_target=trip_selected_id shell_delete_kind=kind trip_manage_open=true trip_sidebar_open=true trip_refresh_shell()}
+fn shell_delete_confirm(){
+ let id=shell_delete_target let kind=shell_delete_kind
+ shell_delete_target=nil shell_delete_kind=""
+ if kind=="trip" {trip_delete(id)} elif id==trip_selected_id {guardian_delete()}
+ trip_refresh_shell()
 }
 fn trip_label(){
  let trip=trip_by_id(trip_selected_id)
@@ -2021,17 +2074,21 @@ fn guardian_sync_layout(){
  guardian_layout_pending=false
  if !native_ui_available {return}
  let area=ui.content.rect()
- if area==nil || area.width<=0 || area.height<=0 {return}
- let top=area.y-ui.sentence.rect().y+12
- if ui_viewport==nil || ui_viewport.height!=area.height || ui_viewport.width!=area.width || ui_overlay_top!=top {
-   ui_viewport=area ui_overlay_top=top ui_facts_revision+=1
+ let anchor=ui.result_anchor.rect() let root=ui.index_page.rect()
+ if anchor==nil || root==nil {return}
+ let top=anchor.y+anchor.height-root.y
+ let viewport_changed=area!=nil && area.width>0 && area.height>0 && (ui_viewport==nil || ui_viewport.height!=area.height || ui_viewport.width!=area.width)
+ if viewport_changed || ui_overlay_top!=top {
+   if area!=nil && area.width>0 && area.height>0 {ui_viewport=area}
+   ui_overlay_top=top ui_facts_revision+=1
    ui.block_overlay.render_style() refresh_generated_facts()
  }
 }
 fn guardian_refresh(){
- ui.guardian_panel.render() ui.guardian_confirmation.render()
+ ui.guardian_panel.render() ui.guardian_confirmation.render() ui.guardian_details.render()
  ui.guardian_panel.set_visible(guardian_goal!=nil || guardian_error!="")
  ui.guardian_confirmation.set_visible(guardian_pending!=nil)
+ ui.guardian_details.set_visible(guardian_progress_open && guardian_goal!=nil)
  refresh_generated_facts()
  if !guardian_layout_pending {guardian_layout_pending=true start_timeout(0.05,||guardian_sync_layout())}
 }
@@ -2657,7 +2714,7 @@ fn interface_route_facts(candidate, check){
 fn interface_facts(){
  if trip_replay && trip_history!=nil {let facts={} for key value in trip_history.facts {facts[key]=value} facts.history={captured_at:trip_history.captured_at current:false} facts.viewport=ui_viewport facts.viewed_route_id=viewed_route_id return facts}
 
-    if native_ui_available {let area = ui.content.rect() if area != nil && area.width>0 && area.height>0 {ui_viewport=area ui_overlay_top=area.y-ui.sentence.rect().y+12}}
+    if native_ui_available {let area = ui.content.rect() if area != nil && area.width>0 && area.height>0 {ui_viewport=area let anchor=ui.result_anchor.rect() let root=ui.index_page.rect() if anchor!=nil && root!=nil {ui_overlay_top=anchor.y+anchor.height-root.y}}}
     render_probe_mark("source_check_entered")
     let routes = [] let source_valid = sources_current() let sources = []
     render_probe_mark("source_check_returned")
@@ -2857,57 +2914,76 @@ fn update_map_widget(slot){
 trip_load()
 trace_initialize()
 View{width:Fill height:Fill flow:Overlay
-SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.color: #xf7f7f7
-    trip_header := View{width:Fill height:Fit flow:Down spacing:4 on_render:||{
+index_page := SolidView{width:Fill height:Fill flow:Down padding:Inset{left:16 right:16 top:8 bottom:12} spacing:8 draw_bg.color:#xf7f9f8
+    trip_header := View{width:Fill height:56 flow:Right spacing:12 align:Align{y:0.5} on_render:||{
+      trip_menu := NavSecondary{text:"☰" width:44 on_click:||{trip_sidebar_open=!trip_sidebar_open trip_refresh_shell()}}
+      trip_title := Label{width:Fill height:Fit max_lines:1 text:shell_title() draw_text +:{text_style:NavBold{font_size:20} color:ink}}
+    }}
+    trip_context := View{width:Fill height:Fit flow:Down spacing:4 on_render:||{
       View{width:Fill height:Fit flow:Right spacing:8
-        trip_menu := ButtonFlat{text:"☰ 出行列表" width:110 height:32 on_click:||{trip_sidebar_open=!trip_sidebar_open trip_refresh_shell()}}
-        Label{width:Fill height:Fit flow:Flow.Right{wrap:true} text:"Navigation · 出行详情" draw_text.text_style:NavRegular}
+        history_info := NavSecondary{visible:trip_replay text:shell_history_line() width:Fill on_click:||{history_details_open=!history_details_open trip_refresh_shell()}}
+        shell_state := NavMeta{visible:!trip_replay text:shell_history_line()}
+        NavSecondary{text:if composer_open {"收起要求"} else {"调整要求"} width:104 on_click:||{composer_open=!composer_open trip_refresh_shell()}}
       }
-      trip_title := Label{width:Fill height:Fit flow:Flow.Right{wrap:true} text:trip_label() draw_text.text_style:NavRegular}
+      NavMeta{visible:trip_replay && history_details_open text:"历史资料不代表当前交通；打开不会自动运行。地图仍可查看，核验需主动发起。"}
+      return true
     }}
-    sentence := TextInput{width: Fill height: 48 on_return: || shell_action() text: "40 分钟内到机场，预算 50，尽量便宜。" empty_text: "描述本次行程、时限与预算"
-        draw_text +: {text_style: NavRegular color: ink color_hover: ink color_focus: ink color_empty: muted}}
-    control := View{width: Fill height: Fit on_render: || {
-        ButtonFlat{enabled:native_ui_available draw_text +: {text_style: NavRegular color: ink color_hover: ink color_down: ink color_focus: ink} text: if !native_ui_available {"查询（不可用）"} elif shell_busy() { "终止" } else { "查询" } width: 160 height: 36 on_click: || shell_action()}
+    composer := View{width:Fill height:Fit flow:Down spacing:8
+      Label{width:Fill height:Fit text:"出行要求" draw_text +:{text_style:NavRegular{font_size:16} color:ink}}
+      sentence := TextInput{width:Fill height:80 is_multiline:true text:"40 分钟内到机场，预算 50，尽量便宜。" empty_text:"目的地、到达时间与预算" on_return:||{if !shell_busy() {shell_action()} return true}
+        draw_text +:{text_style:NavRegular{font_size:16} color:ink color_hover:ink color_focus:ink color_empty:muted} draw_bg +:{border_radius:8}}
+      NavMeta{text:"提交会新建一条出行，原记录保留。"}
+    }
+    control := View{width:Fill height:Fit on_render:||{
+      if shell_busy() || composer_open || shell_composer_default() {
+        query_button := NavPrimary{enabled:native_ui_available text:if shell_busy() {"停止"} else {"开始规划"} width:Fill on_click:||shell_action()}
+      }
+    return true
     }}
-    guardian_panel := View{width:Fill height:Fit flow:Down spacing:4 on_render:||{
-      if guardian_goal!=nil || guardian_error!="" {
-        Label{width:Fill height:Fit flow:Flow.Right{wrap:true} draw_text.text_style:NavRegular draw_text.color:ink text:guardian_label()}
-        if guardian_goal!=nil {
-          View{width:Fill height:Fit flow:Right spacing:6
-            ButtonFlat{text:"重新核验" enabled:native_ui_available && guardian_goal.state=="active" && !shell_busy() width:90 height:36 on_click:||guardian_recheck()}
-            ButtonFlat{text:"结束目标" width:90 height:36 on_click:||guardian_finish()}
-            ButtonFlat{text:"删除目标" width:90 height:36 on_click:||guardian_delete()}
-          }
-          if guardian_goal.state=="active" {
-            if guardian_selected_candidate()!=nil {
-              let route=guardian_selected_candidate()
-              guardian_viewed_candidate := Label{width:Fill height:Fit flow:Flow.Right{wrap:true} draw_text.text_style:NavRegular text:"当前查看："+route.id+" · "+route_kind_label(route)+" · "+money_text(route.price_cents)+" · "+duration_text(route.duration_seconds)}
-              guardian_prepare := ButtonFlat{text:"用当前查看方案准备替代" width:Fill height:36 enabled:!shell_busy() on_click:||guardian_prepare_selected()}
-            }
-            ButtonFlat{text:if guardian_progress_open {"收起进度"} else {"确认进度/费用"} width:140 height:32 on_click:||{guardian_progress_open=!guardian_progress_open guardian_refresh()}}
-            if guardian_progress_open {View{width:Fill height:Fit flow:Down spacing:4
-              Label{width:Fill height:Fit draw_text.text_style:NavRegular text:"确认进度与累计已花费用（人民币元）"}
-              guardian_progress_input := TextInput{width:Fill height:36 text:guardian_goal.progress empty_text:"例如尚未出发／已下车到某站；位置不会证明乘车"}
-              guardian_spent := TextInput{width:Fill height:36 text:""+(guardian_goal.spent_cents/100) empty_text:"累计已花金额"}
-              ButtonFlat{text:"确认进度/费用" width:140 height:32 on_click:||guardian_progress()}
-            }}
-          }
+    guardian_panel := View{width:Fill height:Fit flow:Down spacing:8 on_render:||{
+      if guardian_goal!=nil {Label{width:Fill height:Fit flow:Flow.Right{wrap:true} text:shell_goal_summary() draw_text +:{text_style:NavRegular{font_size:14} color:ink}}
+        View{width:Fill height:Fit flow:Right spacing:8
+          if guardian_goal.state=="active" {guardian_recheck_button := NavPrimary{text:"重新核验" width:Fill enabled:native_ui_available && !shell_busy() on_click:||guardian_recheck()}}
+          guardian_details_button := NavSecondary{text:if guardian_progress_open {"收起详情"} else {"进度与详情"} width:116 on_click:||{guardian_progress_open=!guardian_progress_open guardian_refresh()}}
         }
       }
+      if guardian_error!="" {NavMeta{text:guardian_error draw_text.color:#xa23832}}
+    return true
     }}
+    result_anchor := View{width:Fill height:1}
     content := ScrollYView{width: Fill height: Fill flow: Down spacing: 8
         feedback := View{width: Fill height: Fit on_render: || {
             Label{draw_text.text_style: NavRegular width: Fill height: Fit flow: Flow.Right{wrap:true} visible: interface_error != "" || interface_inflight || ((!generated_active || phase == "failed") && runtime_status != "")
                 text: if phase == "failed" && runtime_status != "" { runtime_status } elif interface_error != "" { if generated_render_complete { "界面操作未能完成；已有结果保留" } elif agent_active { "界面正在修正；可终止本次查询" } else { "生成界面未能正常显示，请重新查询" } } elif interface_inflight { "Agent 正在生成界面；可终止" } else { runtime_status } draw_text.color: ink}
         }}
+        guardian_details := View{width:Fill height:Fit flow:Down spacing:8 on_render:||{
+          if guardian_progress_open && guardian_goal!=nil {
+            if guardian_goal.state=="active" {
+              if guardian_selected_candidate()!=nil {let route=guardian_selected_candidate()
+                guardian_viewed_candidate := NavMeta{text:"当前查看："+route.id+" · "+route_kind_label(route)+" · "+money_text(route.price_cents)+" · "+duration_text(route.duration_seconds)}
+                guardian_prepare := NavSecondary{text:"用当前查看方案准备替代" width:Fill enabled:!shell_busy() on_click:||guardian_prepare_selected()}
+              }
+              Label{text:"进度与累计已花（人民币元）" draw_text.text_style:NavRegular{font_size:16}}
+              guardian_progress_input := TextInput{width:Fill height:44 text:guardian_goal.progress empty_text:"例如尚未出发／已到某站" draw_text.text_style:NavRegular{font_size:16}}
+              guardian_spent := TextInput{width:Fill height:44 text:""+(guardian_goal.spent_cents/100) empty_text:"累计已花金额" draw_text.text_style:NavRegular{font_size:16}}
+              guardian_progress_submit := NavSecondary{text:"确认进度/费用" width:Fill on_click:||guardian_progress()}
+            }
+            NavMeta{text:guardian_label()}
+            NavMeta{text:"管理目标（保留出行与历史详情）"}
+            View{width:Fill height:Fit flow:Right spacing:8
+              NavSecondary{text:"结束目标" width:Fill on_click:||guardian_finish()}
+              NavSecondary{text:"删除目标" width:Fill on_click:||shell_delete_request("goal")}
+            }
+          }
+        return true
+    }}
         guardian_confirmation := View{width:Fill height:Fit flow:Down spacing:6 on_render:||{
           if guardian_pending!=nil {
             let version=guardian_pending.proposal_version
             guardian_proposal_text := Label{width:Fill height:Fit flow:Flow.Right{wrap:true} draw_text.text_style:NavRegular draw_text.color:ink text:guardian_proposal_label()}
             View{width:Fill height:Fit flow:Right spacing:8
-              guardian_accept := Button{text:"确认此方案" width:140 height:40 on_click:||guardian_confirm(version)}
-              guardian_decline := ButtonFlat{text:"拒绝提案" width:120 height:40 on_click:||guardian_reject()}
+              guardian_accept := NavPrimary{text:"确认此方案" width:Fill on_click:||guardian_confirm(version)}
+              guardian_decline := NavSecondary{text:"拒绝提案" width:Fill on_click:||guardian_reject()}
             }
           }
         }}
@@ -2926,21 +3002,43 @@ SolidView{width: Fill height: Fill flow: Down padding: 12 spacing: 8 draw_bg.col
 block_overlay := View{width:Fill height:Fill flow:Overlay on_render:||{
  for block in overlay_blocks {View{width:Fill height:block_height(block) margin:Inset{top:ui_overlay_top} visible:block_actual_visible(block) flow:Down clip_x:true clip_y:true Splash{width:Fill height:Fill body:block.body}}}
 }}
-trip_sidebar := SolidView{width:310 height:Fill flow:Down padding:12 spacing:8 draw_bg.color:#xf2f4f3
-  View{width:Fill height:Fit flow:Right spacing:8
-    Label{width:Fill height:Fit text:"出行列表" draw_text.text_style:NavRegular}
-    trip_close := ButtonFlat{text:"关闭" width:64 height:32 on_click:||{trip_sidebar_open=false trip_refresh_shell()}}
+trip_scrim := ButtonFlat{width:Fill height:Fill margin:0 padding:0 text:"" draw_bg +:{color:#x0006 color_hover:#x0006 color_down:#x0006 border_size:0} on_click:||{trip_sidebar_open=false trip_refresh_shell()}}
+trip_sidebar := SolidView{width:320 height:Fill flow:Down padding:16 spacing:12 draw_bg.color:#xffffff
+  View{width:Fill height:48 flow:Right spacing:8 align:Align{y:0.5}
+    Label{width:Fill height:Fit text:"我的出行" draw_text +:{text_style:NavBold{font_size:20} color:ink}}
+    trip_close := NavSecondary{text:"关闭" width:64 on_click:||{trip_sidebar_open=false trip_refresh_shell()}}
   }
-  trip_new_button := Button{text:"新建出行" width:Fill height:40 on_click:||trip_new()}
+  trip_new_button := NavPrimary{text:"＋ 新建出行" width:Fill on_click:||trip_new()}
   trip_rows := ScrollYView{width:Fill height:Fill flow:Down spacing:8 on_render:||{
     for trip in trip_records {let id=trip.id
-      ButtonFlat{width:Fill height:Fit text:if id==trip_selected_id {"● "+trip.title} else {trip.title}+"\n"+guardian_deadline(trip.updated_at)+" · "+if trip.goal!=nil {if trip.goal.state=="active" {"已确认目标"} else {"已结束"}} else {if trip.status=="draft" {"草稿"} else {"规划记录"}} on_click:||trip_select(id)}
+      let meta=shell_short_time(trip.updated_at)
+      if id==trip_selected_id {meta="当前 · "+meta}
+      let status=if trip.goal!=nil {if trip.goal.state=="active" {"已确认目标"} else {"已结束"}} else {if trip.status=="draft" {"草稿"} else {"规划记录"}}
+      meta+=" · "+status
+      View{width:Fill height:136 flow:Overlay
+        ButtonFlat{width:Fill height:Fill margin:0 text:"" draw_bg +:{color:if id==trip_selected_id {#xe5f0ec} else {#xf7f9f8} color_hover:#xe5f0ec border_size:0 border_radius:8} on_click:||trip_select(id)}
+        View{width:Fill height:Fill flow:Down padding:12 spacing:6
+          Label{width:Fill height:Fit max_lines:2 text:shell_trip_name(trip) draw_text +:{text_style:NavRegular{font_size:16} color:ink}}
+          NavMeta{text:meta}
+        }
+      }
     }
   }}
-  trip_delete_button := ButtonFlat{text:"删除当前出行" width:Fill height:36 enabled:trip_selected_id!=nil on_click:||trip_delete(trip_selected_id)}
+  trip_management := View{width:Fill height:Fit flow:Down spacing:8 on_render:||{
+    trip_manage_button := NavSecondary{text:if trip_manage_open {"收起管理"} else {"管理当前出行"} width:Fill enabled:trip_selected_id!=nil on_click:||{trip_manage_open=!trip_manage_open trip_refresh_shell()}}
+    if trip_manage_open && shell_delete_target==nil {trip_delete_button := NavSecondary{text:"删除整条出行" width:Fill on_click:||shell_delete_request("trip")}}
+    if shell_delete_target!=nil {let target=trip_by_id(shell_delete_target)
+      NavMeta{text:"确认删除"+if shell_delete_kind=="goal" {"此目标？出行与历史详情保留。"} else {"整条出行？目标和历史详情一并删除。"}+if target!=nil {"\n"+target.title} else {""}}
+      View{width:Fill height:Fit flow:Right spacing:8
+        trip_delete_cancel := NavSecondary{text:"取消" width:Fill on_click:||{shell_delete_target=nil shell_delete_kind="" trip_refresh_shell()}}
+        trip_delete_confirm := NavSecondary{text:"确认删除" width:Fill draw_text.color:#xa23832 on_click:||shell_delete_confirm()}
+      }
+    }
+  return true
+  }}
 }
 trace_overlay := View{width:1 height:1 flow:Overlay
 trace_identity := Label{visible:trace_enabled width:1 height:1 padding:0 text:trace_identity_json() draw_text +: {color:#x0000 text_style:NavRegular{font_size:0.5}}}
 }
 }
-start_timeout(0.1, || { ui.trip_sidebar.set_visible(false) trace_initialize() if trace_enabled {try {ui.trace_identity.set_text(trace_identity_json())} {}} trace_marker() if native_ui_available {ui_viewport = ui.content.rect()} render_content() if native_ui_available {poll_generated()} trip_restore() })
+start_timeout(0.1, || { ui.trip_sidebar.set_visible(false) ui.trip_scrim.set_visible(false) trace_initialize() if trace_enabled {try {ui.trace_identity.set_text(trace_identity_json())} {}} trace_marker() if native_ui_available {ui_viewport = ui.content.rect()} render_content() if native_ui_available {poll_generated()} trip_restore() })
