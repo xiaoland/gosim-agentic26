@@ -751,6 +751,9 @@ def main():
  for p in [a.STATE,a.HOME_DIR,a.CORE]:p.mkdir(parents=True,exist_ok=True)
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
  if '--tool-contract' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_begin(','fn product_agent_begin(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1).replace('fn amap_request(','fn product_amap_request(',1).replace('fn map_geometry_uncached(','fn product_map_geometry_uncached(',1).replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+CONTRACT_FIXTURE
+ if '--source-contract' in sys.argv:
+  import test_source_contract as sources
+  source=sources.source(original)
  if '--agent-protocol' in sys.argv:
   import test_agent_protocol as protocol
   source=protocol.source(original)
@@ -821,6 +824,9 @@ def main():
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv:trips.prepare(jail)
   launch('native');report=None
+  if '--source-contract' in sys.argv:
+   sources.run(w,jail,original,source)
+   return
   if '--agent-protocol' in sys.argv:
    protocol.run(w,jail,original,source)
    return

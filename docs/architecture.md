@@ -42,7 +42,11 @@ Agent负责检索、比较、解释并提出待确认方案；父应用负责用
 
 M3请求省略thinking以采用官方默认自适应思考，并显式reasoning_split:true。宿主允许省略或传adaptive／disabled，并透传split布尔；不投影或重写provider消息。应用保留完整assistant对象及reasoning_content、reasoning_details等扩展字段供下一轮，呈现仅取content，不将思考另塞system或当答案展示。协议依据为[MiniMax OpenAI接口](https://platform.minimax.io/docs/api-reference/text-openai-api)与[工具上下文说明](https://platform.minimax.io/docs/guides/text-m3-function-call)。
 
+model.chat的桥接等待期限为HTTP的120秒加10秒收尾，避免桥默认60秒先结束但供应商仍在计算与计费；其它服务保持原等待设置。超时不等于远端请求取消，不自动重试。
+
 应用在保存原始回执后判断finish_reason：tool_calls必须有有效调用，length为截断，未知结束原因属于协议失败；这些情况保留已取得事实与成功界面，写failed，不执行残缺调用或自动续请求。stop有正文或成功生成稿才完成；空结果／仅失败稿不能记completed。技能元提示说明任务匹配description时read_skill(name)，相对引用通过path按需读取；不自动加载所有技能，也不规定路线探索步骤。技能传递审计分别核目录、物化正文、工具call_id及下一模型请求中的完整Markdown；success回执不能替代这条证据链。
+
+模拟日历与机票的set_constraints只服务关联票据推断，不是普通POI采用的前置。其schema声明必须引用所选事件和关联笔记各自raw的单行原文；拒绝回执区分未知记录、原文不匹配和缺少来源。票据机场身份不匹配时返回工具拒绝及期望机场、来源和当前POI字段，不再先提交错误回执又返回成功布尔值；机场、航站楼及出发区域核验仍保留。
 
 工具schema在同一查询内固定，首次构造后复用，新查询清空后重建；构造只读取一次location_mode，不每个模型请求重复同步读取配置和创建工具表。这不改变工具选择或调用顺序。该修正源于实际在线轮在下一请求派发前触发64ms硬时间预算；耗尽位置并不证明全部时间都消耗在schema，作用以新稿实际复验为准。
 

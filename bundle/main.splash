@@ -928,23 +928,30 @@ fn verify_position_city(record, token, done){
     })
 }
 fn validate_citations(items){
-    if !items.is_array() || items.len() < 2 { return false }
-    let calendar_cited = false
-    let note_cited = false
-    for citation in items {
-        if !citation.is_object() || !citation.source_id.is_string() || !citation.quote.is_string() || citation.quote.trim() == "" { return false }
-        if citation.quote.search("\n") >= 0 || citation.quote.search("\r") >= 0 || citation.quote.search("\\n") >= 0 || citation.quote.search("\\r") >= 0 { return false }
-        let found = false
+    if !items.is_array() || items.len() < 2 { return reject_constraints("来源引用至少需要所选日历事件和关联机票笔记各一条") }
+    let calendar_cited = false let note_cited = false
+    for index citation in items {
+        if !citation.is_object() || !route_get(citation,"source_id").is_string() { return reject_constraints("来源引用第"+(index+1)+"项缺少source_id；使用读取结果的记录id") }
+        let id=citation.source_id
+        if !route_get(citation,"quote").is_string() || citation.quote.trim()=="" {return reject_constraints("来源引用 "+id+" 缺少非空quote；逐字引用该记录raw中的单行原文")}
+        if citation.quote.search("\n") >= 0 || citation.quote.search("\r") >= 0 || citation.quote.search("\\n") >= 0 || citation.quote.search("\\r") >= 0 {return reject_constraints("来源引用 "+id+" 的quote跨行；仅使用该记录raw中的单行原文")}
+        let found = false let matched = false
         for source in source_records {
-            if source.id == citation.source_id && source.raw.search(citation.quote) >= 0 {
-                found = true
-                if source.kind == "calendar" { calendar_cited = true }
-                if source.kind == "note" { note_cited = true }
+            if source.id == id {
+                found=true
+                if source.raw.search(citation.quote) >= 0 {
+                    matched=true
+                    if source.kind == "calendar" {calendar_cited=true}
+                    if source.kind == "note" {note_cited=true}
+                }
             }
         }
-        if !found { return false }
+        if !found {return reject_constraints("来源引用source_id未知："+id+"；使用read_calendar/read_notes返回的记录id，本次用户原文ID为current-input")}
+        if !matched {return reject_constraints("来源引用 "+id+" 的quote不匹配该记录raw；不要将用户指令或其它记录的文字归到此ID")}
     }
-    return calendar_cited && note_cited
+    if !calendar_cited {return reject_constraints("来源引用缺少calendar日历记录；引用所选event_id对应raw的单行原文")}
+    if !note_cited {return reject_constraints("来源引用缺少note机票笔记；引用所选note_id对应raw的单行原文")}
+    return true
 }
 fn declared_currency(text){
     let value = ""
@@ -1035,11 +1042,12 @@ fn set_constraints(p){
     if position_record.currency != "CNY" { return reject_constraints("位置尚未核实人民币计价依据，无法确定预算币种。") }
     if p.currency != "CNY" { return reject_constraints("模型预算币种不是人民币，无法与本次报价比较") }
     if !p.destination_query.is_string() || p.destination_query.trim() == "" { return reject_constraints("模型缺少目的地查询文字") }
-    if !validate_citations(p.citations) { return reject_constraints("模型来源引用无效：必须使用来源记录ID及同一行原文") }
+    if !validate_citations(p.citations) { return false }
     let event_cited = false
     let note_cited = false
     for citation in p.citations { if citation.source_id == p.event_id { event_cited = true } if citation.source_id == p.note_id { note_cited = true } }
-    if !event_cited || !note_cited { return reject_constraints("模型未引用所选日历事件及机票笔记") }
+    if !event_cited { return reject_constraints("来源引用未覆盖所选日历event_id："+p.event_id) }
+    if !note_cited { return reject_constraints("来源引用未覆盖所选机票note_id："+p.note_id) }
     let event_found = false
     for event in calendar_events {
         if event.id == p.event_id && event.starts_at_unix >= received_at { event_found = true }
@@ -1172,7 +1180,7 @@ fn select_destination(p, reason){
                 if !position_current(position_record) { fail_task("机场选择时位置已过期，请重新查询") return true }
                 if !poi.queried_at.is_number() || time_now() - poi.queried_at > 300 { fail_task("机场查询结果已过期，请重新查询") return true }
             } else {
-                if poi.name.search(constraints.airport) < 0 && (!poi.address.is_string() || poi.address.search(constraints.airport) < 0) { fail_task("目的地名称与地址不足以核实机票机场身份，请明确出发地点") return true }
+                if poi.name.search(constraints.airport) < 0 && (!poi.address.is_string() || poi.address.search(constraints.airport) < 0) { let address=if poi.address.is_string() {poi.address} else {"未提供"} return reject_destination("机票机场身份未匹配；来源note_id="+constraints.note_id+"，期望airport="+constraints.airport+"；POI id="+poi.id+"，name="+poi.name+"，address="+address+"。名称或地址须含完整机票机场名；本次目的地未采用") }
                 if regex("停车|酒店|宾馆|货运|到达", "").test(poi.name) { return reject_destination("所选地点是停车、住宿、货运或到达区域，不是所需出发地点") }
                 if poi.name.search(constraints.terminal) < 0 { return reject_destination("所选地点航站楼与机票来源不符") }
                 if constraints.departure_scene != "" && poi.name.search(constraints.departure_scene) < 0 { return reject_destination("所选地点的国内或国际出发区域与机票来源不符") }
@@ -2435,7 +2443,7 @@ fn agent_tools(){
  if mode=="demo" {
 tools.push(tool("read_calendar","读取本应用明确标注的模拟日历；返回记录和来源。",{},[]))
 tools.push(tool("read_notes","读取本应用模拟机票笔记；返回记录和来源。",{},[]))
-tools.push(tool("set_constraints","按实际日历/笔记原文形成行程约束；用户原分钟数和预算不变。",{event_id:{type:"string"} note_id:{type:"string"} minutes:{type:"number" description:"用户到达时限，整数分钟"} budget_cents:{type:"number" description:"用户总预算，整数分"} currency:{type:"string"} destination_query:{type:"string"} citations:{type:"array" items:{type:"object" properties:{source_id:{type:"string"} quote:{type:"string"}}}}},["event_id" "note_id" "minutes" "budget_cents" "currency" "destination_query" "citations"]))
+tools.push(tool("set_constraints","仅从模拟日历事件及关联机票笔记采纳目的地约束；用户分钟数和预算不变。普通已有POI可直接adopt_destination，不需本工具。",{event_id:{type:"string" description:"read_calendar返回的所选记录id"} note_id:{type:"string" description:"read_notes返回、关联event_id的有效机票记录id"} minutes:{type:"number" description:"用户到达时限，整数分钟"} budget_cents:{type:"number" description:"用户总预算，整数分"} currency:{type:"string"} destination_query:{type:"string"} citations:{type:"array" minItems:2 description:"必须至少覆盖所选event_id及note_id各一条；引用各自raw中的单行原文" items:{type:"object" required:["source_id" "quote"] properties:{source_id:{type:"string" description:"读取结果record.id；本次用户原文可用current-input，不编造ID"} quote:{type:"string" description:"该source_id的raw中逐字单行子串；非摘要、不跨行、不混用用户或其它记录文字"}}}}},["event_id" "note_id" "minutes" "budget_cents" "currency" "destination_query" "citations"]))
  }
  agent_tool_schema=tools
  return tools

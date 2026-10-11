@@ -26,7 +26,18 @@ def main():
         ledger = json.loads(ledger_path.read_bytes())
         assert ledger['day'] == original['day'] and ledger['apps'] == original['apps']
         assert ledger['limits']['other-app'] == original['limits']['other-app']
-        assert ledger['limits']['os.agentic26-navigation'] == {'per_minute': 20, 'calls_per_day': 100, 'tokens_per_day': 1_000_000}
+        assert ledger['limits']['os.agentic26-navigation'] == {'unlimited': True}
+        # Only this development app becomes unlimited; repeated configuration
+        # keeps all real usage and other applications unchanged.
+        ledger['limits']['os.agentic26-navigation'] = {'per_minute': 17, 'calls_per_day': 120, 'tokens_per_day': 2_000_000}
+        before = json.loads(json.dumps(ledger))
+        agent.write_private(ledger_path, agent.json_bytes(ledger))
+        with patch.object(agent, 'materialize_skills'):
+            agent.configure(values, jail)
+            agent.configure(values, jail)
+        ledger = json.loads(ledger_path.read_bytes())
+        before['limits']['os.agentic26-navigation'] = {'unlimited': True}
+        assert ledger == before
         config = json.loads((jail / 'private-config.json').read_bytes())
         assert not any(name.startswith('minimax_') for name in config)
         assert values['MINIMAX_API_KEY'].encode() not in (jail / 'private-config.json').read_bytes()

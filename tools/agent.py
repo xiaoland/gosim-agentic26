@@ -468,12 +468,12 @@ def configure(values, jail, location_mode="live", trace=False):
                           'route': {'base_url': values['MINIMAX_BASE_URL'], 'api_key_env': 'MINIMAX_API_KEY', 'api_type': 'openai'}},
                           'fallbacks': []}, 'env_vars': {'MINIMAX_API_KEY': values['MINIMAX_API_KEY']}}}
     write_private(CORE / 'profiles/_main.json', json_bytes(profile))
-    # 只改隔离开发应用的宿主额度；当日已用调用和 tokens 原样保留。
+    # 仅取消隔离开发应用的本机预算准入，真实使用量和其它应用配置保留。
     ledger_path = HOME_DIR / 'apps/.host/model/ledger.json'
     ledger = json.loads(ledger_path.read_bytes()) if ledger_path.is_file() else {'day': 0, 'apps': {}, 'limits': {}}
     manifest = json.loads((ROOT / 'bundle/manifest.json').read_bytes())
     app_id = manifest['id'] if manifest['id'].startswith('os.') else 'os.' + manifest['id']
-    ledger.setdefault('limits', {})[app_id] = {'per_minute': 20, 'calls_per_day': 100, 'tokens_per_day': 1_000_000}
+    ledger.setdefault('limits', {})[app_id] = {'unlimited': True}
     write_private(ledger_path, json_bytes(ledger))
 
     trace_session = uuid.uuid4().hex if trace else None

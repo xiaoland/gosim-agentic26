@@ -119,8 +119,122 @@ index 0000000..5fd97a3
 +        Ok(json!({"response": response, "meta": {"usage": {"input_tokens": used.input_tokens, "output_tokens": used.output_tokens, "estimated": used.estimated}, "budget": self.budget(app).to_json()}}))
 +    }
 +}
+diff --git a/apps/ai-providers/host-service/src/complete/ledger.rs b/apps/ai-providers/host-service/src/complete/ledger.rs
+index 296e38b..79b79c2 100644
+--- a/apps/ai-providers/host-service/src/complete/ledger.rs
++++ b/apps/ai-providers/host-service/src/complete/ledger.rs
+@@ -4,12 +4,14 @@
+ //! The day is the UTC day: counts reset at 00:00 UTC. Counts persist in
+ //! `<host dir>/model/ledger.json` (`{"day", "apps": {id: {calls, tokens}},
+ //! "limits": {id: {per_minute, calls_per_day, tokens_per_day}}}`), outside
+-//! every app's jail, so closing and reopening an app, or restarting the
++//! An explicit per-app `{"unlimited":true}` override skips all three budget
++//! checks while preserving usage accounting; other apps keep numeric limits.
++//! Counts are outside every app's jail, so closing and reopening an app, or restarting the
+ //! shell, does not refill its budget. `limits` holds per-app overrides: the
+ //! place a Settings page will write them (a follow-up); the service only
+ //! reads them. The per-minute window is kept in memory.
+ use serde_json::{json, Value};
+-use std::collections::{BTreeMap, VecDeque};
++use std::collections::{BTreeMap, BTreeSet, VecDeque};
+ use std::path::PathBuf;
+
+ const DAY_MS: u64 = 24 * 3600 * 1000;
+@@ -63,6 +65,7 @@ pub enum Refused {
+ /// What an app (and later Settings) is shown of its budget.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct Budget {
++    pub unlimited: bool,
+     pub calls_today: u32,
+     pub calls_per_day: u32,
+     pub tokens_today: u64,
+@@ -74,7 +77,11 @@ pub struct Budget {
+
+ impl Budget {
+     pub fn to_json(&self) -> Value {
++        if self.unlimited {
++            return json!({"unlimited":true,"calls_today":self.calls_today,"tokens_today":self.tokens_today,"calls_per_day":null,"tokens_per_day":null,"tokens_left":null,"per_minute":null,"resets_at":self.resets_at});
++        }
+         json!({
++            "unlimited": false,
+             "calls_today": self.calls_today, "calls_per_day": self.calls_per_day,
+             "tokens_today": self.tokens_today, "tokens_per_day": self.tokens_per_day,
+             "tokens_left": self.tokens_per_day.saturating_sub(self.tokens_today),
+@@ -95,6 +102,7 @@ pub struct Ledger {
+     path: Option<PathBuf>,
+     defaults: Limits,
+     overrides: BTreeMap<String, Limits>,
++    unlimited: BTreeSet<String>,
+     day: u64,
+     apps: BTreeMap<String, Day>,
+     recent: BTreeMap<String, VecDeque<u64>>,
+@@ -128,6 +136,7 @@ impl Ledger {
+                 if let Some(limits) = v["limits"].as_object() {
+                     for (id, l) in limits {
+                         self.overrides.insert(id.clone(), Limits::from_json(l, self.defaults));
++                        if l["unlimited"] == true { self.unlimited.insert(id.clone()); } else { self.unlimited.remove(id); }
+                     }
+                 }
+             }
+@@ -137,6 +146,7 @@ impl Ledger {
+
+     /// Set one app's limits (tests; Settings later).
+     pub fn set_limits(&mut self, app: &str, limits: Limits) {
++        self.unlimited.remove(app);
+         self.overrides.insert(app.to_string(), limits);
+         self.save();
+     }
+@@ -157,6 +167,12 @@ impl Ledger {
+     /// tokens, and count it; or say why not.
+     pub fn admit(&mut self, app: &str, now_ms: u64, estimate: u64) -> Result<(), Refused> {
+         self.roll(now_ms);
++        if self.unlimited.contains(app) {
++            let slot = self.apps.entry(app.to_string()).or_default();
++            slot.calls = slot.calls.saturating_add(1);
++            self.save();
++            return Ok(());
++        }
+         let limits = self.limits(app);
+         let recent = self.recent.entry(app.to_string()).or_default();
+         while recent.front().is_some_and(|t| now_ms.saturating_sub(*t) >= MINUTE_MS) {
+@@ -192,6 +208,7 @@ impl Ledger {
+         let limits = self.limits(app);
+         let today = self.apps.get(app).copied().unwrap_or_default();
+         Budget {
++            unlimited: self.unlimited.contains(app),
+             calls_today: today.calls,
+             calls_per_day: limits.calls_per_day,
+             tokens_today: today.tokens,
+@@ -212,7 +229,7 @@ impl Ledger {
+         let Some(path) = &self.path else { return };
+         let apps: serde_json::Map<String, Value> =
+             self.apps.iter().map(|(id, d)| (id.clone(), json!({"calls": d.calls, "tokens": d.tokens}))).collect();
+-        let limits: serde_json::Map<String, Value> = self.overrides.iter().map(|(id, l)| (id.clone(), l.to_json())).collect();
++        let limits: serde_json::Map<String, Value> = self.overrides.iter().map(|(id, l)| (id.clone(), if self.unlimited.contains(id) {json!({"unlimited":true})} else {l.to_json()})).collect();
+         let text = json!({"day": self.day, "apps": apps, "limits": limits}).to_string();
+         if let Some(dir) = path.parent() {
+             let _ = std::fs::create_dir_all(dir);
+@@ -230,6 +247,18 @@ mod tests {
+
+     const T0: u64 = 1_790_000_000_000;
+
++    #[test]
++    fn explicit_unlimited_keeps_usage_and_other_apps_limited() {
++        let path=std::env::temp_dir().join(format!("model-unlimited-{}.json",std::process::id()));
++        std::fs::write(&path,json!({"day":T0/DAY_MS,"apps":{"dev":{"calls":100,"tokens":2_000_000}},"limits":{"dev":{"unlimited":true}}}).to_string()).unwrap();
++        let mut l=Ledger::new(Limits{per_minute:1,calls_per_day:1,tokens_per_day:1});l.attach(path.clone());
++        for _ in 0..3 {l.admit("dev",T0,u64::MAX).unwrap();l.charge("dev",T0,5);}
++        let b=l.budget("dev",T0);assert!(b.unlimited);assert_eq!((b.calls_today,b.tokens_today),(103,2_000_015));assert!(b.to_json()["tokens_left"].is_null());
++        l.admit("other",T0,0).unwrap();assert!(matches!(l.admit("other",T0,0),Err(Refused::Rate{..})));
++        let mut again=Ledger::new(Limits::default());again.attach(path.clone());assert!(again.budget("dev",T0).unlimited);assert_eq!(again.budget("dev",T0).tokens_today,2_000_015);
++        let stored:Value=serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();assert_eq!(stored["limits"]["dev"],json!({"unlimited":true}));std::fs::remove_file(path).unwrap();
++    }
++
+     #[test]
+     fn rate_then_day_then_tokens() {
+         let mut l = Ledger::new(Limits { per_minute: 2, calls_per_day: 3, tokens_per_day: 1000 });
 diff --git a/apps/ai-providers/host-service/src/complete/mod.rs b/apps/ai-providers/host-service/src/complete/mod.rs
-index 8d0fe69..f7646fd 100644
+index 8d0fe69..a72baf7 100644
 --- a/apps/ai-providers/host-service/src/complete/mod.rs
 +++ b/apps/ai-providers/host-service/src/complete/mod.rs
 @@ -10,6 +10,7 @@
@@ -134,7 +248,7 @@ index 8d0fe69..f7646fd 100644
 @@ -66,6 +67,7 @@ use std::path::{Path, PathBuf};
  use std::sync::{Arc, Mutex};
  use std::time::Duration;
- 
+
 +pub mod chat;
  pub mod ledger;
  pub mod schema;
@@ -148,11 +262,11 @@ index 8d0fe69..f7646fd 100644
 +        Ok(self.candidates()?.into_iter().next())
 +    }
  }
- 
+
  /// The kernel's profile and its vault: the same providers AI providers
 @@ -347,6 +353,10 @@ pub struct ProfileProviders {
  }
- 
+
  impl Providers for ProfileProviders {
 +    fn primary(&self) -> Result<Option<Candidate>, String> {
 +        let store = ProfileStore::open(self.path.clone(), self.vault.clone())?;
@@ -161,7 +275,24 @@ index 8d0fe69..f7646fd 100644
      fn candidates(&self) -> Result<Vec<Candidate>, String> {
          let store = ProfileStore::open(self.path.clone(), self.vault.clone())?;
          Ok(store
-@@ -694,6 +704,16 @@ impl HostService for ModelService {
+@@ -687,6 +697,16 @@ impl HostService for ModelService {
+         FAMILY
+     }
+
++    fn timeout(&self, call: &ServiceCall) -> Duration {
++        // Keep the bridge alive until the bounded HTTP request can finish and
++        // its JSON/usage reply is settled; other methods retain their deadline.
++        if call.method() == "chat" {
++            TIMEOUT + Duration::from_secs(10)
++        } else {
++            octosense_appstore::services::DEFAULT_TIMEOUT
++        }
++    }
++
+     fn call(&mut self, call: ServiceCall, reply: Replier, _host: &mut dyn ServiceHost) {
+         if !(self.grants)(&call.app_id, &call.host_dir) {
+             return reply.send(Err(Refusal::new(Code::Capability, "This app was not granted the model capability.").to_string()));
+@@ -694,6 +714,16 @@ impl HostService for ModelService {
          self.host.attach(&call.host_dir);
          match call.method() {
              "budget" => reply.send(Ok(self.host.budget(&call.app_id).to_json())),
@@ -178,6 +309,25 @@ index 8d0fe69..f7646fd 100644
              "complete" => {
                  let request = match Request::from_args(&call.args) {
                      Ok(r) => r,
+@@ -722,3 +752,18 @@ pub fn register_with(options: Options) -> Arc<ModelHost> {
+     octosense_appstore::services::register_host_service(Box::new(ModelService { host: host.clone(), grants }));
+     host
+ }
++
++#[cfg(test)]
++mod chat_deadline_tests {
++    use super::*;
++    #[test]
++    fn only_chat_waits_past_the_http_deadline() {
++        let service = ModelService { host: Arc::new(ModelHost::new(&Options::default())), grants: Arc::new(|_, _| true) };
++        for method in ["chat", "complete", "budget", "unknown"] {
++            let call = ServiceCall { app_id: "fixture".into(), service: format!("model.{method}"), args: json!({}), from_sheet: false, may_prompt: false, host_dir: PathBuf::new() };
++            let deadline = service.timeout(&call);
++            if method == "chat" { assert_eq!(deadline, TIMEOUT + Duration::from_secs(10)); assert!(deadline > TIMEOUT); }
++            else { assert_eq!(deadline, octosense_appstore::services::DEFAULT_TIMEOUT); }
++        }
++    }
++}
 diff --git a/apps/ai-providers/host-service/tests/chat.rs b/apps/ai-providers/host-service/tests/chat.rs
 new file mode 100644
 index 0000000..510af23

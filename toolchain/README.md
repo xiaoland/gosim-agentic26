@@ -45,11 +45,11 @@ make agent-dev
 航班设为两小时后；`agent-dev` 和 `agent-hidden` 保留已编辑的日历与笔记，默认位置模式为 live；`make agent-demo` 明确使用模拟位置，模拟位置过期需重新 `agent-init-demo`。
 私有数据在 `.local-state/agent/`：官方宿主的 `octos/profiles/_main.json` 保存单个 MiniMax-M3 provider、地址与密钥，fallbacks 为空；应用 jail 内的 `private-config.json` 只保留高德、可选滴滴 key、位置模式与开发诊断配置，不再提供模型鉴权或选路配置；开发诊断元数据仍记录模型名称。目录为0700，私有文件为0600，均不进入包、Git或启动参数。
 
-应用调用 `host.request("model.chat", ...)`，提交完整 messages、tools、`tool_choice: "auto"` 和 `reasoning_split: true`，省略 thinking 使用 M3 默认自适应思考。宿主也接受显式 adaptive／disabled，不再强制关闭思考。宿主返回原始 provider response 和 usage／budget 元数据；应用继续保存 assistant/tool 历史与执行工具。该接口由 `octosense-model-chat.patch` 提供，是待上游接纳的本地扩展；官方 `model.complete` 不支持原生工具调用或历史，不能用 JSON 动作模拟替代。
+应用调用 `host.request("model.chat", ...)`，提交完整 messages、tools、`tool_choice: "auto"` 和 `reasoning_split: true`，省略 thinking 使用 M3 默认自适应思考。宿主也接受显式 adaptive／disabled，不再强制关闭思考。宿主返回原始 provider response 和 usage／budget 元数据；应用继续保存 assistant/tool 历史与执行工具。`model.chat` 的桥接等待为现有 HTTP 120秒超时加10秒收尾，共130秒；不会在网络请求仍有效时提前用通用60秒期限丢弃回执。其它方法的等待期限不变，不自动重试。该接口由 `octosense-model-chat.patch` 提供，是待上游接纳的本地扩展；官方 `model.complete` 不支持原生工具调用或历史，不能用 JSON 动作模拟替代。
 
 聊天扩展复用同一 ModelHost、主提供方凭据、HTTP transport、授权和 ledger。它只使用实际 primary，主项未配置或缺 key 时直接失败，不挑选 fallback；当前支持 OpenAI 兼容协议。完整消息不裁剪，不附加 one-shot 的结构化输出提示或 URL 拒绝规则。宿主原有请求大小、HTTP响应和服务等待边界仍适用。取消查询会屏蔽迟到回调，不保证远端HTTP已经中止或停止计费。
 
-开发启动器仅给隔离 Navigation 应用设置每分钟20次、每日100次和100万 tokens 的宿主额度，保留当天已用计数和其它应用设置，不改变宿主默认值。依据是现有实际运行达到每分钟11次、单任务约41万 tokens；默认6次／分钟和10万 tokens／日无法承载该任务。预算仍由宿主准入与计费，应用不能自行上调。模型服务拒绝会结束本轮并呈现具体类别，不暗中改直连或重试。
+开发启动器仅给隔离 Navigation 应用写入显式 `unlimited:true` 配置，取消本机每分钟、每日调用及 token 预算准入，继续累计真实调用和 token 使用量，保留其它应用设置与宿主全局默认值。budget 回执标记 unlimited，额度及剩余额度字段为 null。此开发偏好不会取消供应商限流、网络超时或消息容量边界，应用也不能自行更改宿主配置。
 
 模型配置仍固定 MiniMax-M3 与 `https://api.minimax.cn/v1`，启动器验证地址、模型与单一主提供方。M3出网和Authorization归宿主；应用manifest只声明高德与滴滴网络主机，并在锁定版本申请model能力。`DIDI_MCP_KEY` 来自正式个人MCP账号，缺省不阻断高德查询；应用仅调用地点搜索与询价，不下单。高德和滴滴key留在应用私有配置，模型key只留在宿主profile。
 本轮撤掉应用自行添加的输入／输出、工具步数、自动阶段和纠正次数上限，直接生成 Splash 界面；宿主和服务端的实际能力及错误以运行结果为准。

@@ -84,7 +84,7 @@
     "revision": "d405d5ca53012cb6bf606ed9323c68baf12c7ec6",
     "base_tree": "aaf3ab827e4b1aec51066357d5623c7c555c833b",
     "patch": "toolchain/patches/octosense-model-chat.patch",
-    "patch_sha256": "97274e7aa258d9f28d1ce7ac17864738c7972aadd8774683f106db2ea86e8d40",
-    "tree": "6cce41cc408f4c8e6bd9bb466fe9cb2f9d119b07"
+    "patch_sha256": "b3c80f517b61983dabf07eff1f38d5ed67d4ffa85941f37f5d529601707223d1",
+    "tree": "67df053ebba09f016b03c8a190aeec4a2861b054"
   }
 }
