@@ -1,5 +1,12 @@
 [
   {
+    "name": "journey-guardian",
+    "description": "已有已确认出行目标的主动核验、替代提案与用户确认边界；用于保持绝对期限、总预算和已花费用，并区分本轮证据与历史快照。",
+    "files": [
+      "SKILL.md"
+    ]
+  },
+  {
     "name": "makepad-2-0-events",
     "description": "Makepad 2.0回调、事件和状态更新资料，用于实现按钮交互及局部界面更新。",
     "files": [
@@ -48,6 +55,14 @@
     ]
   },
   {
+    "name": "mixed-routing",
+    "description": "规划或改进出行时，主动识别公交/步行/打车瓶颈，形成可验证的首段、末段和中段接驳假设；用于决定值得查询的替代，而非只比较整程导航方案。",
+    "files": [
+      "SKILL.md",
+      "references/hypotheses.md"
+    ]
+  },
+  {
     "name": "native-ui",
     "description": "Navigation的render_ui嵌入环境、共享事实、区块交互、字体和地图接口，用于将Makepad/Splash源码交给当前宿主执行。",
     "files": [
@@ -57,7 +72,7 @@
   },
   {
     "name": "navigation-data",
-    "description": "Navigation真实出行资料、统一Route身份、混合接驳与供应商报价语义，用于选择工具并解释可追溯路线。",
+    "description": "Navigation工具事实契约：真实地点与Route身份、分段站点关系、完整供应商计价、时效和独立约束判断；用于理解工具结果。",
     "files": [
       "SKILL.md"
     ]

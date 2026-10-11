@@ -29,6 +29,8 @@
 
 [统一Route身份与报价派生](../tasks/route-identity/packet.md)保存已有路线直接附价、完整与未完成路线统一读取及在线验收的实施边界。
 
+[接驳探索与技能分工](../tasks/transfer-exploration/packet.md)保存真实模型记录复盘、提示与工具职责整理、站点关系投影及瓶颈替代探索的实施和验证。
+
 [技能规范化与复用](../tasks/skill-standardization/packet.md)保存上游技能固定、渐进读取与隔离验证边界。
 
 [查询、几何引用与区块工具](../tasks/tool-contracts/packet.md)保存统一交通查询、简化响应、自动几何引用及独立渲染入口的实现与验收。

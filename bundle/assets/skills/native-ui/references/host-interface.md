@@ -4,7 +4,7 @@ render_summary、render_explanation、render_routes、render_suggestions、rende
 
 render_ui 仍可提交任意额外内容，用 source 替换整稿，也可用 blocks 提交一个或多个命名区块：`{blocks:[{id:"summary",source:"Label{text:\"本次结果\"}"}]}`。后续相同 id 只替换该块，新 id 追加；未更新块的输入、滚动、脚本和地图状态保留。source 是同一引擎的单文档替换，会清除此前所有块。每块源码在其独立 View.on_render 闭包中执行。可以包含脚本语句和原生控件表达式；这里是 Makepad Splash，不是 JavaScript。不支持 XML/JSX 标签（例如 <View>、</View>）；原生控件直接使用 View{...} 表达式。显示文字是带引号的字符串（例如 text:"最早到达"），不能把中文标题当作未定义变量或把 source 当作隐含变量。空值是 nil；函数写 fn(x){...} 或 || {...}；字符串与数字可用 + 连接。
 
-每次顶部查询开始一个独立任务；不提供澄清问答或恢复模型对话。普通未确认查询不保存；只有父应用明确确认的守护目标与选定路线保存为业务状态。
+每次顶部提交开始独立规划；不提供澄清问答或恢复模型对话。出行列表保存普通规划详情供历史展示，不自动继续工具执行。
 
 数组使用 `for item in items {...}` 遍历、`items[index]` 访问和 `items.len()` 取长度；没有 Array.find 方法。按字段查找记录时使用 for 遍历并比较字段，找到后保存记录或 return；`ui.body.find("name")` 是原生控件句柄的查找方法，与数组不同。
 
@@ -151,8 +151,6 @@ render_ui 的 blocks 回执逐块返回 id、revision、diagnostics、notified�
 
 地图事件 target 也可直接引用 query_route 返回的 geometry_ref（polyline_…）；父应用按同一候选的真实几何加载，不由模型传折线坐标。原路线 id、viewed 和 path_indices 仍可用；新查询使上一轮引用失效。
 
-守护业务事实在snapshot().guardian中，包含goal、proposal、last_check和remaining_budget_cents。propose_goal/report_goal_check是父Agent工具，不是子VM方法；emit不支持确认保存、替换或更新费用。待确认提案由父应用可靠确认区显示完整目标、真实估计原因、选定依据与差额，真实按钮点击才保存。生成页面可解释这些事实与风险，不能声称render成功就已获得用户确认。新查询仍建立独立模型历史，出行列表还保存普通规划详情的成功原始区块DSL与历史事实，但不保存模型会话或未确认提案。重开时父应用显示历史时刻，重新构造展示实例，snapshot().history.current为false；历史facts不重算为当前assessment。历史只接阅读/地图/区块切换动作，不能提出或确认旧提案，需用户主动重新核验。父左侧出行栏负责新建、选择和删除，index页面显示所选出行详情。
+守护展示事实在snapshot().guardian中，包括goal、proposal、current_check、last_check和remaining_budget_cents。current_check是本轮判定，last_check是历史；页面按事实变化更新，不能静态写“已保存/仍成立”。提案、核验和用户确认的业务规则见journey-guardian。propose_goal/report_goal_check是父Agent工具，不是子VM方法；emit不支持保存确认或费用变更，生成页面只能解释事实。
 
-使用target:"saved_goal_route"可以查看已确认路线快照的实际几何；get_route({id:"saved_goal_route"})取得其目录，source_ts仍为旧查询时间，不是当前交通证据。新候选和比较仍只来自本轮查询。
-
-守护父确认区由应用管理显隐，生成稿仍需通过on_facts_changed响应确认和进度改变。current_check明确本轮证据范围；last_check不可冒称当前结果。saved_goal_route快照只供线路识别、历史估价和地图，get_route回执的current_check不从旧交通数值认证当前成立。
+出行列表恢复成功原始DSL与保存时的历史facts，不恢复模型会话或未确认提案。snapshot().history.current为false，显示生成时刻；历史facts不重算为当前assessment。历史展示只接阅读、地图和区块切换动作；主动核验由父外壳发起。父侧栏负责新建、选择和删除，index显示所选出行详情。

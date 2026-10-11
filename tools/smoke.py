@@ -352,10 +352,15 @@ start_timeout(0.2,||trace_fixture_poll())
 '''
 
 MIXED_FIXTURE=r'''
-let mixed_done=false
+let mixed_done=false let mixed_first_response=nil let mixed_default_response=nil
+fn agent_tool_result(result){
+ if active_tool!=nil && active_tool.id=="mixed-taxi-a" {mixed_first_response=result}
+ if active_tool!=nil && active_tool.id=="mixed-default" {mixed_default_response=result}
+ product_agent_tool_result(result)
+}
 fn agent_pump(token){
  if mixed_done {return} mixed_done=true agent_active=false phase="waiting"
- let complete=candidates[candidates.len()-1]
+ let complete=candidates[2]
  let first=route_prefixes["prefix-1-0"] let second=route_prefixes["prefix-2-0"] let final=route_prefixes["prefix-3-0"]
  let leg=final.legs[2]
  let walking_variant=complete.to_json().parse_json() walking_variant.legs[1].mode="walk"
@@ -370,7 +375,34 @@ fn agent_pump(token){
  let old_directory=map_path_catalog(candidates[1]) let extended_cold=route_map_metadata(complete)
  let quote_cold=route_map_metadata(priced) let new_directory=map_path_catalog(complete)
  let quoted_directory=map_path_catalog(priced) let quoted_facts=interface_route_facts(priced,route_recheck(priced,time_now(),arrive_by,5000))
+ let shared={id:"transfer-shared" name:"共同起站" location:"114,22"}
+ let finish={id:"transfer-end" name:"共同终站" location:"114.03,22"}
+ let bus_segment={walking:{distance:"80" cost:{duration:"60"}} bus:{buslines:[
+  {id:"line-a" name:"主干A" cost:{duration:"600"} distance:"3000" departure_stop:shared arrival_stop:finish via_stops:[{id:"via-a" name:"中途A" location:"114.01,22"} {id:"missing-location" name:"无位置"}]}
+  {id:"line-b" name:"替代B" distance:"3500" departure_stop:shared arrival_stop:finish via_stops:[{id:"via-b" name:"中途B" location:"114.02,22"}]}
+ ]}}
+ let projection=route_candidate("projection","public_transit",660,500,time_now(),time_now(),"114.03,22","114.03,22",true,[bus_segment])
+ assign_candidate_ref(projection)
+ projection.legs=[{id:"projection-leg" price_basis:"合成完整供应商票价" warnings:"合成资料" mode:"transit" from_ref:"origin" to_ref:"destination" segments:[bus_segment] price_cents:500 duration_seconds:660 source_ts:time_now() departure_ts:time_now() waiting_included:true}]
+ projection.request_bound=true projection.origin_complete=true projection.node_ref="destination" projection.connection_verified=true
+ register_route_stations(projection.segments) candidates.push(projection)
+ let short=query_route_summary(projection) let detailed=interface_route_facts(projection,route_recheck(projection,time_now(),arrive_by,5000))
+ let copy={} for key value in projection {copy[key]=value} copy.id="projection-copy" candidates.push(copy)
+ let graph=route_graph_facts() let membership=nil for node in graph.nodes {if node.ref=="stop:transfer-shared" {membership=node.memberships}}
+ let poi=parse_pois({pois:[{id:"transfer-poi" name:"真实格式POI" location:"114,22" cityname:"深圳市" citycode:"0755" adcode:"440306" pname:"广东省"}]},time_now(),false)[0]
+ register_route_pois([poi])
+ let short_bytes=short.to_json()
+ let warm_detail=route_segment_facts(complete,true)
+ let cached_quote=route_quote_variant(complete,{ref:"quote:cache" price_cents:900},final.legs[0].id,"合成缓存验证").candidate
  fs.write("harness-smoke.json",{checks:[
+ {name:"query中转前缀只含起点到站且回执保routes和new_nodes" passed:mixed_first_response.success && mixed_first_response.routes.len()==1 && mixed_first_response.new_nodes.is_array() && first.legs.len()==1 && first.legs[0].from_ref=="origin" && first.legs[0].requested_to_ref=="stop:a" && first.price_cents==1200 && first.legs[0].duration_seconds==300 && second.legs.len()==2 && second.legs[1].duration_seconds==900 && second.legs[1].from_ref=="stop:a" && second.legs[1].requested_to_ref=="stop:b" && second.price_cents==1800 && second.duration_seconds>=1200}
+ {name:"省略query目标保持原整程查询及返回形状" passed:mixed_default_response.success && mixed_default_response.routes.len()==1 && mixed_default_response.new_nodes.is_array() && candidates[3].legs.len()==1 && candidates[3].legs[0].from_ref=="origin" && candidates[3].legs[0].requested_to_ref=="destination" && candidates[3].duration_seconds==900 && candidates[3].price_cents==600}
+ {name:"短回执含每条线路上下站ref和真实用时距离" passed:short.steps[0].buslines.len()==2 && short.steps[0].buslines[0].line_id=="line-a" && short.steps[0].buslines[0].departure_node_ref=="stop:transfer-shared" && short.steps[0].buslines[0].arrival_node_ref=="stop:transfer-end" && short.steps[0].buslines[0].duration_seconds==600 && short.steps[0].buslines[0].distance_m==3000 && short.steps[0].walking.duration_seconds==60}
+ {name:"缺失段耗时与站点ref保nil且短回执不复制经停站序" passed:short.steps[0].duration_seconds==nil && short.steps[0].buslines[1].duration_seconds==nil && route_get(short.steps[0].buslines[0],"stops")==nil && short_bytes.search("中途A")<0 && short_bytes.search("missing-location")<0}
+ {name:"详细站序分线路并保Route内leg及segment关系" passed:detailed.segments[0].leg_id=="projection-leg" && detailed.segments[0].leg_segment_index==0 && detailed.segments[0].buslines[0].stops.len()==4 && detailed.segments[0].buslines[0].stops[1].node_ref=="stop:via-a" && detailed.segments[0].buslines[0].stops[2].node_ref==nil && detailed.segments[0].buslines[1].stops[1].node_ref=="stop:via-b"}
+ {name:"同站多线路多Route归属保留且不修改注册节点" passed:membership.len()==4 && membership[0].route_id==projection.id && membership[2].route_id=="projection-copy" && route_get(route_node("stop:transfer-shared"),"memberships")==nil && graph.transit_segments.len()==4}
+ {name:"详情和短步骤缓存报价派生共享不变资料" passed:route_segment_facts(cached_quote,true)==warm_detail && route_summary_steps(cached_quote)==complete.steps_cache && cached_quote.price_cents==2700 && complete.price_cents==3000 && warm_detail[1].leg_id==final.legs[1].id && warm_detail[1].leg_segment_index==0}
+ {name:"POI projection直接给实际extend节点引用" passed:poi.node_ref=="poi:transfer-poi" && route_node(poi.node_ref)!=nil}
  {name:"未读地图目录不是零且不构造几何" passed:map_cold.catalog_status=="not_loaded" && map_cold.path_count==nil && map_cache_before==nil && map_cold.max_paths_per_image==4}
  {name:"extend新几何不能沿用旧Route目录" passed:route_map_metadata(candidates[1]).catalog_status=="ready" && extended_cold.catalog_status=="not_loaded" && extended_cold.path_count==nil}
  {name:"报价派生复用同源目录并保当前Route身份" passed:quote_cold.catalog_status=="not_loaded" && quoted_directory==new_directory && quoted_facts.id==priced.id && quoted_facts.map_paths==new_directory && quoted_facts.map_metadata.catalog_status=="ready" && quoted_facts.map_metadata.path_count==new_directory.len()}
@@ -397,6 +429,7 @@ fn amap_request(path,params,token,done){
  start_timeout(0.01,||done(data))
 }
 start_timeout(1,||{
+ trip_new() trip_begin("合成接驳事实测试")
  run_id+=1 received_at=time_now() arrive_by=received_at+2400 user_limits={minutes:40 budget_cents:5000} constraints={budget_cents:5000}
  let city={city:"fixture" citycode:"0755" adcode:"440306" currency:"CNY"}
  position_record={name:"fixture origin" source:"mock" mock:true coordinate_system:"GCJ-02" longitude:114 latitude:22 city:"fixture" citycode:"0755" adcode:"440306" currency:"CNY" sampled_at_unix:received_at}
@@ -404,9 +437,10 @@ start_timeout(1,||{
  register_route_node("stop:a","fixture station A","114.01,22","mock",city)
  register_route_node("stop:b","fixture station B","114.02,22","mock",city)
  agent_active=true phase="running" agent_calls=[
- {id:"mixed-taxi-a" function:{name:"extend_route" arguments:{route_id:"origin" to_ref:"stop:a" mode:"taxi"}.to_json()}}
+ {id:"mixed-taxi-a" function:{name:"query_route" arguments:{to_ref:"stop:a" mode:"taxi"}.to_json()}}
  {id:"mixed-transit" function:{name:"extend_route" arguments:{route_id:"route_"+run_id+"_1" to_ref:"stop:b" mode:"transit" strategy:0}.to_json()}}
  {id:"mixed-taxi-b" function:{name:"extend_route" arguments:{route_id:"route_"+run_id+"_2" to_ref:"destination" mode:"taxi"}.to_json()}}
+ {id:"mixed-default" function:{name:"query_route" arguments:{mode:"transit"}.to_json()}}
  ] agent_call_index=0 agent_execute_next(run_id)
 })
 '''
@@ -552,13 +586,20 @@ fn skills_tick(){
  agent_begin()
  let checks=[]
  let catalog=agent_skill_catalog()
- checks.push({name:"七个技能从frontmatter曝光" passed:catalog.len()==7})
+ let mixed=read_agent_skill({name:"mixed-routing"}) let guardian=read_agent_skill({name:"journey-guardian"})
+ checks.push({name:"搜索与守护技能可由目录发现并按需读取" passed:mixed.success && guardian.success && mixed.files.len()==2 && mixed.content==read_text("skills/mixed-routing/SKILL.md") && guardian.content==read_text("skills/journey-guardian/SKILL.md")})
+ let extend_schema=nil
+ for schema in agent_tools() {if schema.function.name=="extend_route" {extend_schema=schema.function}}
+ checks.push({name:"实际extend参数说明保留完整前缀与返回ID累计契约" passed:extend_schema.parameters.properties.route_id.description.split("origin").len()>1 && extend_schema.parameters.properties.route_id.description.split("不会裁到内部站点").len()>1 && extend_schema.parameters.properties.to_ref.description.split("非滴滴").len()>1 && extend_schema.description.split("Route.id").len()>1})
+ let examples=read_agent_skill({name:"mixed-routing" path:"references/hypotheses.md"})
+ checks.push({name:"接驳例子仅按需读取完整引用" passed:examples.success && examples.content==read_text("skills/mixed-routing/references/hypotheses.md")})
  let prompt=agent_messages[0].content
  let metadata_ok=true
  for skill in catalog {if prompt.split(skill.name).len()<2 || prompt.split(skill.description).len()<2 {metadata_ok=false}}
  checks.push({name:"首次模型消息包含所有名称与描述" passed:metadata_ok})
  let entry=read_agent_skill({name:"native-ui"})
  checks.push({name:"默认读取完整SKILL.md" passed:entry.success && entry.path=="SKILL.md" && entry.content==read_text("skills/native-ui/SKILL.md")})
+ checks.push({name:"呈现技能加载包含真实耗时估价与未知表达边界" passed:entry.success && entry.content.split("不将余量补成总耗时").len()>1 && entry.content.split("不把估价写成成交价").len()>1 && entry.content.split("未知项存在时不给到达保证").len()>1})
  checks.push({name:"技能正文不提前进入模型上下文" passed:prompt.split(entry.content).len()==1})
  let host=read_agent_skill({name:"native-ui" path:"references/host-interface.md"})
  checks.push({name:"按需读取完整宿主引用" passed:host.success && host.content==read_text("skills/native-ui/references/host-interface.md")})
@@ -710,9 +751,10 @@ def main():
  for p in [a.STATE,a.HOME_DIR,a.CORE]:p.mkdir(parents=True,exist_ok=True)
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
  if '--tool-contract' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_begin(','fn product_agent_begin(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1).replace('fn amap_request(','fn product_amap_request(',1).replace('fn map_geometry_uncached(','fn product_map_geometry_uncached(',1).replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+CONTRACT_FIXTURE
+ if '--transfer-startup' in sys.argv:source=original
  if '--skills' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1)+'\n'+SKILLS_FIXTURE
  if '--trace' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+TRACE_FIXTURE
- if '--mixed-routing' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn amap_request(','fn product_amap_request(',1)+'\n'+MIXED_FIXTURE
+ if '--mixed-routing' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn amap_request(','fn product_amap_request(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+MIXED_FIXTURE
  if '--loop-settle' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('fn map_geometry_uncached(','fn product_map_geometry_uncached(',1).replace('fn trace_emit_run(','fn product_trace_emit_run(',1).replace('fn refresh_generated_facts(','fn product_refresh_generated_facts(',1)+'\n'+LOOP_SETTLE_FIXTURE
  if '--ui-blocks' in sys.argv:source=original.replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+UI_BLOCKS_FIXTURE
  if '--map-sections' in sys.argv:source=original.replace('fn fit_map_slot(','fn product_fit_map_slot(',1).replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+MAP_SECTIONS_FIXTURE
@@ -776,6 +818,13 @@ def main():
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv:trips.prepare(jail)
   launch('native');report=None
+  if '--transfer-startup' in sys.argv:
+   time.sleep(1.5)
+   errors=[line for line in (w/'native.log').read_text().splitlines() if '[E]' in line]
+   report={'product_source_sha256':hashlib.sha256(original.encode()).hexdigest(),'unmodified_product_source':True,'model_called':False,'no_external_services':True,'checks':[{'name':'真实空库冷启动原稿无动态控件寻址错误','passed':not errors}], 'native_errors':errors}
+   (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+   assert not errors, str(w/'report.json')
+   print('PASS: 真实空库冷启动；'+str(w/'report.json'));return
   if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv:
    trips.run(w,jail,q,stop,launch,original,source)
    return
@@ -1037,6 +1086,10 @@ def main():
   assert all(row['passed'] for row in report['checks']),report
   if recovery or '--loop-settle' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--map-details' in sys.argv or '--terminal-content' in sys.argv or '--mixed-routing' in sys.argv or '--performance' in sys.argv:
    report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),injected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),synthetic_model=True,real_native_controls=True,mode='Android' if '--terminal-content' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv else 'desktop')
+   if '--mixed-routing' in sys.argv:
+    native_errors=[line for line in (w/'native.log').read_text().splitlines() if '[E]' in line]
+    assert not native_errors, str(w/'native.log')
+    report.update(model_called=False,no_external_services=True,synthetic_supplier_responses=True,native_errors=0)
    if '--loop-settle' in sys.argv:
     (w/'loop-settle-android.png').write_bytes(q('g',raw=1))
     report.update(no_external_services=True,expected_injected_errors=['diagnostic side entry unavailable','facts side entry unavailable'])

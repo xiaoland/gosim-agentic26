@@ -688,7 +688,7 @@ fn render_content(){
     ui.control.set_visible(shell_busy() || composer_open || shell_composer_default())
     ui.trip_context.set_visible(!shell_composer_default())
     // 原版宿主不支持动态子控件寻址；其兼容页只使用静态外壳。
-    if native_ui_available {
+    if native_ui_available && !shell_composer_default() {
       ui.shell_state.set_text(shell_history_line()) ui.shell_state.set_visible(!trip_replay)
       ui.history_info.set_text(shell_history_line()) ui.history_info.set_visible(trip_replay)
     }
@@ -1139,7 +1139,7 @@ fn parse_pois(data, at, airports_only){
         if point == nil { point = route_point(location) }
         if point != nil && route_get(poi, "id").is_string() && route_get(poi, "name").is_string() && poi.id != "" && poi.name != "" && (!airports_only || typecode == "150104") {
             let city = amap_city(route_get(poi, "cityname"), route_get(poi, "citycode"), route_get(poi, "adcode"), route_get(poi, "pname"))
-            result.push({id: poi.id name: poi.name typecode: typecode type: route_get(poi, "type") parent: route_get(poi, "parent") longitude: point.lon latitude: point.lat coordinate_system: "GCJ-02" coordinate_basis: coordinate_basis source: "amap-poi" address: route_get(poi, "address") queried_at: at returned_at: time_now() city_metadata: city})
+            result.push({id: poi.id node_ref:"poi:"+poi.id name: poi.name typecode: typecode type: route_get(poi, "type") parent: route_get(poi, "parent") longitude: point.lon latitude: point.lat coordinate_system: "GCJ-02" coordinate_basis: coordinate_basis source: "amap-poi" address: route_get(poi, "address") queried_at: at returned_at: time_now() city_metadata: city})
         }
     }
     return result
@@ -1325,10 +1325,20 @@ fn route_prefix_facts(prefix){
     return {id:prefix.id node_ref:prefix.node_ref completion_status:if prefix.node_ref=="destination" {"reached_requested_destination"} else {"incomplete"} requested_destination_ref:"destination" remaining_endpoint_gap_m:if route_nodes["destination"]!=nil {route_endpoint_gap(prefix.actual_endpoint,coord_text(route_nodes["destination"]))} else {nil} full_journey_price_cents:if prefix.node_ref=="destination" {prefix.price_cents} else {nil} incomplete_reason:if prefix.node_ref!="destination" {"仅到真实中间/路径终点；后续连接尚未取得，不能把当前小计当到目的地总价"} else {nil} departure_ts:prefix.departure_ts earliest_arrival_ts:prefix.earliest_arrival_ts known_cost_cents:prefix.known_cost_cents price_cents:prefix.price_cents duration_seconds:prefix.duration_seconds waiting_included:prefix.waiting_included budget_status:route_get(prefix,"budget_status") deadline_status:route_get(prefix,"deadline_status") waiting_slack_seconds:route_get(prefix,"waiting_slack_seconds") scenario:route_get(prefix,"scenario") legs:legs}
 }
 fn route_graph_facts(){
-    let nodes=[] let routes=[]
-    for ref node in route_nodes {nodes.push(node)}
-    for candidate in candidates {routes.push(query_route_summary(candidate))}
-    return {nodes:nodes routes:routes initial_route_id:"origin" coverage:"本次已取得POI/公交停靠站和已查询完整边；Agent选择继续扩展，不代表穷尽现实路线"}
+ let nodes=[] let routes=[] let relations=[] let memberships={}
+ for candidate in candidates {
+  routes.push(query_route_summary(candidate))
+  for segment in route_segment_facts(candidate,true) {for line_index line in segment.buslines {
+   let relation={route_id:candidate.id leg_id:segment.leg_id segment_index:segment.index leg_segment_index:segment.leg_segment_index busline_index:line_index line_id:line.line_id name:line.name stops:line.stops}
+   relations.push(relation)
+   for stop in line.stops {if stop.node_ref!=nil {
+    if memberships[stop.node_ref]==nil {memberships[stop.node_ref]=[]}
+    memberships[stop.node_ref].push({route_id:candidate.id leg_id:segment.leg_id segment_index:segment.index busline_index:line_index line_id:line.line_id stop_index:stop.index role:stop.role})
+   }}
+  }}
+ }
+ for ref node in route_nodes {let fact={} for key value in node {fact[key]=value} fact.memberships=if memberships[ref]!=nil {memberships[ref]} else {[]} nodes.push(fact)}
+ return {nodes:nodes routes:routes transit_segments:relations initial_route_id:"origin" coverage:"本轮已取得地点、停靠站和完整查询边；并非完整交通网络"}
 }
 fn verify_route_node_city(node,token,done){
     if node.city_metadata!=nil {done() return}
@@ -1535,6 +1545,8 @@ fn attach_quote(p,token){
 }
 
 fn query_route(p,token){
+ if p.mode!="transit" && p.mode!="taxi" {agent_tool_result({success:false error:"mode支持transit或taxi"}) return}
+ if route_get(p,"to_ref")!=nil {extend_route({route_id:"origin" to_ref:p.to_ref mode:p.mode strategy:route_get(p,"strategy")},token) return}
  if p.mode=="transit" {let strategy=route_get(p,"strategy") if strategy==nil {strategy=0} query_transit({strategy:strategy},token)}
  elif p.mode=="taxi" {query_driving(token)}
  else {agent_tool_result({success:false error:"mode支持transit或taxi"})}
@@ -2380,10 +2392,10 @@ let agent_tool_schema = nil
 fn tool(name,description,properties,required){return {type:"function" function:{name:name description:description parameters:{type:"object" properties:properties required:required}}}}
 fn is_render_tool(name){return name=="render_ui" || name=="render_summary" || name=="render_explanation" || name=="render_routes" || name=="render_suggestions" || name=="render_route_detail"}
 fn render_block_tool(name,description){
- let source_description="任意Makepad Splash DSL。区块源码的父body默认Fit，顶层ScrollYView{height:Fill}在未指定区块height时会零高，包括overlay与整稿；普通内容用自然Fit的View，父容器承担滚动；确需内部Fill滚动时显式指定区块height。事件引用实际构造的本块widget名字。"
- if name=="render_route_detail" {source_description="独立详情区块的Splash DSL：父容器初始隐藏，打开父容器时源码内容应正常可见，根不再visible:false。多个候选共用同ID详情时，初始按facts.viewed_route_id、on_facts_changed按传入current.viewed_route_id查同一Route，用该Route的kind_label、price_label、duration_label、reason、segments更新文案和地图target；view_route只改变父事实，不替生成稿更换内容。每候选使用独立静态详情也合法，但须使用不同区块ID，列表按钮打开对应区块。地图按目标Route的map_metadata/map_paths目录选择path_indices；目录未读不表示最多四条，可用get_route取得当前目录。每图最多4条独立paths，可自选多个独立命名地图或本地分段翻页，使所有分图或页面的索引合起来覆盖全部真实折线；布局、张数、分页和分组由你选择，不猜索引或沿用extend前目录。首次打开所选路线后，从本详情区块向自己的命名地图emit map绑定(target为路线id或geometry_ref)；on_camera_changed的map_camera仅处理已绑定地图的后续相机变化。打开用show_block(实际目标区块ID)，关闭/返回用hide_self()，不重建列表。"}
+ let source_description="任意Splash DSL；原生嵌入、事实更新、事件与地图接口见native-ui技能。未指定height时父body为Fit，顶层ScrollYView Fill会零高。"
+ if name=="render_route_detail" {source_description+="详情默认overlay且初始隐藏；根内容应正常可见，按当前viewed_route_id更新。"}
  let default_id=name.strip_prefix("render_")
- return tool(name,description+"；source是任意Splash DSL，不是模板。省略id时实际区块ID为"+default_id+"；show_block(target_id)必须使用要打开的实际ID，hide_self()无参数关闭发起块。id可覆盖默认块名，重复id仅更新此块，其余状态保留；overlay/height可选。",{source:{type:"string" description:source_description} id:{type:"string" description:"实际区块ID；省略时为"+default_id+"，打开按钮调用show_block(此实际ID)；详情返回调用hide_self()，不用猜来源ID。"} overlay:{type:"boolean"} height:{type:"number"}},["source"])
+ return tool(name,description+"；省略id时实际区块ID为"+default_id+"；重复id只更新此块，其它块状态保留。",{source:{type:"string" description:source_description} id:{type:"string" description:"实际区块ID；默认"+default_id+"，用于show_block；hide_self()关闭发起块。"} overlay:{type:"boolean"} height:{type:"number" description:"区块高度，逻辑像素；省略为自然Fit"}},["source"])
 }
 fn render_tool_params(name,p){
  if name=="render_ui" {return p}
@@ -2399,31 +2411,31 @@ fn agent_tools(){
  if agent_tool_schema!=nil {return agent_tool_schema}
  let mode=location_mode()
  let tools = [
- tool("propose_goal","提出确认保存目标或替换路线；只暂存本轮真实Route提案，用户在父应用按钮确认才保存。已有目标时不得改变目的地/绝对期限/总预算/偏好风险。",{route_id:{type:"string"} preferences:{type:"string"} risk_acceptance:{type:"string"} basis:{type:"string"}},["route_id" "preferences" "risk_acceptance" "basis"])
- tool("report_goal_check","计算并记录原计划本轮三态核验；引用本轮新Route，或省略route_id检查已过期/已超支及信息不足。本工具结果才是本次成立/失效/未知结论，旧快照仅供识别比较，不能用旧数值口头自算当前成立。返回原计划证据与替代差额。新路线不自动替换原路线，进度只能由用户确认。",{route_id:{type:"string"}},[])
+ tool("propose_goal","暂存本轮route_id的目标/替代提案；父应用真实确认后才保存。已有目标约束锁定；preferences/risk_acceptance为待用户确认文字。",{route_id:{type:"string"} preferences:{type:"string"} risk_acceptance:{type:"string"} basis:{type:"string"}},["route_id" "preferences" "risk_acceptance" "basis"])
+ tool("report_goal_check","以本轮新route_id计算并记录原计划valid/invalid/unknown；省略id检查已过期、已超支或缺证据。返回核验与替代差额，不替换路线。",{route_id:{type:"string"}},[])
  tool("read_skill","读取技能目录中的技能。省略path读取SKILL.md；path可读取该技能返回的files中的引用资料。",{name:{type:"string"} path:{type:"string"}},["name"])
  tool("read_location",if mode=="demo" {"读取显式模拟出发位置并核实城市。"} else {"读取当前设备定位并核实城市。"},{},[])
- tool("search_places","用真实高德搜索公开地点，返回完整POI和城市；不采用目标。",{query:{type:"string"}},["query"])
+ tool("search_places","搜索高德真实地点，返回POI、城市与可extend的node_ref；不采用目的地。",{query:{type:"string"}},["query"])
  tool("adopt_destination","采用已有poi_id为本任务目标。basis说明来自用户选择或明确推断；不伪造航站楼。",{poi_id:{type:"string"} basis:{type:"string"}},["poi_id" "basis"])
- tool("query_route","查询实际起终点。mode为transit或taxi；transit策略默认0推荐，可1经济/2少换乘/3少步行/4舒适/5无地铁/7地铁优先/8快；taxi用单路径高德驾车路线出租车估价，候车未知。只覆盖本次已查范围，返回新增Route、实际legs、completion_status与assessment；new_nodes是供应商真实中转节点，其ref可直接用于extend_route.to_ref，geometry_ref供地图引用。直达公共交通超期或末段未完成，不证明到中转节点后换打车也不成立；用时数值在期限内不等于已核实准时。",{mode:{type:"string" enum:["transit" "taxi"]} strategy:{type:"number"}},["mode"])
- tool("extend_route","从本轮route_id延长一整段到真实图节点，返回新Route，原Route不变；route_id=origin可从实际出发点查询到中转站；to_ref用query_route.new_nodes或get_route_graph.nodes的真实ref，新Route.id可继续以另一mode接驳。未到目标也能get/view/map；walk/taxi/transit每段采用完整供应商方案，不拆摊原公交票价。后续公交按最早场景查询，未知候车不保证班次。",{route_id:{type:"string"} to_ref:{type:"string"} mode:{type:"string"} strategy:{type:"number"}},["route_id" "to_ref" "mode"])
+ tool("query_route","从当前起点查询，返回新增Route、分段事实和new_nodes；成功Route.id可供extend_route继续累计。transit公交策略默认0；taxi为完整驾车路程估价，候车未知。",{to_ref:{type:"string" description:"可选真实中转节点node_ref，省略则到destination。指定时只查origin到该节点，作为新的完整前缀；非滴滴询价地点ref。"} mode:{type:"string" enum:["transit" "taxi"]} strategy:{type:"number" description:"transit:0推荐/1经济/2少换乘/3少步行/4舒适/5无地铁/7地铁优先/8快；默认0"}},["mode"])
+ tool("extend_route","查询完整新段并返回累计的新Route，原Route不变；成功返回的Route.id可作下一次route_id。费用/时间由工具累计，完整公交票价不可拆摊。",{route_id:{type:"string" description:"要保留并累计的本轮完整前缀Route.id，从其实际终点继续。origin是零路段起点；从起点重组或替换首段用origin。完整公交Route.id会保留其全部耗时费用，不会裁到内部站点。"} to_ref:{type:"string" description:"下一节点的真实node_ref，来自本轮路线/图/高德POI；非滴滴询价地点ref。"} mode:{type:"string" enum:["walk" "taxi" "transit"]} strategy:{type:"number" description:"公交策略，含义同query_route；默认0，仅transit使用"}},["route_id" "to_ref" "mode"])
  tool("search_didi_places","搜索滴滴供应商真实地点，city完整城市名；报价坐标只用本工具ref。",{query:{type:"string"} city:{type:"string"}},["query" "city"])
- tool("attach_quote","以route_id和leg_id将指定车型当前报价替换明确taxi leg费用，返回新Route及新id；原Route不变，展示/地图须选择返回的新id。重算小计，全程金额与完成状态独立；不认证滴滴上下车连接。place_basis保两端名称/城/地址入口对应依据。",{route_id:{type:"string"} leg_id:{type:"string"} quote_ref:{type:"string"} place_basis:{type:"string"}},["route_id" "leg_id" "quote_ref" "place_basis"])
- tool("quote_didi","用本轮滴滴地点ref询价，多车型当前估价；不下单，不自动认作高德leg价格。",{from_ref:{type:"string"} to_ref:{type:"string"}},["from_ref" "to_ref"])
- tool("compare_routes","确定性重算当前Route的时间、费用、原截止与assessment理由，只比较已查范围。根据用户目标与缺口探索真实接驳及可用供应商报价；未查的报价/连接不证明最优，passed=false不能称可行或稳妥；不自动选方案/结束。",{},[])
- tool("get_route","按本轮Route ID读取完整或未完成路线的legs、费用范围、来源、当前校验和该ID真实map_paths目录；首次按需解析并缓存几何，不再查询供应商。map_metadata.catalog_status=not_loaded/path_count=nil不表示最多四条；每张高德图最多4条独立paths，按当前目标目录选择。extend后的新几何不能沿用旧目录；报价派生几何不变可复用同源目录。",{id:{type:"string"}},["id"])
- tool("get_route_graph","读取本轮全部真实接驳节点和统一Route对象，不查询供应商。",{},[])
+ tool("attach_quote","将本轮quote_ref替换route_id指定taxi leg估价，返回新Route；原Route不变。place_basis说明两端地点对应依据，不认证连接。",{route_id:{type:"string"} leg_id:{type:"string"} quote_ref:{type:"string"} place_basis:{type:"string"}},["route_id" "leg_id" "quote_ref" "place_basis"])
+ tool("quote_didi","使用本轮滴滴地点ref询价，返回多车型当前CNY估价及报价ref；不下单。",{from_ref:{type:"string"} to_ref:{type:"string"}},["from_ref" "to_ref"])
+ tool("compare_routes","按当前时刻重算已查Route费用、截止与assessment，返回全部已查范围的比较；不自动选定方案。",{},[])
+ tool("get_route","读取本轮完整/未完成Route详情、按线路分开的有序stop refs和map_paths目录；不查询供应商。saved_goal_route仅为已确认历史快照。",{id:{type:"string"}},["id"])
+ tool("get_route_graph","按需读取本轮节点、多线路归属、route/leg/segment关系和已有Routes；不查询供应商。",{},[])
  render_block_tool("render_summary","呈现本次总结论")
  render_block_tool("render_explanation","呈现结论的简要解释")
  render_block_tool("render_routes","呈现已评估方案列表，用户可点击打开对应候选详情；不成立的候选也可查看")
  render_block_tool("render_suggestions","呈现改进建议")
- render_block_tool("render_route_detail","呈现对应已评估候选的分段、费用、耗时、限制和实际地图，即使不满足条件仍有详情价值；已有块更新保持当前页面状态，可用不同id保留多个详情")
+ render_block_tool("render_route_detail","呈现已评估Route详情与实际地图，包括不成立方案；可按不同id保留详情")
  tool("render_ui","提交任意原生Splash源码。source整稿替换；blocks按id追加或替换指定区块，其余区块状态保留。普通区块自然高度，overlay是可显示/隐藏的有限视口。返回各块真实执行诊断；success不代表内容目标完成。",{source:{type:"string"} blocks:{type:"array" items:{type:"object" properties:{id:{type:"string"} source:{type:"string"} overlay:{type:"boolean"} visible:{type:"boolean"} height:{type:"number"}} required:["id" "source"]}}},[])
  ]
  if mode=="demo" {
 tools.push(tool("read_calendar","读取本应用明确标注的模拟日历；返回记录和来源。",{},[]))
 tools.push(tool("read_notes","读取本应用模拟机票笔记；返回记录和来源。",{},[]))
-tools.push(tool("set_constraints","按实际日历/笔记原文形成行程约束；用户原分钟数和预算不变。",{event_id:{type:"string"} note_id:{type:"string"} minutes:{type:"number"} budget_cents:{type:"number"} currency:{type:"string"} destination_query:{type:"string"} citations:{type:"array" items:{type:"object" properties:{source_id:{type:"string"} quote:{type:"string"}}}}},["event_id" "note_id" "minutes" "budget_cents" "currency" "destination_query" "citations"]))
+tools.push(tool("set_constraints","按实际日历/笔记原文形成行程约束；用户原分钟数和预算不变。",{event_id:{type:"string"} note_id:{type:"string"} minutes:{type:"number" description:"用户到达时限，整数分钟"} budget_cents:{type:"number" description:"用户总预算，整数分"} currency:{type:"string"} destination_query:{type:"string"} citations:{type:"array" items:{type:"object" properties:{source_id:{type:"string"} quote:{type:"string"}}}}},["event_id" "note_id" "minutes" "budget_cents" "currency" "destination_query" "citations"]))
  }
  agent_tool_schema=tools
  return tools
@@ -2447,7 +2459,7 @@ fn read_agent_skill(p){
  return {success:false error:"技能不在目录中" name:name catalog:agent_skill_metadata()}
 }
 fn agent_begin(){
- agent_messages=[{role:"system" content:"你是Navigation出行Agent。围绕本次时间、预算和偏好探索步行、公共交通与打车接驳；工具选择和顺序由你决定，时间费用由工具计算。标题与结论取同一Route当前assessment：预算、截止与连接独立判断，unknown不是符合，passed=false不等于每项超限；已查段小计不是全程价格，新规划期限从received_at起算，守护使用已确认绝对期限。新输入是独立查询，不恢复模型对话。守护核验维护facts.guardian中的已确认目标，本轮核验交付以本轮新交通证据及report_goal_check工具判断为准，旧快照不认证当前成立；不放宽绝对期限或其它约束，提案由用户真实确认后生效。只前台核验，不后台监听或下单。向用户呈现已评估方案及实际依据，包括不成立方案的分段、费用、耗时、限制和地图；未取得的数据或服务失败如实说明。结果面向用户，不使用内部ID/时间戳或已结束的正在处理标题。技能目录（正文及引用资料通过read_skill按需读取）：\n"+agent_skill_metadata().to_json()} {role:"user" content:({request:request_text facts:model_task_context()}).to_json()}]
+ agent_messages=[{role:"system" content:"你是Navigation出行Agent。围绕用户期限、预算和偏好，主动寻找值得替换的出行瓶颈与接驳组合；由你决定工具选择与探索顺序，代码计算时间、费用和连接。新输入独立规划，不恢复模型对话。守护约束不可放宽，提案仅用户真实确认后生效。向用户交付已查路线、依据和未知，不把估计或历史当保证，不下单。按任务需要读取以下技能；技能承载搜索策略、事实、守护和原生呈现的各自规则：\n"+agent_skill_metadata().to_json()} {role:"user" content:({request:request_text facts:model_task_context()}).to_json()}]
  agent_active=true agent_pump(run_id)
 }
 
@@ -2504,11 +2516,48 @@ fn tool_new_nodes(){
  return added
 }
 // 路段展示资料随Route几何保持不变；只重算当前assessment，不重复解析供应商步骤。
+fn route_stop_fact(stop,role,index){
+ let id=route_get(stop,"id") let ref=nil
+ if id.is_string() && id!="" && route_node("stop:"+id)!=nil {ref="stop:"+id}
+ return {node_ref:ref name:route_get(stop,"name") role:role index:index}
+}
+fn route_line_facts(line,detailed){
+ let duration=route_seconds(route_get(route_get(line,"cost"),"duration"))
+ if duration==nil {duration=route_seconds(route_get(line,"duration"))}
+ let first=route_stop_fact(route_get(line,"departure_stop"),"departure",0)
+ let last=route_stop_fact(route_get(line,"arrival_stop"),"arrival",0)
+ let fact={line_id:route_get(line,"id") name:route_get(line,"name") departure_stop:first.name departure_node_ref:first.node_ref arrival_stop:last.name arrival_node_ref:last.node_ref duration_seconds:duration distance_m:route_seconds(route_get(line,"distance"))}
+ if detailed {
+  let stops=[first] let via=route_get(line,"via_stops")
+  if via.is_array() {for stop in via {stops.push(route_stop_fact(stop,"via",stops.len()))}}
+  last.index=stops.len() stops.push(last) fact.stops=stops
+ }
+ return fact
+}
+// 保留每条供应商线路的独立站序；不拼出替代线路的虚构共同停站顺序。
+fn route_segment_facts(candidate,detailed){
+ if detailed {let cached=route_get(candidate,"segments_cache") if cached!=nil {return cached}}
+ let result=[] let offset=0 let legs=route_get(candidate,"legs")
+ for index segment in candidate.segments {
+  let leg_id=nil let leg_segment_index=index
+  if legs.is_array() {offset=0 for leg in legs {let segments=route_get(leg,"segments") if segments.is_array() {if index>=offset && index<offset+segments.len() {leg_id=leg.id leg_segment_index=index-offset} offset+=segments.len()}}}
+  let lines=[] let supplied=route_get(route_get(segment,"bus"),"buslines")
+  if supplied.is_array() {for line in supplied {lines.push(route_line_facts(line,detailed))}}
+  let walking=route_get(segment,"walking") let taxi=route_get(segment,"taxi")
+  let duration=route_seconds(route_get(route_get(segment,"cost"),"duration"))
+  if duration==nil {duration=route_seconds(route_get(segment,"duration"))}
+  let taxi_duration=route_seconds(route_get(taxi,"drivetime")) if taxi_duration==nil {taxi_duration=route_seconds(route_get(taxi,"duration"))}
+  result.push({index:index leg_id:leg_id leg_segment_index:leg_segment_index description:segment_description(segment) duration_seconds:duration distance_m:route_seconds(route_get(segment,"distance"))
+    walking:if walking.is_object() {{duration_seconds:route_seconds(route_get(route_get(walking,"cost"),"duration")) distance_m:route_seconds(route_get(walking,"distance"))}} else {nil}
+    taxi:if taxi.is_object() {{duration_seconds:taxi_duration distance_m:route_seconds(route_get(taxi,"distance")) price:route_get(taxi,"price")}} else {nil}
+    road:route_get(segment,"road") buslines:lines})
+ }
+ if detailed {candidate.segments_cache=result}
+ return result
+}
 fn route_summary_steps(candidate){
-    let cached=route_get(candidate,"steps_cache") if cached!=nil {return cached}
-    let steps=[]
-    for segment in candidate.segments {steps.push({description:segment_description(segment) distance_m:route_seconds(route_get(segment,"distance")) duration_seconds:route_seconds(route_get(route_get(segment,"cost"),"duration"))})}
-    candidate.steps_cache=steps return steps
+ let cached=route_get(candidate,"steps_cache") if cached!=nil {return cached}
+ let steps=route_segment_facts(candidate,false) candidate.steps_cache=steps return steps
 }
 fn query_route_summary(candidate){
     let check=route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents"))
@@ -2685,19 +2734,10 @@ fn route_cost_facts(candidate){
     return {amount_cents:candidate.price_cents known_subtotal_cents:known full_journey_amount_cents:if covered {candidate.price_cents} else {nil} complete:candidate.price_cents!=nil coverage:if covered {"requested_journey"} else {"queried_legs_only"} currency:candidate.currency basis:route_get(candidate,"price_basis") estimated:candidate.estimated}
 }
 fn interface_route_facts(candidate, check){
-    let segments = []
-    if candidate.segments.is_array() {
-        for index segment in candidate.segments {
-            let walking = route_get(segment, "walking") let taxi = route_get(segment, "taxi") let buslines = []
-            let lines = route_get(route_get(segment, "bus"), "buslines")
-            if lines.is_array() { for line in lines {
-                buslines.push({name: route_get(line, "name") departure_stop: route_get(route_get(line, "departure_stop"), "name") arrival_stop: route_get(route_get(line, "arrival_stop"), "name") distance_m: route_get(line, "distance") duration_seconds: route_get(route_get(line, "cost"), "duration")})
-            } }
-            segments.push({index: index walking_distance_m: route_get(walking, "distance") walking_duration_seconds: route_get(route_get(walking, "cost"), "duration") taxi_distance_m: route_get(taxi, "distance") taxi_duration_seconds: route_get(taxi, "drivetime") taxi_price: route_get(taxi, "price") description: segment_description(segment) road: route_get(segment, "road") distance_m: route_get(segment, "distance") duration_seconds: route_get(segment, "duration")
-                walking: if walking.is_object() { {distance_m: route_get(walking, "distance") duration_seconds: route_get(route_get(walking, "cost"), "duration")} } else { nil }
-                taxi: if taxi.is_object() { {distance_m: route_get(taxi, "distance") duration_seconds: route_get(taxi, "duration") price: route_get(taxi, "price")} } else { nil }
-                buslines: buslines})
-        }
+    let segments=route_segment_facts(candidate,true)
+    for segment in segments {
+      segment.walking_distance_m=route_get(segment.walking,"distance_m") segment.walking_duration_seconds=route_get(segment.walking,"duration_seconds")
+      segment.taxi_distance_m=route_get(segment.taxi,"distance_m") segment.taxi_duration_seconds=route_get(segment.taxi,"duration_seconds") segment.taxi_price=route_get(segment.taxi,"price")
     }
     let fact=query_route_summary(candidate)
     fact.kind_label=route_kind_label(candidate) fact.price_cents=candidate.price_cents fact.currency=candidate.currency

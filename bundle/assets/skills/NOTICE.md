@@ -2,7 +2,7 @@
 
 Makepad通用技能资料来自GitHub社区仓库ZhangHanDong/makepad-skills，固定commit为6e16c8d5beefcb410d57e83a799014beb2957977。上游README声明MIT许可。UPSTREAM.md和references保留上游内容；本项目添加短SKILL.md入口、符合Agent Skills命名规则的目录和Navigation环境说明。上游与本地文件摘要见仓库toolchain/skills.lock.json。
 
-native-ui和navigation-data为本项目的Apache-2.0资料。Makepad社区资料不能被本项目的Apache-2.0重新许可。
+native-ui、navigation-data、mixed-routing和journey-guardian为本项目的Apache-2.0资料。Makepad社区资料不能被本项目的Apache-2.0重新许可。
 
 ## MIT License — ZhangHanDong/makepad-skills
 
