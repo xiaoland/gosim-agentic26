@@ -38,7 +38,32 @@ query_route 返回真实供应商节点，extend_route 可从 origin 或已有 R
 
 资料参考：[RAPTOR](https://www.microsoft.com/en-us/research/publication/round-based-public-transit-routing/)以到达时间、换乘等标准比较非劣路线；[ULTRA](https://i11www.iti.kit.edu/extra/publications/bbswz-ultra-19.pdf)明确区分起点、终点与中途接驳。可借鉴比较与搜索视角；本应用依赖供应商黑盒查询，没有论文算法所需的完整交通网络，本轮不引入全网求解器，也不继承其最优性保证。
 
-## 当前实现与验证
+## Harness诊断接续（2026-10-11，当前工作）
+
+用户授权继续推进，要求参考Pi Agent和成熟Agent harness实践，并强调先排查技能读取是否真正可用、获取全面诊断。当前基线db572f4，工作区开始干净。上一阶段失败不归因为模型能力；不再仅微调路线提示词抽样。
+
+已确认的关键事实：
+
+- 应用minimax_request和宿主请求校验共同硬锁thinking:disabled；最后8次实际请求均如此。[MiniMax官方OpenAI协议](https://platform.minimax.io/docs/api-reference/text-openai-api)明确M3省略／adaptive启用思考、disabled跳过思考。这是配置问题，但需实证它对接驳行为的影响。
+- guardian_verify逐环核28次实际read_skill：正文SHA对应物化文件，tool回执唯一call_id与assistant调用一致，下次请求的role:tool内容与回执逐字相同，Markdown完整、有真实换行，无额外转义层。最后115事件轮有目录却未调用技能，不是该轮文件读取失败。证据归build/research/transfer-exploration/skill-delivery-audit-safe.json，复核入口tools/audit_skill_delivery.py。
+- app完整push assistant原对象，宿主serde_json原样包装响应，无已观察到的reasoning字段丢弃；disabled轮响应原本就没有reasoning。没有HTTP抓包，不冒称已核网络原始字节。
+- seq112的宿主JSON回执已有finish_reason:tool_calls但无calls。app不检查finish_reason而记completed，是确定的终态缺陷；length截断和空正文／无成功稿也不能误记完成。
+
+实现分工与决定：guardian_impl改应用为省略thinking、请求reasoning_split:true，继续无损回传assistant对象；用简短技能元提示说明匹配description时read_skill(name)，引用通过path按需读；分类异常终止且不自动重试。host_model改宿主支持省略／adaptive／disabled及split布尔透传，并维护overlay和构建锁。guardian_verify维护实际技能传递审计及最后受控观察；root维护知识归属。各owner不覆盖彼此文件，不改路线策略／供应商fixture或预算账本。
+
+参考[Pi agent loop](https://github.com/earendil-works/pi/blob/ea448f454af474f3e2fe9733b331e17b0662f5d6/packages/agent/src/agent-loop.ts)和[技能提示](https://github.com/earendil-works/pi/blob/ea448f454af474f3e2fe9733b331e17b0662f5d6/packages/coding-agent/src/core/skills.ts)，官方仓库现重定向earendil-works/pi；源码对照归build/research/transfer-exploration/pi-harness-comparison.md。[Agent Skills官方接入指南](https://agentskills.io/client-implementation/adding-skills-support)支持模型匹配描述后调用专用读取工具，不要求业务固定流程。[MiniMax工具指南](https://platform.minimax.io/docs/guides/text-m3-function-call)要求完整回传思考上下文；不同官方页出现reasoning_content／reasoning_details差异，因此保留整对象，不押单一字段。reasoning_split防止思考混进用户结果，不能删除历史来处理显示。
+
+先做无模型协议／技能回放：实际请求配置、两种reasoning字段完整往返、工具ID一致、坏tool_calls／length／空stop不执行工具不记完成、不自动续轮。然后仅在既有剩余9次／约295k tokens内做一次同fixture真实M3观察。若额度不足完整UI，只报告已观察到的路线行为，不放宽额度、不换账本，也不以必调用工具规则替代自主编排。
+
+当前修复冻结：main a27ca4c486a9c260c9273148747f493f5386117207109ac484d2acc5c1fc6f3d，包77ada9b2666b3a9a4b6bab1273d1685a564c52856e50b79ccd64f9c1877ea76a，stamp f3bbff0faf8e69d9a4f66485cb2559de5bb6017dc7d7e71541088f96937834b9；实际在线host 38c1f446b5a5c5fc5a05d3ba33a6ca6bcd87b0115afc457904e3edf6cece6223，overlay tree6cce41cc408f4c8e6bd9bb466fe9cb2f9d119b07／patch97274e7aa258d9f28d1ce7ac17864738c7972aadd8774683f106db2ea86e8d40。
+
+宿主早期构建hash c04864与最终hash不同，因为app-hub-app的build.rs把Navigation包编入可执行文件；最后应用改稿后重建。当前二进制、私有实验二进制、build/agent/build.json及在线freeze均为38c1，宿主源码tree一致，不把早期二进制当作本次线上对象。
+
+Rust chat3项／complete19项通过；应用实际请求与loop的18项原生回放通过build/smoke/navigation-harness-j3cwtu_m/report.json，覆盖双工具ID／全文技能／reasoning_content与reasoning_details、坏tool_calls／length保留路线和成功块但磁盘failed、不重试，以及空stop／仅失败稿。报告main eec27a52与最终main只差截断错误文案，避免将“这次响应工具未执行”误读成整个查询无调用；没有因此重跑行为检查。check/build通过。HTTP仍120秒，model service实际继承桥默认60秒，没有旧上下文提及的270秒；无输出token参数，本次不做额外超时调参。最后同fixture真实M3已执行，出现独立reasoning_content并在首回复主动读mixed-routing等技能；后台轨迹也开始query_route(to_ref)查询中转站，尚无完整混合候选。实验存在两个准备缺陷：首次临时空索引缺saved_at导致0模型调用，修正后共享fixture-go又让vm-2与vm-3同时启动。两份完整轨迹分别128和63事件、6和3次成功响应，合计9次／95363 tokens，与账本吻合；不是宿主重复计费或模型重试。第4个可见请求收到100次/日拒绝，不是60秒超时。两VM并发污染了单轮对照，不声称A/B或完整接驳验收通过。
+
+验证owner已将实验入口修为按session和instance定向VM触发并消费一次性token；实际双VM、零模型请求的6项隔离检查通过，账本逐字不变。合法索引构造也纳入入口。10份mount及两份原业务索引已逐字恢复，自有实例已停止。证据归fixture-protocol-gate/report-safe.json及restore-safe.json。原始两VM日志私密保留，推理内容只在安全报告中记字段、长度和hash。当前账本100次／1800256 tokens；用户已收到异步问题，询问是否允许仅把开发调用上限100提高至120，保留token限额和真实计数后补一次单VM验证。用户未答前不调整、不再请求模型。
+
+## 上一阶段实现与验证
 
 最终源码main为51f45061f0fd68e98af13ae2ba672d50ef355bf40928e5fc515507f3a69f4070，包聚合ce36450801ad57e0bf8516e20a89d19dd5c6ba45acd3d6fb2e5829a6ec356be1，Hub摘要124962e33bcbee71e8dca13672b4febef10cd24cfafccfa14d3bd80bffcc8b59。未更新宿主或版本号。guardian_impl拥有生产main／技能／原生回归，guardian_verify拥有在线实验与证据，root整合文档和本任务包。
 

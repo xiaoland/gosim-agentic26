@@ -751,6 +751,9 @@ def main():
  for p in [a.STATE,a.HOME_DIR,a.CORE]:p.mkdir(parents=True,exist_ok=True)
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
  if '--tool-contract' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_begin(','fn product_agent_begin(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1).replace('fn amap_request(','fn product_amap_request(',1).replace('fn map_geometry_uncached(','fn product_map_geometry_uncached(',1).replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+CONTRACT_FIXTURE
+ if '--agent-protocol' in sys.argv:
+  import test_agent_protocol as protocol
+  source=protocol.source(original)
  if '--transfer-startup' in sys.argv:source=original
  if '--skills' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1)+'\n'+SKILLS_FIXTURE
  if '--trace' in sys.argv:source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+TRACE_FIXTURE
@@ -818,6 +821,9 @@ def main():
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv:trips.prepare(jail)
   launch('native');report=None
+  if '--agent-protocol' in sys.argv:
+   protocol.run(w,jail,original,source)
+   return
   if '--transfer-startup' in sys.argv:
    time.sleep(1.5)
    errors=[line for line in (w/'native.log').read_text().splitlines() if '[E]' in line]

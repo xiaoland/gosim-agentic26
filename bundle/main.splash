@@ -1758,7 +1758,7 @@ fn request_stage(record, stage){
 }
 fn minimax_request(task, input, schema, token, record, done){
     request_stage(record, "entry")
-    let body = {messages: input tools: schema tool_choice: "auto" thinking: {type: "disabled"}}
+    let body = {messages: input tools: schema tool_choice: "auto" reasoning_split: true}
     trace_emit_run("model_request",{step:record.step service:"model.chat" body:body.to_json()},nil,token)
     let waiting = {settled: false}
     record.dispatch_started_at = nil record.dispatch_returned_at = nil record.dispatch_returned = false record.http_status = nil
@@ -2459,7 +2459,7 @@ fn read_agent_skill(p){
  return {success:false error:"技能不在目录中" name:name catalog:agent_skill_metadata()}
 }
 fn agent_begin(){
- agent_messages=[{role:"system" content:"你是Navigation出行Agent。围绕用户期限、预算和偏好，主动寻找值得替换的出行瓶颈与接驳组合；由你决定工具选择与探索顺序，代码计算时间、费用和连接。新输入独立规划，不恢复模型对话。守护约束不可放宽，提案仅用户真实确认后生效。向用户交付已查路线、依据和未知，不把估计或历史当保证，不下单。按任务需要读取以下技能；技能承载搜索策略、事实、守护和原生呈现的各自规则：\n"+agent_skill_metadata().to_json()} {role:"user" content:({request:request_text facts:model_task_context()}).to_json()}]
+ agent_messages=[{role:"system" content:"你是Navigation出行Agent。围绕用户期限、预算和偏好，主动寻找值得替换的出行瓶颈与接驳组合；由你决定工具选择与探索顺序，代码计算时间、费用和连接。新输入独立规划，不恢复模型对话。守护约束不可放宽，提案仅用户真实确认后生效。向用户交付已查路线、依据和未知，不把估计或历史当保证，不下单。任务匹配下列技能description时，用read_skill(name)读取完整指令；引用资源按需用该技能的相对path读取：\n"+agent_skill_metadata().to_json()} {role:"user" content:({request:request_text facts:model_task_context()}).to_json()}]
  agent_active=true agent_pump(run_id)
 }
 
@@ -2477,16 +2477,19 @@ fn agent_pump(token){
    let message_at=time_now()
    agent_messages.push(message)
    start_timeout(0.01,||trace_emit_run("assistant_message",{step:record.step message:message.to_json() occurred_at:message_at},nil,token))
-   let calls=route_get(message,"tool_calls")
+   let calls=route_get(message,"tool_calls") let finish=route_get(choice,"finish_reason")
+   if finish=="length" {record.state="truncated_response" request_failed(record,"模型输出已截断，这次响应中的工具未执行；已取得的路线与界面保留，请重新查询") return}
+   if finish=="tool_calls" && (!calls.is_array() || calls.len()==0) {record.state="invalid_tool_response" request_failed(record,"模型声明工具调用但未提供调用，本轮未完成；已取得的路线与界面保留，请重新查询") return}
+   if finish!="stop" && finish!="tool_calls" {record.state="invalid_finish_reason" request_failed(record,"模型未正常结束响应，本轮未完成；请重新查询") return}
    if !calls.is_array() || calls.len()==0 {
       let content=route_get(message,"content")
       answer_text=if content.is_string() {content} else {""}
       ui_facts_revision+=1
-      runtime_status=if answer_text.trim()=="" && !generated_active {"Agent没有返回可展示内容，请重新查询"} else {""}
-      agent_active=false active_tool=nil if phase=="running" {phase="waiting"}
+      runtime_status=if answer_text.trim()=="" && !generated_render_complete {"Agent没有返回可展示内容，请重新查询"} else {""}
+      agent_active=false active_tool=nil if phase=="running" {phase=if runtime_status=="" {"waiting"} else {"failed"}}
       let ended={content:answer_text generated:generated_active rendered:generated_render_complete occurred_at:time_now()}
       start_timeout(0.01,||trace_emit_run("query_ended",ended,nil,token))
-      trip_save_current("completed") trip_refresh_shell() return
+      trip_save_current(if runtime_status=="" {"completed"} else {"failed"}) trip_refresh_shell() return
    }
    agent_calls=calls agent_call_index=0 start_timeout(0.01,||agent_execute_next(token))
  })

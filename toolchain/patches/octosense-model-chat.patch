@@ -1,9 +1,9 @@
 diff --git a/apps/ai-providers/host-service/src/complete/chat.rs b/apps/ai-providers/host-service/src/complete/chat.rs
 new file mode 100644
-index 0000000..dffe993
+index 0000000..5fd97a3
 --- /dev/null
 +++ b/apps/ai-providers/host-service/src/complete/chat.rs
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,115 @@
 +//! Native function-calling transport. The app owns its transient conversation
 +//! and tool execution; the host owns the primary provider, key and shared budget.
 +use super::{Code, ModelHost, Refusal, Refused, Usage};
@@ -22,8 +22,8 @@ index 0000000..dffe993
 +
 +fn check(args: &Value) -> Result<(), Refusal> {
 +    let object = args.as_object().ok_or_else(|| bad("chat arguments must be an object"))?;
-+    if object.keys().any(|k| !["messages", "tools", "tool_choice", "thinking"].contains(&k.as_str())) {
-+        return Err(bad("chat takes only messages, tools, tool_choice and thinking"));
++    if object.keys().any(|k| !["messages", "tools", "tool_choice", "thinking", "reasoning_split"].contains(&k.as_str())) {
++        return Err(bad("chat takes only messages, tools, tool_choice, thinking and reasoning_split"));
 +    }
 +    let messages = args["messages"].as_array().filter(|m| !m.is_empty()).ok_or_else(|| bad("messages must be a nonempty array"))?;
 +    for message in messages {
@@ -48,8 +48,18 @@ index 0000000..dffe993
 +            return Err(bad("each tool needs a function name and parameter schema"));
 +        }
 +    }
-+    if args["tool_choice"] != "auto" || args["thinking"] != json!({"type":"disabled"}) {
-+        return Err(bad("chat requires tool_choice auto and thinking disabled"));
++    if args["tool_choice"] != "auto" {
++        return Err(bad("chat requires tool_choice auto"));
++    }
++    // Omission keeps the provider default; explicit modes follow MiniMax's
++    // OpenAI-compatible contract without changing assistant history fields.
++    if let Some(thinking) = object.get("thinking") {
++        if thinking != &json!({"type":"adaptive"}) && thinking != &json!({"type":"disabled"}) {
++            return Err(bad("thinking must be adaptive or disabled"));
++        }
++    }
++    if object.get("reasoning_split").is_some_and(|value| !value.is_boolean()) {
++        return Err(bad("reasoning_split must be a boolean"));
 +    }
 +    Ok(())
 +}
@@ -110,14 +120,14 @@ index 0000000..dffe993
 +    }
 +}
 diff --git a/apps/ai-providers/host-service/src/complete/mod.rs b/apps/ai-providers/host-service/src/complete/mod.rs
-index 8d0fe69..7ac5d58 100644
+index 8d0fe69..f7646fd 100644
 --- a/apps/ai-providers/host-service/src/complete/mod.rs
 +++ b/apps/ai-providers/host-service/src/complete/mod.rs
 @@ -10,6 +10,7 @@
  //! |---|---|---|
  //! | `model.complete` | `{task, input, schema, class?, allow_urls?}` | `{output, meta: {class, requested, attempts, usage: {input_tokens, output_tokens, estimated}, budget}}` |
  //! | `model.budget` | – | the caller's `budget` alone |
-+//! | `model.chat` | `{messages, tools, tool_choice: "auto", thinking: {type: "disabled"}}` | `{response, meta: {usage, budget}}` (native function calls; primary only; see [`chat`]) |
++//! | `model.chat` | `{messages, tools, tool_choice: "auto", thinking?, reasoning_split?}` | `{response, meta: {usage, budget}}` (native function calls; primary only; optional thinking adaptive/disabled and boolean reasoning_split; see [`chat`]) |
  //!
  //! - `task` (1 to [`TASK_MAX`] bytes): what to do, in words.
  //! - `input` (any JSON, at most [`INPUT_MAX`] bytes): what to do it on.
@@ -170,10 +180,10 @@ index 8d0fe69..7ac5d58 100644
                      Ok(r) => r,
 diff --git a/apps/ai-providers/host-service/tests/chat.rs b/apps/ai-providers/host-service/tests/chat.rs
 new file mode 100644
-index 0000000..3dfd283
+index 0000000..510af23
 --- /dev/null
 +++ b/apps/ai-providers/host-service/tests/chat.rs
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,84 @@
 +//! Native tool history and host policy via actual dispatch, with no network.
 +use octosense_appstore::services::{dispatch,take_replies_for,ServiceCall,ServiceHost};
 +use octosense_llm_config::Provider;
@@ -234,4 +244,27 @@ index 0000000..3dfd283
 + let providers=complete::ProfileProviders{path:dir.join("profile.json"),vault};assert_eq!(providers.candidates().unwrap().len(),1);assert!(providers.primary().unwrap().unwrap().key.is_none());
 + let fake=Arc::new(Fake::default());let host=complete::ModelHost::new(&complete::Options::default().providers(Arc::new(providers)).transport(fake.clone()));
 + assert_eq!(host.chat("allowed",&args(json!([{"role":"user","content":"Go"}]))).unwrap_err().code,complete::Code::NoProvider);assert!(fake.seen.lock().unwrap().is_empty());assert_eq!(host.budget("allowed").calls_today,0);std::fs::remove_dir_all(dir).unwrap();
++}
++
++#[test]
++fn thinking_options_and_reasoning_history_are_transparent(){
++ let fake=Arc::new(Fake::default());
++ let host=complete::ModelHost::new(&complete::Options::default().providers(Arc::new(Fixed)).transport(fake.clone()));
++ let assistant=json!({"role":"assistant","content":null,"reasoning_content":"provider reasoning", "reasoning_details":[{"type":"reasoning.text","text":"preserved","format":"MiniMax-response-v1","id":"reasoning-1"}],"tool_calls":[{"id":"nonce-1","type":"function","function":{"name":"nonce","arguments":"{}"}}]});
++ let history=json!([{"role":"user","content":"Use nonce"},assistant,{"role":"tool","tool_call_id":"nonce-1","content":"value"}]);
++ for (index,(thinking,split)) in [(None,None),(Some("adaptive"),Some(true)),(Some("disabled"),Some(false))].into_iter().enumerate(){
++  let mut request=args(history.clone());request.as_object_mut().unwrap().remove("thinking");
++  if let Some(mode)=thinking{request["thinking"]=json!({"type":mode});}
++  if let Some(split)=split{request["reasoning_split"]=json!(split);}
++  fake.answers.lock().unwrap().push_back(json!({"choices":[{"message":assistant,"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}));
++  let response=host.chat("allowed",&request).unwrap();
++  assert_eq!(response["response"]["choices"][0]["message"],assistant);
++  let seen=fake.seen.lock().unwrap();let sent=&seen[index];assert_eq!(sent["messages"],history);
++  assert_eq!(sent.get("thinking"),request.get("thinking"));assert_eq!(sent.get("reasoning_split"),request.get("reasoning_split"));
++ }
++ for (field,value) in [("thinking",json!({"type":"enabled"})),("thinking",json!(null)),("reasoning_split",json!("true")),("reasoning_split",json!(null))]{
++  let mut request=args(history.clone());request[field]=value;
++  assert_eq!(host.chat("allowed",&request).unwrap_err().code,complete::Code::BadRequest);
++ }
++ assert_eq!(fake.seen.lock().unwrap().len(),3);assert_eq!(host.budget("allowed").calls_today,3);
 +}

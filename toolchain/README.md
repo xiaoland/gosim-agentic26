@@ -45,7 +45,7 @@ make agent-dev
 航班设为两小时后；`agent-dev` 和 `agent-hidden` 保留已编辑的日历与笔记，默认位置模式为 live；`make agent-demo` 明确使用模拟位置，模拟位置过期需重新 `agent-init-demo`。
 私有数据在 `.local-state/agent/`：官方宿主的 `octos/profiles/_main.json` 保存单个 MiniMax-M3 provider、地址与密钥，fallbacks 为空；应用 jail 内的 `private-config.json` 只保留高德、可选滴滴 key、位置模式与开发诊断配置，不再提供模型鉴权或选路配置；开发诊断元数据仍记录模型名称。目录为0700，私有文件为0600，均不进入包、Git或启动参数。
 
-应用调用 `host.request("model.chat", ...)`，提交完整 messages、tools、`tool_choice: "auto"` 与关闭 thinking 的参数。宿主返回原始 provider response 和 usage／budget 元数据；应用继续保存 assistant/tool 历史与执行工具。该接口由 `octosense-model-chat.patch` 提供，是待上游接纳的本地扩展；官方 `model.complete` 不支持原生工具调用或历史，不能用 JSON 动作模拟替代。
+应用调用 `host.request("model.chat", ...)`，提交完整 messages、tools、`tool_choice: "auto"` 和 `reasoning_split: true`，省略 thinking 使用 M3 默认自适应思考。宿主也接受显式 adaptive／disabled，不再强制关闭思考。宿主返回原始 provider response 和 usage／budget 元数据；应用继续保存 assistant/tool 历史与执行工具。该接口由 `octosense-model-chat.patch` 提供，是待上游接纳的本地扩展；官方 `model.complete` 不支持原生工具调用或历史，不能用 JSON 动作模拟替代。
 
 聊天扩展复用同一 ModelHost、主提供方凭据、HTTP transport、授权和 ledger。它只使用实际 primary，主项未配置或缺 key 时直接失败，不挑选 fallback；当前支持 OpenAI 兼容协议。完整消息不裁剪，不附加 one-shot 的结构化输出提示或 URL 拒绝规则。宿主原有请求大小、HTTP响应和服务等待边界仍适用。取消查询会屏蔽迟到回调，不保证远端HTTP已经中止或停止计费。
 
