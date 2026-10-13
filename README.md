@@ -93,9 +93,9 @@ Agent可以提出保存目标与选定路线。应用先显示方案、费用与
 
 ## 决赛交付与验收
 
-决赛候选材料位于 [Release v0.16.0](https://github.com/xiaoland/gosim-agentic26/releases/tag/v0.16.0)，已更新既有 [App Hub #116](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/116)。附件包含精确应用源码、作者制作的[演示视频](https://github.com/xiaoland/gosim-agentic26/releases/download/v0.16.0/final-v1.mp4)、预检与作者自评。视频展示真实运行及剪辑，不代表每次新生成界面都与录像相同。
+决赛材料位于 [Release v0.16.1](https://github.com/xiaoland/gosim-agentic26/releases/tag/v0.16.1)，既有 [App Hub #116](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/116)提供同一版本入口。附件包含精确应用源码、作者制作的[演示视频](https://github.com/xiaoland/gosim-agentic26/releases/download/v0.16.1/final-v1.mp4)、预检与作者自评。视频展示真实运行及剪辑，不代表每次新生成界面都与录像相同。
 
-真实 M3、高德、12306 和滴滴已在多轮任务中完成查询、候选比较及自主界面生成；同 Route 的详情、真实地图、滚动、返回和历史恢复有实际手机样式证据。新生成稿仍可能出现尺寸或语法问题，模型也可能夸大全程费用、到达和未知范围，因此当前不能宣称每轮完整验收均通过。配套宿主包预检通过；标准 Hub 扫描因未提供 Notes 工具而拒绝，尚未上架。版本、原始诊断、定点修复与未覆盖项归[决赛前任务包](tasks/semifinal-readiness/packet.md)。
+真实 M3、高德、12306 和滴滴已在多轮任务中完成查询、候选比较及自主界面生成。0.16.1 最后一次新规划在13次真实响应后自然结束：候选卡正文连续可见，混合铁路与公交两条 Route 的详情、真实地图、滚动及返回通过，首路线首末地图分组也已核对。该轮没有人工改稿或注入修稿提示，也没有确认目标或下单；未生成滴滴报价卡。新生成稿仍可能出现尺寸或语法问题，模型也可能夸大全程费用、到达和未知范围，因此不宣称每轮完整验收均通过。配套宿主包预检通过；标准 Hub 扫描因未提供 Notes 工具而拒绝，尚未上架。版本、原始诊断、定点修复与未覆盖项归[决赛前任务包](tasks/semifinal-readiness/packet.md)。
 
 ## 初赛交付与复现
 
