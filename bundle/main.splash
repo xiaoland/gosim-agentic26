@@ -3451,13 +3451,14 @@ let agent_tool_job = nil
 let agent_tool_job_sequence = 0
 let agent_provider_diagnostic = nil
 let agent_tool_schema = nil
+let render_sizing_description = "natural（默认，overlay也相同）：源码根height:Fit，内容自然展开，由父容器滚动；viewport：源码根height:Fill获得有限视口，长内容由稿内ScrollYView承载Fit内容。height参数只约束外视口。"
 fn tool(name,description,properties,required){return {type:"function" function:{name:name description:description parameters:{type:"object" properties:properties required:required}}}}
 fn is_render_tool(name){return name=="render_ui" || name=="render_summary" || name=="render_explanation" || name=="render_routes" || name=="render_suggestions" || name=="render_route_detail"}
 fn render_block_tool(name,description){
- let source_description="当前宿主Makepad/Splash源码，不接受XML/HTML。语法、原生嵌入、事实更新、事件与地图桥接见read_skill native-ui。snapshot字段按实际契约读取，Route来源为source.provider，不存在provider_label；时间优先用arrive_by_label和estimated_arrival_label及明确timezone，不手工误标UTC为当地时间。新稿content_sizing默认natural，内容Fit增长并由wrapper滚动；有限视口内的长内容用稿内ScrollYView承载Fit内容并显式选择viewport；自然长内容根View使用height:Fit。height只约束外视口。"
+ let source_description="当前宿主Makepad/Splash源码，不接受XML/HTML。语法、原生嵌入、事实更新、事件与地图桥接见read_skill native-ui。snapshot字段按实际契约读取，Route来源为source.provider，不存在provider_label；时间优先用arrive_by_label和estimated_arrival_label及明确timezone，不手工误标UTC为当地时间。"
  if name=="render_route_detail" {source_description+="详情默认overlay且初始隐藏；根内容应正常可见，按当前viewed_route_id更新。"}
  let default_id=name.strip_prefix("render_")
- return tool(name,description+"；省略id时实际区块ID为"+default_id+"；重复id只更新此块，其它块状态保留。",{source:{type:"string" description:source_description} id:{type:"string" description:"实际区块ID；默认"+default_id+"，用于show_block；hide_self()关闭发起块。"} overlay:{type:"boolean"} height:{type:"number" description:"外区块高度，逻辑像素"} content_sizing:{type:"string" enum:["natural" "viewport"] description:"默认natural：内容Fit自然增长并由父容器滚动；viewport：内容Fill铺满有限视口，长内容由稿内有限ScrollYView承载Fit内容"}},["source"])
+ return tool(name,description+"；省略id时实际区块ID为"+default_id+"；重复id只更新此块，其它块状态保留。",{source:{type:"string" description:source_description} id:{type:"string" description:"实际区块ID；默认"+default_id+"，用于show_block；hide_self()关闭发起块。"} overlay:{type:"boolean"} height:{type:"number" description:"外区块高度，逻辑像素"} content_sizing:{type:"string" enum:["natural" "viewport"] description:render_sizing_description}},["source"])
 }
 fn render_tool_params(name,p){
  if name=="render_ui" {return p}
@@ -3497,7 +3498,7 @@ fn agent_tools(){
  render_block_tool("render_routes","呈现已评估方案列表，用户可点击打开对应候选详情；不成立的候选也可查看")
  render_block_tool("render_suggestions","呈现改进建议")
  render_block_tool("render_route_detail","呈现已评估Route详情与实际地图，包括不成立方案；可按不同id保留详情")
- tool("render_ui","提交当前宿主Makepad/Splash源码，不接受XML/HTML；语法及Navigation事实/事件/地图桥接见read_skill native-ui。时间优先引用arrive_by_label、estimated_arrival_label及明确timezone。source整稿替换；blocks按id追加或替换指定区块，其余区块状态保留。新普通区块默认显示，新overlay默认隐藏；visible显式值优先，已有块未指定时保留显示状态。返回各块真实执行诊断；success不代表内容目标完成。",{source:{type:"string" description:"嵌入View.on_render中的Makepad/Splash脚本与控件表达式；非XML/HTML。实际语法与桥接可读取native-ui资料。"} content_sizing:{type:"string" enum:["natural" "viewport"] description:"source整稿内容尺寸；默认natural且根内容Fit；viewport显式铺满有限视口，长内容由稿内ScrollYView滚动"} blocks:{type:"array" items:{type:"object" properties:{id:{type:"string"} source:{type:"string" description:"Makepad/Splash脚本与控件表达式；非XML/HTML。"} overlay:{type:"boolean"} visible:{type:"boolean"} height:{type:"number"} content_sizing:{type:"string" enum:["natural" "viewport"]}} required:["id" "source"]}}},[])
+ tool("render_ui","提交当前宿主Makepad/Splash源码，不接受XML/HTML；语法及Navigation事实/事件/地图桥接见read_skill native-ui。时间优先引用arrive_by_label、estimated_arrival_label及明确timezone。source整稿替换；blocks按id追加或替换指定区块，其余区块状态保留。新普通区块默认显示，新overlay默认隐藏；visible显式值优先，已有块未指定时保留显示状态。返回各块真实执行诊断；success不代表内容目标完成。",{source:{type:"string" description:"嵌入View.on_render中的Makepad/Splash脚本与控件表达式；非XML/HTML。实际语法与桥接可读取native-ui资料。"} content_sizing:{type:"string" enum:["natural" "viewport"] description:render_sizing_description} blocks:{type:"array" items:{type:"object" properties:{id:{type:"string"} source:{type:"string" description:"Makepad/Splash脚本与控件表达式；非XML/HTML。"} overlay:{type:"boolean"} visible:{type:"boolean"} height:{type:"number"} content_sizing:{type:"string" enum:["natural" "viewport"] description:render_sizing_description}} required:["id" "source"]}}},[])
  ]
  if mode=="demo" {
 tools.push(tool("read_calendar","读取本应用明确标注的模拟日历；返回记录和来源。",{},[]))

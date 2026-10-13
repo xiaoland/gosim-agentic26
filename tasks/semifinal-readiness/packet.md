@@ -8,13 +8,20 @@
 
 ## 当前源码与交付
 
-已推送的最新提交为 `d1d80fb`，包含工具回执精简、渐进技能资料、字体信息层级和原生界面语法修正。其交互通过不代表解释准确性或完整全链通过；当前只收尾影响手机演示直观效果的问题。
+已推送的决赛候选提交为 `229101c`，固定标签 `v0.16.0`；源码 ZIP、用户制作的视频、预检、自评和证据已放在该 Release，既有 App Hub #116 已更新。视频实际文件为同级 `agentic26-video/build/semifinal-video/final-v1.mp4`，Release 只保留正确附件，SHA256 `f594be5d16068d33034e0a6ac20e8ab5bdbe6a204184e49f85e4dca3ed3dbbfb`。该标签不移动；如冻结前修正界面，应另建版本并在 #116 更新最终锚点。当前只收尾影响手机演示直观效果的问题。
 
 当前候选封包在 `online19-card-layout-ui/receipt-safe.json` 记录：source `c1349ebb`／main `af40ad3e`／binary `32beddf0`／bundle `94026d78`，check/stamp/build/doctor 通过。正文16／Meta14／通用标题22／主出行标题18可两行；滴滴采用供应商当前有效优惠价。宿主 RC6、SDK与锁未变，模型HTTP300秒／桥310秒，普通HTTP120秒。新的聚焦 UI replay 尚未完成；这些封包检查不代表它通过。
 
 模型原始回复、技能回执、工具调用、源码和实际错误均保留在忽略的build目录；密钥、私有日志及状态不进入Git或应用包。online19自然结束后账本 **182 calls／9,806,261 tokens**，该轮20次回复的usage均已计入。历史轮次缺失usage仍未知，不能算零；聚焦UI回放如发生模型调用则另计。
 
 ## 已得到的证据与局限
+
+- online21在候选提交上以真实M3／高德／铁路／滴滴正常运行至17次完整响应后自然结束；两条Route的卡片、各自详情、首组380×240真实地图和返回通过，但首卡标题与正文之间约449px留白，完整演示验收未通过。原件见`build/research/journey-guardian/current-online-21/result-safe.json`。
+- online21原稿把默认Fill的NavBody与NavSurface、多个NavMeta放在横向wrap行；技能入口仅点名Label。精确化Nav三控件默认宽度后，新鲜online22的首卡连续显示正文、价格、未知项和详情入口，大片留白改善。15/15真实响应自然结束，但详情全rect0，因此整轮未通过；账本214 calls／11,654,132 tokens，实例全停。
+- online22使用通用`render_ui.blocks`，其详情默认natural却根height:Fill。冻结真实事实、原稿和事件顺序的原生单变量对照，仅根Fill→Fit后返回、正文及388×240真实地图均可见，0模型／交通规划调用；证据`online22-detail-sizing/layout-hk8ckc14/result-safe.json`。未改交付稿。现统一命名与批量入口的content_sizing参数说明，删除source重复尺寸说明，不增加必填或自动改写。check/build通过，source `46b67ff8`／bundle `df5b79e0`；局部修稿与正式复验结果分别记录如下。
+- 隔离M3历史续接2次响应自然stop，自主只更新详情为natural／rootFit，两Route正文和返回、公交388×240真实地图通过；滴滴历史投影缺几何目录，地图未覆盖，没有补造。证据`online22-detail-model-repair/result-safe.json`，累计216 calls／11,886,688 tokens，全停。局部修稿不覆盖原online22失败。
+- 本地0.16.1已check/build通过，source `409553b9`／bundle `df5b79e0`；最后一次正式fresh规划验收中，只检查明显卡片布局、两Route详情／地图／滚动／返回，不再扩细微语义回归，结束后直接整理新提交包。
+- 决赛提交候选：`v0.16.0`及 #116 原评论已指向正确视频。配套`--navigation-check --allow-unsigned`通过；`hub scan`因contained apps未提供`notes.search`仍REFUSED，没有Hub扫描包。当前材料诚实标为候选，非独立审核通过或官方原版完整验收。
 
 - online7完成广州→宝安官方入口的真实条件守护闭环：M3自主建立公交＋S4837＋步行，查看同Route详情与地图，经父确认保存goal v2。已查估价57元，合成18:41期限／200元预算保持；站内连接、内部通达与整程费用未知。
 - 独立native-ui包第二consumer由真实M3按需读技能并生成列表、详情、更新、返回和重开，未手改原稿。经历21稿／27请求，不声称首稿稳定性；SDK3975fe7f／prelude2280b462，证据归build/research/native-ui-notes-model。
