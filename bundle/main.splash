@@ -3958,6 +3958,16 @@ fn block_content_height(block){
 }
 fn block_inner_height(block){if block.height!=nil {return Fill} if block.document {return Fill} return Fit}
 fn block_height(block){
+ if block.overlay {
+  // 浮层从结果锚点开始；给内部Fill的高度必须是父区域剩余可见高度。
+  let root=ui.index_page.rect()
+  if root!=nil && root.height>0 {
+   let top=if ui_overlay_top>0 {ui_overlay_top} else {0}
+   let available=root.height-top if available<1 {available=1}
+   if block.height!=nil && block.height<available {return block.height}
+   return available
+  }
+ }
  if block.height!=nil {return block.height}
  if block.overlay || block.document {if ui_viewport!=nil {return ui_viewport.height} return Fill}
  return Fit

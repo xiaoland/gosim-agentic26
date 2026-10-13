@@ -19,6 +19,10 @@ fn agent_pump(token){if token!=run_id {return} cs_dispatches+=1 for message in a
   let natural=block_by_id("natural") let viewport=block_by_id("viewport")
   cs_check("新height520默认natural保存metadata且body Fit",cs_reply.success && natural.installed && natural.content_sizing=="natural" && natural.height==520 && block_content_height(natural)=="Fit" && cs_has_body(natural,"Fit"))
   cs_check("显式viewport body Fill且外height520不变",viewport.installed && viewport.content_sizing=="viewport" && viewport.height==520 && block_content_height(viewport)=="Fill" && cs_has_body(viewport,"Fill"))
+  let root=ui.index_page.rect() let top=if ui_overlay_top>0 {ui_overlay_top} else {0} let available=root.height-top
+  cs_check("超高overlay按父区域锚点后可见高度约束",available>0 && block_height({overlay:true document:false height:892})==available)
+  cs_check("overlay小视口保请求高度且普通区块高度不变",block_height({overlay:true document:false height:40})==40 && block_height({overlay:false document:false height:892})==892)
+  cs_check("未指定overlay高度同样使用实际剩余区域",block_height({overlay:true document:false height:nil})==available)
   cs_stage=1 agent_active=false start_timeout(0.1,||cs_save())
  } elif cs_stage==3 {
   cs_check("无效content_sizing真实工具false反馈且不安装",!cs_reply.success && cs_reply.error.search("content_sizing")>=0 && block_by_id("invalid")==nil && cs_dispatches==2)
