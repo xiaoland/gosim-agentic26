@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and run the pinned stock desktop host with project-private state."""
+"""Build and run the pinned desktop host and Navigation extensions with private state."""
 import argparse
 import base64
 from datetime import datetime, timedelta, timezone
@@ -184,37 +184,35 @@ def apply_overlay(source, spec):
 
 
 def final_overlay(name):
-    maps = LOCK['maps_overlays'][name]
-    return LOCK.get('font_document_overlay', maps) if name == 'app_hub' else LOCK.get('model_chat_overlay', LOCK.get('ui_widget_overlay', maps))
+    if name == 'octosense':
+        return LOCK['navigation_overlay']
+    return LOCK['app_hub_overlay']
+
+
+def rust_toolchain():
+    version = LOCK['build']['rust_toolchain']
+    require(bool(re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version)), '锁文件 Rust 版本格式不符。')
+    checked = subprocess.run(['rustc', '+' + version, '--version'], capture_output=True, text=True)
+    require(checked.returncode == 0 and checked.stdout.startswith('rustc ' + version + ' '),
+            f'缺少固定 Rust {version}；请先安装该版本，不使用默认工具链替代。')
+    return '+' + version
 
 
 def verify_source():
     require(SOURCE.is_dir(), '请先运行 make agent-bootstrap。')
     spec = LOCK['octosense']
-    require(output('git', 'rev-parse', 'HEAD') == spec['revision'], '隔离 OctoSense 版本与 agent-runtime.lock.json 不符。')
-    overlays = LOCK['location_overlays']
-    require(overlays['octosense']['revision'] == spec['revision']
-            and overlays['app_hub']['revision'] == LOCK['app_hub_revision'], '宿主覆盖补丁与固定上游版本不符。')
-    maps = LOCK['maps_overlays']
-    for name, source in [('octosense', SOURCE), ('app_hub', SOURCE / '.sources/app-hub')]:
-        require(maps[name]['base_tree'] == overlays[name]['tree'], 'Maps 覆盖补丁的定位基线不符。')
-        require(hashlib.sha256((ROOT / overlays[name]['patch']).read_bytes()).hexdigest() == overlays[name]['patch_sha256'], '定位基线补丁摘要不符。')
-        overlay = final_overlay(name)
-        if name == 'octosense' and 'ui_widget_overlay' in LOCK:
-            ui_overlay = LOCK['ui_widget_overlay']
-            require(ui_overlay['base_tree'] == maps[name]['tree'], '控件接口覆盖补丁的 Maps 基线不符。')
-            require(hashlib.sha256((ROOT / maps[name]['patch']).read_bytes()).hexdigest() == maps[name]['patch_sha256'], 'Maps 基线补丁摘要不符。')
-            require(hashlib.sha256((ROOT / ui_overlay['makepad_patch']).read_bytes()).hexdigest() == ui_overlay['makepad_patch_sha256'], '控件运行时补丁摘要不符。')
-        if name == 'app_hub' and 'font_document_overlay' in LOCK:
-            require(overlay['base_tree'] == maps[name]['tree'], '字体文档覆盖补丁的 Maps 基线不符。')
-            require(hashlib.sha256((ROOT / maps[name]['patch']).read_bytes()).hexdigest() == maps[name]['patch_sha256'], 'Maps 基线补丁摘要不符。')
-        if name == 'octosense' and 'model_chat_overlay' in LOCK:
-            require(overlay['base_tree'] == LOCK['ui_widget_overlay']['tree'], '模型服务覆盖补丁的控件基线不符。')
-            require(hashlib.sha256((ROOT / ui_overlay['patch']).read_bytes()).hexdigest() == ui_overlay['patch_sha256'], '控件接口补丁摘要不符。')
-        verify_overlay(source, overlay)
-    for name, expected in [('Cargo.lock', maps['octosense']['cargo_lock_sha256']),
+    verify_overlay(SOURCE, LOCK['navigation_overlay'])
+    hub = SOURCE / '.sources/app-hub'
+    verify_overlay(hub, LOCK['app_hub_overlay'])
+    overlay = LOCK['navigation_overlay']
+    require(overlay['revision'] == spec['revision'], 'Navigation 补丁上游版本不符。')
+    require(hashlib.sha256((ROOT / overlay['makepad_patch']).read_bytes()).hexdigest()
+            == overlay['makepad_patch_sha256'], 'Navigation Makepad 补丁摘要不符。')
+    require((SOURCE / 'tools/runtime-patches/makepad-navigation-rc6.patch').read_bytes()
+            == (ROOT / overlay['makepad_patch']).read_bytes(), '宿主内嵌 Makepad 补丁与锁定文件不符。')
+    for name, expected in [('Cargo.lock', spec['cargo_lock_sha256']),
                            ('runtime-patches.lock.json', spec['runtime_patches_lock_sha256'])]:
-        require(hashlib.sha256((SOURCE / name).read_bytes()).hexdigest() == expected, f'官方 {name} 摘要不符。')
+        require(hashlib.sha256((SOURCE / name).read_bytes()).hexdigest() == expected, f'固定 {name} 摘要不符。')
     checked = subprocess.run([sys.executable, str(SOURCE / 'tools/setup.py'), '--check'], cwd=SOURCE,
                              capture_output=True, text=True)
     require(checked.returncode == 0, '官方 setup --check 未通过；请运行 agent-bootstrap 查看源码问题。')
@@ -227,6 +225,9 @@ def verify_source():
 
 
 def refresh_skill_catalog(bundle):
+    if bundle.resolve() == (ROOT / 'bundle').resolve():
+        from native_ui_package import materialize_navigation_skill
+        materialize_navigation_skill(bundle)
     directory = bundle / 'assets/skills'
     if not directory.is_dir():
         return
@@ -285,7 +286,7 @@ def official_bundles(values):
     bundles = {}
     for name in SYSTEM_APPS[1:]:
         files = bundle_files(values, SOURCE / 'apps' / name / 'bundle')
-        require(set(files) == {'manifest.json', 'main.splash'}
+        require({'manifest.json', 'main.splash'}.issubset(files)
                 and json.loads(files['manifest.json'])['id'] == 'os.' + name,
                 f'固定官方 {name} bundle 的文件集合或 id 不符。')
         bundles[name] = files
@@ -360,7 +361,7 @@ def build(values):
     metadata, files = stage(values)
     bundles = {'navigation': files, **official_bundles(values)}
     spec = LOCK['build']
-    args = ['cargo', 'build', '--locked', '-p', spec['package'], '--bin', spec['binary'],
+    args = ['cargo', rust_toolchain(), 'build', '--locked', '-p', spec['package'], '--bin', spec['binary'],
             '--no-default-features', '--features', ','.join(spec['features']),
             '--target-dir', str(TOOLCHAIN / 'target'), '--message-format=json']
     print('+', ' '.join(args), flush=True)
@@ -390,7 +391,7 @@ def build(values):
     metadata['bundle_blake3'] = metadata['system_apps']['navigation']['bundle_blake3']
     metadata['host_revision'] = LOCK['octosense']['revision']
     metadata['host_overlay_tree'] = final_overlay('octosense')['tree']
-    metadata['hub_overlay_tree'] = LOCK.get('font_document_overlay', LOCK['maps_overlays']['app_hub'])['tree']
+    metadata['hub_overlay_tree'] = final_overlay('app_hub')['tree']
     metadata['host_binary_sha256'] = hashlib.sha256(BINARY.read_bytes()).hexdigest()
     (BUILD / 'build.json').write_bytes(json_bytes(metadata))
     print('当前源码 SHA-256:', metadata['source_sha256'], flush=True)
@@ -398,48 +399,23 @@ def build(values):
 
 
 def bootstrap():
-    for name in ('git', 'cargo'):
+    for name in ('git', 'cargo', 'rustc'):
         require(bool(shutil.which(name)), f'缺少 {name}。')
+    rust_toolchain()
     TOOLCHAIN.mkdir(parents=True, exist_ok=True)
     if not SOURCE.exists():
         command('git', 'init', SOURCE, cwd=TOOLCHAIN)
         command('git', 'remote', 'add', 'origin', LOCK['octosense']['url'])
         command('git', 'fetch', '--depth', '1', 'origin', LOCK['octosense']['revision'])
         command('git', 'checkout', '--detach', 'FETCH_HEAD')
-    require(output('git', 'rev-parse', 'HEAD') == LOCK['octosense']['revision'], '隔离源码版本不符；请选择新的 AGENTIC26_AGENT_TOOLCHAIN。')
+    apply_overlay(SOURCE, LOCK['navigation_overlay'])
     hub = SOURCE / '.sources/app-hub'
     if not hub.exists():
-        spec = LOCK['location_overlays']['app_hub']
         command('git', 'init', hub, cwd=TOOLCHAIN)
-        command('git', 'remote', 'add', 'origin', spec['url'], cwd=hub)
-        command('git', 'fetch', '--depth', '1', 'origin', spec['revision'], cwd=hub)
+        command('git', 'remote', 'add', 'origin', 'https://github.com/OctoSense-org/OctoSense-App-Hub.git', cwd=hub)
+        command('git', 'fetch', '--depth', '1', 'origin', LOCK['app_hub_revision'], cwd=hub)
         command('git', 'checkout', '--detach', 'FETCH_HEAD', cwd=hub)
-    for name, source in [('app_hub', hub), ('octosense', SOURCE)]:
-        layers = [LOCK['location_overlays'][name], LOCK['maps_overlays'][name]]
-        if name == 'app_hub' and 'font_document_overlay' in LOCK:
-            layers.append(LOCK['font_document_overlay'])
-        if name == 'octosense':
-            for key in ('ui_widget_overlay', 'model_chat_overlay'):
-                if key in LOCK:
-                    layers.append(LOCK[key])
-        tree = output('git', 'write-tree', cwd=source)
-        completed = next((i + 1 for i, layer in enumerate(layers) if tree == layer['tree']), 0)
-        for layer in layers[completed:]:
-            apply_overlay(source, layer)
-        verify_overlay(source, layers[-1])
-    # An existing checkout may already have the stock reviewed runtime stack.
-    # Apply just our extra layer; fresh checkouts are reconstructed by setup.
-    if 'ui_widget_overlay' in LOCK:
-        overlay = LOCK['ui_widget_overlay']
-        makepad = SOURCE / '.sources/makepad'
-        if makepad.is_dir() and output('git', 'write-tree', cwd=makepad) == overlay['makepad_base_tree']:
-            require(not output('git', 'diff', '--name-only', cwd=makepad)
-                    and not output('git', 'ls-files', '--others', '--exclude-standard', cwd=makepad),
-                    '保留未知 Makepad 修改；请选择新的工具链目录。')
-            patch = ROOT / overlay['makepad_patch']
-            require(hashlib.sha256(patch.read_bytes()).hexdigest() == overlay['makepad_patch_sha256'], '控件运行时补丁摘要不符。')
-            command('git', 'apply', '--check', patch, cwd=makepad)
-            command('git', 'apply', '--index', patch, cwd=makepad)
+    apply_overlay(hub, LOCK['app_hub_overlay'])
     command(sys.executable, SOURCE / 'tools/setup.py', '--no-hub', '--cache', ROOT.parent / '.octosense-agentic26')
     build(env_values(required=False))
 
@@ -605,7 +581,14 @@ def packaged_host():
     contents = STATE / 'app/OctoSense Navigation.app/Contents'
     private_dir(contents / 'MacOS')
     info = plistlib.loads((BINARY.parent / 'Info.plist').read_bytes())
-    require(info.get('NSLocationWhenInUseUsageDescription'), '官方宿主缺少定位用途说明。')
+    privacy = plistlib.loads((SOURCE / 'desktop/packaging/macos/Info.plist').read_bytes())
+    # The profile sidecar omits Calendar declarations and can be overwritten by
+    # another package. Use the pinned app's packaging template for privacy text.
+    for key in ('NSLocationUsageDescription', 'NSLocationWhenInUseUsageDescription',
+                'NSCalendarsUsageDescription', 'NSCalendarsFullAccessUsageDescription'):
+        require(isinstance(privacy.get(key), str) and privacy[key].strip(),
+                f'固定官方包装模板缺少用途说明：{key}')
+        info[key] = privacy[key]
     # Makepad writes this sidecar into a shared target profile. Another package's
     # build script can overwrite it without invalidating our cached executable.
     # The wrapper owns its bundle identity; match the pinned OctoSense config.
@@ -668,6 +651,7 @@ def start(hidden, demo=False, trace=True):
 
 
 def doctor():
+    rust_toolchain()
     verify_source()
     values = env_values()
     bundle_files(values)
@@ -681,17 +665,17 @@ def doctor():
     metadata = json.loads((BUILD / 'build.json').read_bytes())
     require(metadata['source_sha256'] == source_digest(bundle_files(values))
             and metadata['host_overlay_tree'] == final_overlay('octosense')['tree']
-            and metadata['hub_overlay_tree'] == LOCK.get('font_document_overlay', LOCK['maps_overlays']['app_hub'])['tree']
+            and metadata['hub_overlay_tree'] == final_overlay('app_hub')['tree']
             and metadata['host_binary_sha256'] == hashlib.sha256(BINARY.read_bytes()).hexdigest(),
             '构建记录、应用源码或宿主二进制已改变；运行 make agent-build。')
-    print('固定官方源码、定位与 Maps 窄选点覆盖补丁、字体文档 gate 覆盖、控件查找与只读几何接口、运行时补丁、MiniMax-M3 单 provider/无 fallback 配置及 Navigation／固定官方 Maps、Mail 包和选择、凭据边界通过；未调用外部服务。')
+    print('固定 RC6 官方源码、Rust 版本、Navigation 扩展补丁、MiniMax-M3 单 provider/无 fallback 配置及 Navigation／固定官方 Maps、Mail 包和选择、凭据边界通过；未调用外部服务。')
 
 
 def check():
     verify_source()
     values = env_values(required=False)
     bundle_files(values)
-    command('cargo', 'build', '--locked', '-p', 'octosense-app-hub', '--bin', 'hub',
+    command('cargo', rust_toolchain(), 'build', '--locked', '-p', 'octosense-app-hub', '--bin', 'hub',
             '--target-dir', TOOLCHAIN / 'target', env=host_env())
     harness_root = Path(os.environ.get('AGENTIC26_TOOLCHAIN', ROOT.parent / '.octosense-agentic26')).expanduser().resolve()
     harness = harness_root / 'OctoScript-App-Design-Flow/tools/octo'
@@ -700,8 +684,21 @@ def check():
     require(output('git', 'rev-parse', 'HEAD', cwd=harness.parent.parent) == harness_lock['revision']
             and not output('git', 'diff', 'HEAD', '--', 'tools/octo', cwd=harness.parent.parent),
             '官方检查 harness 与固定版本不符。')
+    # Keep the official harness's stamping and reviewer checks. Its check
+    # command uses this matching host's narrow Navigation package gate.
+    spec = LOCK['build']
+    command('cargo', rust_toolchain(), 'build', '--locked', '-p', spec['package'], '--bin', spec['binary'],
+            '--no-default-features', '--features', ','.join(spec['features']),
+            '--target-dir', TOOLCHAIN / 'target', env=host_env())
+    BUILD.mkdir(parents=True, exist_ok=True)
+    project_hub = BUILD / 'navigation-check-hub'
+    project_hub.write_text('#!/bin/sh\ncase \"$1\" in\n'
+        + 'stamp) exec ' + shlex.quote(str(TOOLCHAIN / 'target/debug/hub')) + ' \"$@\" ;;\n'
+        + 'check) shift; exec ' + shlex.quote(str(BINARY)) + ' --navigation-check \"$@\" ;;\n'
+        + '*) echo \"unsupported Navigation preflight command\" >&2; exit 2 ;;\nesac\n')
+    project_hub.chmod(0o700)
     env = host_env()
-    env.update(OCTOSENSE_APP_HUB=str(SOURCE / '.sources/app-hub'), OCTO_HUB=str(TOOLCHAIN / 'target/debug/hub'))
+    env.update(OCTOSENSE_APP_HUB=str(SOURCE / '.sources/app-hub'), OCTO_HUB=str(project_hub))
     command(sys.executable, harness, 'check', ROOT / 'bundle', cwd=ROOT, env=env)
     no_secrets((ROOT / 'bundle/manifest.json').read_bytes(), values, '盖摘要后的清单')
 
@@ -755,6 +752,93 @@ def trace_events(directory, status, session_id, instance, values, configured):
         except ValueError:
             incomplete('event JSON is incomplete or invalid')
             return
+        if 'trace_payload' in event:
+            reference = event
+            payload = reference.get('trace_payload')
+            sequence = reference.get('seq')
+            if not isinstance(sequence, int) or sequence < 1 or not isinstance(payload, dict) or payload.get('encoding') != 'UTF-8' or not isinstance(payload.get('parts'), list) or not payload['parts']:
+                incomplete('event payload reference is invalid')
+                return
+            pieces = []
+            for index, part in enumerate(payload['parts']):
+                name = 'event-%s-part-%s.txt' % (sequence, index)
+                if not isinstance(part, dict) or part.get('name') != name or not isinstance(part.get('bytes'), int) or not 0 < part['bytes'] <= 262144:
+                    incomplete('event payload part order or length is invalid')
+                    return
+                path = directory / name
+                require(not path.is_symlink(), 'trace 原件分片不能是符号链接。')
+                if not path.is_file():
+                    incomplete('event payload part is missing')
+                    return
+                piece = path.read_bytes()
+                no_secrets(piece, values, 'trace 原件分片')
+                no_secrets(piece, configured, 'trace 原件分片')
+                if len(piece) != part['bytes']:
+                    incomplete('event payload part length is invalid')
+                    return
+                pieces.append(piece)
+            raw = b''.join(pieces)
+            if len(raw) != payload.get('bytes'):
+                incomplete('event payload total length is invalid')
+                return
+            no_secrets(raw, values, 'trace 原件')
+            no_secrets(raw, configured, 'trace 原件')
+            try:
+                event = json.loads(raw)
+            except (ValueError, UnicodeDecodeError):
+                incomplete('event payload JSON is invalid')
+                return
+            if event.get('seq') != sequence or (event.get('session'), event.get('instance')) != (reference.get('session'), reference.get('instance')) or 'trace_payload' in event:
+                incomplete('event payload identity is invalid')
+                return
+        if 'trace_fields' in event:
+            references = event.pop('trace_fields')
+            sequence = event.get('seq')
+            try:
+                fields = json.loads(event['data'])
+            except (KeyError, TypeError, ValueError):
+                incomplete('event field metadata is invalid')
+                return
+            if not isinstance(sequence, int) or sequence < 1 or not isinstance(fields, dict) or not isinstance(references, list) or not references:
+                incomplete('event field reference is invalid')
+                return
+            names = set()
+            for reference in references:
+                field = reference.get('field') if isinstance(reference, dict) else None
+                if field not in ('body', 'source') or field in fields or field in names or reference.get('encoding') != 'UTF-8' or not isinstance(reference.get('parts'), list) or not reference['parts']:
+                    incomplete('event field identity is invalid or repeated')
+                    return
+                names.add(field)
+                pieces = []
+                for index, part in enumerate(reference['parts']):
+                    name = 'event-%s-field-%s-part-%s.txt' % (sequence, field, index)
+                    if not isinstance(part, dict) or part.get('name') != name or not isinstance(part.get('bytes'), int) or not 0 < part['bytes'] <= 1048576:
+                        incomplete('event field part order or length is invalid')
+                        return
+                    path = directory / name
+                    require(not path.is_symlink(), 'trace 原字段分片不能是符号链接。')
+                    if not path.is_file():
+                        incomplete('event field part is missing')
+                        return
+                    piece = path.read_bytes()
+                    no_secrets(piece, values, 'trace 原字段')
+                    no_secrets(piece, configured, 'trace 原字段')
+                    if len(piece) != part['bytes']:
+                        incomplete('event field part length is invalid')
+                        return
+                    pieces.append(piece)
+                raw = b''.join(pieces)
+                if len(raw) != reference.get('bytes'):
+                    incomplete('event field total length is invalid')
+                    return
+                no_secrets(raw, values, 'trace 原字段')
+                no_secrets(raw, configured, 'trace 原字段')
+                try:
+                    fields[field] = raw.decode('utf-8')
+                except UnicodeDecodeError:
+                    incomplete('event field UTF-8 is invalid')
+                    return
+            event['data'] = json.dumps(fields, ensure_ascii=False, separators=(',', ':'))
         require((event.get('session'), event.get('instance')) == (session_id, instance), 'trace 事件与指定实例不符。')
         sequence = event.get('seq')
         if not isinstance(sequence, int) or sequence < 1:

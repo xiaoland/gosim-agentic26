@@ -19,6 +19,12 @@
 
 ## 当前任务
 
+[评奖轮标准下的后续优化](../tasks/semifinal-readiness/packet.md)保存目标守护闭环、独立 UI 包与通用技能的首批改进，明确评奖冻结版本和后续开发的边界。
+
+[真实背景信息接入](../tasks/real-context/packet.md)保存系统日历、Notes 共享工具、真实授权和数据来源的调查与接入恢复点。
+
+[铁路与城际班次接入](../tasks/rail-integration/packet.md)保存真实班次接入、统一Route实现及广州→宝安机场端到端恢复点；来源调查由任务包链接。
+
 [基础界面与交互优化](../tasks/ui-ux-foundation/packet.md)保存外壳布局、出行抽屉、输入与守护操作的设计依据及实际手机样式验证。
 
 [持久化出行列表](../tasks/trip-list/packet.md)保存多出行、侧边栏选择、详情主页恢复与旧目标迁移的实现和验证。

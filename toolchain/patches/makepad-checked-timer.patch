@@ -1,0 +1,179 @@
+diff --git a/platform/src/script/timer.rs b/platform/src/script/timer.rs
+index c390463..27d238f 100644
+--- a/platform/src/script/timer.rs
++++ b/platform/src/script/timer.rs
+@@ -9,6 +9,8 @@ pub struct CxScriptTimer {
+     pub repeat: bool,
+     pub timer: Timer,
+     pub callback: ScriptFnRef,
++    pub on_error: Option<ScriptFnRef>,
++    pub failure: Option<ScriptObjectRef>,
+ }
+ 
+ /// A hook that can claim dispatch of a firing script timer, e.g. to run the callback
+@@ -61,12 +63,35 @@ pub(crate) fn handle_script_timer(&mut self, event: &TimerEvent) {
+                 }
+             }
+             self.with_vm_and_async(|vm| {
+-                vm.call(timer.callback.as_object().into(), &[time]);
++                let argument = timer.failure.as_ref().map(|v| v.as_object().into()).unwrap_or(time);
++                let result = vm.call(timer.callback.as_object().into(), &[argument]);
++                queue_script_timer_error(vm, &timer, result);
+             })
+         }
+     }
+ }
+ 
++/// Deliver only this timer's actual execution failure in a separate script entry.
++/// The callback captures its business identity; ordinary timers never create one.
++pub fn queue_script_timer_error(vm: &mut ScriptVm, timer: &CxScriptTimer, result: ScriptValue) {
++    let Some(on_error) = timer.on_error.as_ref().filter(|_| result.is_err()) else { return };
++    let object = vm.bx.heap.new_object();
++    let kind = if result.value_type() == ScriptValueType::ERR_LIMIT { "execution_limit" } else { "execution_error" };
++    let kind = vm.bx.heap.new_string_from_str(kind);
++    let error = vm.bx.heap.new_string_from_str("脚本入口未完整执行");
++    let trap = vm.bx.threads.cur().trap.pass();
++    vm.bx.heap.set_value(object, id!(success).into(), false.into(), trap);
++    vm.bx.heap.set_value(object, id!(error_kind).into(), kind, trap);
++    vm.bx.heap.set_value(object, id!(error).into(), error, trap);
++    let failure = vm.bx.heap.new_object_ref(object);
++    let cx = vm.cx_mut();
++    let pending = cx.start_timeout(0.01);
++    cx.script_data.timers.timers.push(CxScriptTimer {
++        id: LiveId::unique(), repeat: false, timer: pending,
++        callback: on_error.clone(), on_error: None, failure: Some(failure),
++    });
++}
++
+ /// Local-time UTC offset in seconds, applied by `std.local_time`. The platform has no
+ /// timezone database, so hosts that know the local offset (e.g. via chrono) set it here.
+ static SCRIPT_LOCAL_UTC_OFFSET_SECS: std::sync::atomic::AtomicI64 =
+@@ -218,6 +243,30 @@ fn ensure_seeded(cx: &mut Cx) {
+                 timer,
+                 id,
+                 callback,
++                on_error: None,
++                failure: None,
++            });
++            id.escape()
++        },
++    );
++
++    vm.add_method(
++        std, id_lut!(start_timeout_checked),
++        script_args_def!(delay = NIL, callback = NIL, on_error = NIL),
++        |vm, args| {
++            let delay = script_value!(vm, args.delay);
++            let callback = script_value!(vm, args.callback);
++            let on_error = script_value!(vm, args.on_error);
++            if !delay.is_number() || !vm.bx.heap.is_fn(callback.into()) || !vm.bx.heap.is_fn(on_error.into()) {
++                return script_err_type_mismatch!(vm.trap(), "invalid checked timer arg type");
++            }
++            let callback = ScriptFnRef::script_from_value(vm, callback);
++            let on_error = ScriptFnRef::script_from_value(vm, on_error);
++            let cx = vm.cx_mut();
++            let timer = cx.start_timeout(delay.as_number().unwrap_or(1.0));
++            let id = LiveId::unique();
++            cx.script_data.timers.timers.push(CxScriptTimer {
++                repeat: false, timer, id, callback, on_error: Some(on_error), failure: None,
+             });
+             id.escape()
+         },
+@@ -246,6 +295,8 @@ fn ensure_seeded(cx: &mut Cx) {
+                 timer,
+                 id,
+                 callback,
++                on_error: None,
++                failure: None,
+             });
+             id.escape()
+         },
+diff --git a/widgets/src/widget_async.rs b/widgets/src/widget_async.rs
+index 601b431..162c453 100644
+--- a/widgets/src/widget_async.rs
++++ b/widgets/src/widget_async.rs
+@@ -1,7 +1,7 @@
+ use {
+     crate::makepad_draw::*,
+     crate::makepad_draw::makepad_platform::script::std::ScriptStd,
+-    crate::makepad_draw::makepad_platform::script::timer::CxScriptTimer,
++    crate::makepad_draw::makepad_platform::script::timer::{CxScriptTimer, queue_script_timer_error},
+     crate::makepad_script::{script_err_not_found, ScriptFnRef, ScriptThreadId},
+     crate::widget::{WidgetRef, WidgetUid},
+     crate::widget_tree::CxWidgetExt,
+@@ -1601,9 +1601,11 @@ fn script_timer_dispatch_hook(cx: &mut Cx, timer: &CxScriptTimer, time: ScriptVa
+             // can't hang the host.
+             contain_isolate_panic("timer callback", || {
+                 cx.with_script_vm_id(vm_id, |vm| {
+-                    vm.with_instruction_limit(WIDGET_SCRIPT_INSTRUCTION_LIMIT, |vm| {
+-                        vm.call(timer.callback.as_object().into(), &[time]);
++                    let argument = timer.failure.as_ref().map(|v| v.as_object().into()).unwrap_or(time);
++                    let result = vm.with_instruction_limit(WIDGET_SCRIPT_INSTRUCTION_LIMIT, |vm| {
++                        vm.call(timer.callback.as_object().into(), &[argument])
+                     });
++                    queue_script_timer_error(vm, timer, result);
+                 });
+             });
+             true
+@@ -1791,6 +1793,61 @@ mod isolate_entry_tests {
+     use super::*;
+     use std::panic::{catch_unwind, AssertUnwindSafe};
+ 
++    #[test]
++    fn checked_timer_hard_budget_reports_once_in_fresh_entry() {
++        let mut cx = Cx::new(Box::new(|_, _| {}));
++        cx.with_vm(crate::script_mod);
++        let vm_id = cx.alloc_splash_vm();
++        cx.with_script_vm_id(vm_id, |vm| {
++            let module = vm.new_module(id!(probe));
++            vm.add_method(module, id_lut!(block), script_args_def!(), |_vm, _args| {
++                std::thread::sleep(std::time::Duration::from_millis(80));
++                NIL
++            });
++            vm.eval(crate::makepad_script::script! {
++                mod.probe.errors = 0
++                mod.probe.finished = false
++                mod.probe.work = fn() { mod.probe.block() loop {} }
++                mod.probe.failed = fn(result) { mod.probe.errors += 1 mod.probe.kind = result.error_kind }
++                mod.std.start_timeout_checked(0.01, mod.probe.work, mod.probe.failed)
++            });
++        });
++        let timer = cx.script_data.timers.timers.remove(0);
++        assert!(script_timer_dispatch_hook(&mut cx, &timer, NIL));
++        assert_eq!(cx.script_data.timers.timers.len(), 1);
++        let failed = cx.script_data.timers.timers.remove(0);
++        assert!(failed.on_error.is_none());
++        assert!(script_timer_dispatch_hook(&mut cx, &failed, NIL));
++        assert!(cx.script_data.timers.timers.is_empty());
++        cx.with_script_vm_id(vm_id, |vm| {
++            assert!(vm.bx.run_budget.is_some()); // only this test's current entry
++            assert_eq!(vm.eval(crate::makepad_script::script! {mod.probe.errors}).as_number(), Some(1.0));
++            assert_eq!(vm.eval(crate::makepad_script::script! {mod.probe.kind == "execution_limit"}), true.into());
++            assert!(vm.bx.threads.cur_ref().trap.on_is_none());
++            assert!(vm.bx.threads.cur_ref().trap.err_is_empty());
++        });
++        let isolated = cx.global::<CxWidgetAsync>().isolated_vms.vms.get(&vm_id).unwrap();
++        assert!(isolated.vm.as_ref().unwrap().run_budget.is_none());
++    }
++
++    #[test]
++    fn checked_timer_normal_work_has_no_failure_callback() {
++        let mut cx = Cx::new(Box::new(|_, _| {}));
++        cx.with_vm(crate::script_mod);
++        let vm_id = cx.alloc_splash_vm();
++        cx.with_script_vm_id(vm_id, |vm| {vm.eval(crate::makepad_script::script! {
++            mod.probe = {finished:false errors:0}
++            mod.std.start_timeout_checked(0.01, fn(){mod.probe.finished=true}, fn(result){mod.probe.errors+=1})
++        });});
++        let timer = cx.script_data.timers.timers.remove(0);
++        assert!(script_timer_dispatch_hook(&mut cx, &timer, NIL));
++        assert!(cx.script_data.timers.timers.is_empty());
++        cx.with_script_vm_id(vm_id, |vm| {
++            assert_eq!(vm.eval(crate::makepad_script::script! {mod.probe.finished}), true.into());
++            assert_eq!(vm.eval(crate::makepad_script::script! {mod.probe.errors}).as_number(), Some(0.0));
++        });
++    }
++
+     /// A guest panics while its isolate is installed — through
+     /// `with_isolate` (a tile's dispatch) and through
+     /// `with_script_vm_id_trusted` (a host's own entry): the main VM is

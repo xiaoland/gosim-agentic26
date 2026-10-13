@@ -1,5 +1,6 @@
 """持久化出行列表的隔离原生检查，由 smoke.py --trips 启动。"""
 import hashlib
+from test_trip_snapshot import read_record
 import json
 import time
 import struct
@@ -111,7 +112,7 @@ def run(work, jail, request, stop, launch, original, injected):
 
     def disk():
         index = json.loads((jail / 'navigation-trips.json').read_text())['data']
-        return index, {entry['id']: json.loads((jail / entry['file']).read_text())['data'] for entry in index['trips']}
+        return index, {entry['id']: read_record(jail, entry['file']) for entry in index['trips']}
 
     def sidebar():
         rows = capture('sidebar-state')
@@ -239,7 +240,7 @@ fn load_map_slot(slot,candidate){
 fn tl_context(tag){
  received_at=time_now() arrive_by=received_at+2400 user_limits={minutes:40 budget_cents:5000 currency:"CNY"} constraints={budget_cents:5000 currency:"CNY"}
  request_text=tag+"合成出行" ui.sentence.set_text(request_text)
- trip_begin(request_text)
+ trip_begin(request_text,fn(committed){if !committed {return}
  position_record={name:tag+"起点" longitude:114 latitude:22 source:"synthetic-fixture" mock:true sampled_at_unix:received_at coordinate_system:"GCJ-02" city:"深圳市" citycode:"0755" adcode:"440306" currency:"CNY"}
  destination_record={name:tag+"目的地" longitude:114.03 latitude:22 city:"深圳市" citycode:"0755" adcode:"440306" currency:"CNY" source:"synthetic-fixture"}
  let route=route_candidate("route_"+tag+"_1","public_transit",if tag=="A" {900} else {600},if tag=="A" {1000} else {2000},received_at,received_at,"114.03,22","114.03,22",true,[{walking:{steps:[{polyline:"114,22;114.03,22"}]}}])
@@ -253,8 +254,10 @@ fn tl_context(tag){
   tl_check(tag+"提案未确认不写目标",p.success && trip_by_id(trip_selected_id).goal==nil)
   tl_marker("trips-"+if tag=="A" {"a"} else {"b"}+"-proposal.json",{id:trip_selected_id})
  })
+ })
 }
 fn tl_poll(){
+ if trip_loading || trip_pending_commit!=nil {start_timeout(0.1,||tl_poll()) return}
  if tl_stage==0 {
   if tl_owned("trips-empty-resume.json") {
    let saved=read_text("trips-checkpoint.json").parse_json() tl_checks=saved.checks tl_evidence=saved.evidence
@@ -281,16 +284,18 @@ fn tl_poll(){
   tl_stage=2 tl_context("A")
  }
  if tl_stage==2 && guardian_goal!=nil && guardian_goal.selected_route.id=="route_A_1" {
-  trip_save_current("complete")
+  tl_stage=21
+  trip_save_current("complete",fn(committed){
   tl_check("真实确认A只更新A目标",trip_by_id(tl_a).goal.preferences=="A偏好" && trip_by_id(tl_legacy).goal.version==tl_legacy_version)
   tl_check("A存成功document原始DSL及当时事实",trip_by_id(tl_a).snapshot.blocks.len()==1 && trip_by_id(tl_a).snapshot.blocks[0].document && trip_by_id(tl_a).snapshot.facts.destination.name=="A目的地")
   tl_stage=3 tl_marker("trips-a-ready.json",{id:tl_a})
+  })
  }
  if tl_stage==3 && !tl_late_started && tl_owned("trips-late-start.json") {
   tl_late_started=true tl_old_token=run_id tl_old_block=block_by_id("__document")
   guardian_mode=true let old=guardian_propose({route_id:"route_A_1" preferences:"A偏好" risk_acceptance:"A明确风险" basis:"切换前未确认提案"}) tl_old_pending=guardian_pending.proposal_version
   agent_active=true phase="running"
-  let record={step:99 run:run_id state:"queued" started_at:time_now()}
+  let record={step:99 run:run_id state:"queued" started_at:time_now()} model_request_owner=record
   minimax_request("",[],[],run_id,record,fn(data){tl_done_count+=1 answer_text="LATE_OLD_TRIP_POLLUTION"})
  }
  if tl_stage==3 && trip_selected_id!=tl_a {
@@ -344,9 +349,11 @@ fn tl_poll(){
  }
  if tl_stage==9 && tl_owned("trips-write-go.json") {
   let before=trip_state().to_json() let selected=trip_selected_id
-  let success=trip_new()
-  tl_check("索引写入失败不新增切换或丢详情",!success && trip_state().to_json()==before && trip_selected_id==selected && guardian_error!="")
+  tl_stage=91
+  trip_new(fn(committed){
+  tl_check("索引写入失败不新增切换或丢详情",!committed && trip_state().to_json()==before && trip_selected_id==selected && guardian_error!="")
   tl_evidence.write_error=guardian_error tl_stage=10 tl_marker("trips-write-checked.json",{})
+  })
  }
  if tl_stage==10 && tl_owned("trips-write-restored.json") {tl_checkpoint() tl_stage=11 tl_marker("trips-empty-ready.json",{})}
  start_timeout(0.1,||tl_poll())

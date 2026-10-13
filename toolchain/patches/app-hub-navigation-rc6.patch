@@ -1,0 +1,69 @@
+diff --git a/crates/appstore/src/services.rs b/crates/appstore/src/services.rs
+index bbc438b..1b53800 100644
+--- a/crates/appstore/src/services.rs
++++ b/crates/appstore/src/services.rs
+@@ -138,6 +138,9 @@ impl Replier {
+         self.heap_key
+     }
+ 
++    /// The original host.request number, for native diagnostic correlation only.
++    pub fn request_id(&self) -> u64 { self.req_id }
++
+     /// Services must check this before opening a delayed OS prompt or doing work
+     /// after the owning isolate closed. It is not permission to perform a write.
+     pub fn is_pending(&self) -> bool {
+@@ -291,8 +294,9 @@ fn request_args(service: &str, args_json: &str) -> Result<Value, String> {
+     if !named {
+         return Err(format!("{service:?} is not a family.method service name"));
+     }
+-    if args_json.len() > MAX_ARGS_BYTES {
+-        return Err(format!("the request's arguments exceed {} MiB", MAX_ARGS_BYTES >> 20));
++    let max_bytes = if service == "model.chat" { 2 * MAX_ARGS_BYTES } else { MAX_ARGS_BYTES };
++    if args_json.len() > max_bytes {
++        return Err(format!("the request's arguments exceed {} MiB", max_bytes >> 20));
+     }
+     serde_json::from_str(args_json).map_err(|e| format!("the request's arguments are not valid JSON: {e}"))
+ }
+@@ -870,6 +874,42 @@ mod tests {
+         cancel_heap(7107);
+     }
+ 
++    #[test]
++    fn chat_size_exception_reaches_the_real_pump_only_for_chat() {
++        use makepad_widgets::*;
++        struct Capture(Arc<Mutex<Vec<(String, usize, u64)>>>);
++        impl HostService for Capture {
++            fn family(&self) -> &'static str { "model" }
++            fn call(&mut self, call: ServiceCall, reply: Replier, _: &mut dyn ServiceHost) {
++                self.0.lock().unwrap().push((call.service, call.args["value"].as_str().unwrap().len(), reply.request_id()));
++                reply.send(Ok(serde_json::json!({})));
++            }
++        }
++        let seen = Arc::new(Mutex::new(Vec::new()));
++        register_host_service(Box::new(Capture(seen.clone())));
++        let mut cx = Cx::new(Box::new(|_, _| {}));
++        let root = cx.with_vm(|vm| {
++            makepad_widgets::script_mod(vm);
++            let value = script_eval!(vm, { use mod.widgets.* View { card := Splash{} sheet := Splash{} } });
++            WidgetRef::script_from_value(vm, value)
++        });
++        let card = root.splash(&mut cx, ids!(card));
++        let sheet = root.splash(&mut cx, ids!(sheet));
++        let text = "x".repeat(MAX_ARGS_BYTES + 65536);
++        card.set_text(&mut cx, &format!("host.request(\"model.chat\", {{value:\"{text}\"}}, nil)\nLabel{{text:\"gate probe\"}}"));
++        pump(&mut cx, "gate-probe", std::path::Path::new("."), &card, &sheet);
++        let calls = seen.lock().unwrap();
++        assert_eq!(calls.len(), 1);
++        assert_eq!(calls[0].0, "model.chat");
++        assert_eq!(calls[0].1, text.len());
++        assert!(calls[0].2 > 0);
++        let encoded = serde_json::json!({"value":text}).to_string();
++        assert!(request_args("model.complete", &encoded).unwrap_err().contains("1 MiB"));
++        assert!(request_args("mail.list", &encoded).unwrap_err().contains("1 MiB"));
++        assert!(request_args("model.chat", &format!("\"{}\"", "x".repeat(2*MAX_ARGS_BYTES))).unwrap_err().contains("2 MiB"));
++        cancel_heap(card.isolate_heap_key(&mut cx).unwrap());
++    }
++
+     #[test]
+     fn malformed_or_oversized_arguments_are_refused_not_passed_on_as_null() {
+         assert!(request_args("mail.list", "{").unwrap_err().contains("not valid JSON"));

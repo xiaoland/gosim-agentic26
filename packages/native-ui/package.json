@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "name": "agentic-native-ui",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "format": "buildtime-splash-prelude",
+  "prelude": "material.splash",
+  "skill": "skills/material-ui/SKILL.md",
+  "source": "Navigation generic visual primitives; OctoSense shared interface conventions",
+  "host_tokens": [
+    "mod.theme.color_text",
+    "mod.theme.color_bg_app",
+    "mod.theme.font_regular",
+    "mod.theme.font_bold"
+  ],
+  "compatibility": "Seven styles only; no host service, runtime importer, data bridge or full Material3 conformance claim",
+  "skill_resources": {
+    "references/primitives.splash": "material.splash",
+    "references/splash-entry.md": "skills/material-ui/references/splash-entry.md"
+  }
+}

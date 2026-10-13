@@ -1,0 +1,43 @@
+# agentic-native-ui 0.1.0
+
+这是Apache-2.0的构建期Splash源码包：七种Material启发的通用样式和一个独立原生UI技能。它不宣称完整Material3规范实现，不是App Hub的Wasm shared component，也不安装新的运行时或包管理器。分发内容为package.json、material.splash、material-ui技能正文／manifest、短语言入口及LICENSE；实际原语reference由canonical prelude生成。
+
+## 消费
+
+`tools/native_ui_package.py`将本包prelude及应用app.splash物化成一个main.splash，并将skill复制到bundle，references/primitives.splash从canonical material.splash逐字生成，供read_skill相对path按需读取。包摘要覆盖实际分发文件，两个应用消费同一版本时应得到同一摘要。生成目标应在build/等独立目录；源包或应用目录不能作为输出。运行本helper不会启动宿主、安装应用或调用模型。
+
+字体只使用当前宿主已有的mod.theme.font_regular／font_bold，色彩只使用color_text／color_bg_app及本包明确的强调色。没有外部字体或资源请求。应用需要自己的字体时，在prelude之后用宿主标准派生语法局部声明，例如`let MyTitle = MaterialTitle{draw_text.text_style: MyFont{font_size:22}}`；MyFont及资源声明由应用负责。圆角、间距和颜色也可在派生类覆盖。本包不修改mod.theme或其他应用样式。
+
+七个公开名字是MaterialSurface、MaterialCard、MaterialTitle、MaterialBody、MaterialMeta、MaterialAction、MaterialSecondaryAction。前两者为容器，中间三者为文字，最后两者为48高按钮。默认内容Fit可增长，有限viewport／滚动由应用选择。theme改变后prelude需随应用重新应用，不能把旧theme对象或WidgetRef当新实例。
+
+Navigation可在构建期物化真实定义到generated_context，再保留原Nav*名字为局部派生别名，连同原字体及局部颜色覆盖，避免破坏已保存的自由DSL。事实、事件、地图和业务协议保持在应用内，不进入本包。具体集成由主源码owner完成。
+
+## 依据与验证边界
+
+样式由Navigation已有七原语整理，采用固定RC6官方[interface.splash](https://github.com/OctoSense-org/OctoSense/blob/f9f6fea90b52182790cb2641fd0145c425af4d84/apps/interface.splash)及[sync-app-interface.py](https://github.com/OctoSense-org/OctoSense/blob/f9f6fea90b52182790cb2641fd0145c425af4d84/tools/sync-app-interface.py)的构建期物化先例；宿主基准RC6 f9f6fea9，未升级。官方主题、ButtonFlat、Label、RoundedView为已有控件。独立技能只说明应用合同及实际动态呈现约束，不赋予host权限。
+
+独立Notes审阅示例在examples/native-ui-notes，只用公开合成记录，无Navigation函数、个人Notes读取或网络。首版真实card/detail/back、事实更新及parent reapply证据见下文；合成UI复用不等于个人Notes接入或模型自主使用技能。本包不附业务任务截图充当组件验收。
+
+官方skills目录还包含manifest.json，声明本技能不使用额外工具，prompts.include仅SKILL.md；Navigation自管harness可按既有按需加载读取同正文。示例尚未准备商店listing，因此不宣称App Hub商店安装或预检通过；已有实际截图归首版运行证据，不生成假截图补门槛。
+
+给嵌入子Splash的应用，可用`native_ui_package.script_prelude_function()`物化一个native_ui_style_source函数；JSON字符串只编码一次，函数返回原prelude全部字节。Navigation main由单一owner将该返回值置于子source之前，再声明兼容Nav别名。通用material-ui技能与原Navigation native-ui业务适配分别注册，不复制业务正文。
+
+主题重应用时，七个模板直接读取当前`mod.theme`色值，不保存主题标量别名；preserve重应用会保留旧绑定作用域。应用根背景由应用绘制，例如以`MaterialSurface{height:Fill draw_bg +:{color:mod.theme.color_bg_app border_radius:0}}`承载有限视口。普通View是否绘制背景取决于它的draw_bg实现，不能只设置color就声称已绘制。
+
+## 首版运行证据
+
+Navigation的旧Nav七原语通过实际兼容检查。独立示例使用自身应用身份和当前锁定card-host，在412×892视口应用真实Android样式，列表、滚动、详情、返回、合成事实更新和父样式重应用后交互通过；浅色→深色→浅色的背景与标题像素匹配当前theme。样例的首屏和更新共用合法内容构造路径，无首次任意延时。早期栈错误与主题缓存失败保留，修复后SDK摘要为617b1d414cd4a7a50168b2be1f0881f9cb736071d371f589057c901f9175df49。
+
+私有运行证据在build/research/native-ui-navigation/report.json及build/research/native-ui-notes/report.json，公开源码入口为examples/native-ui-notes。两者是不同consumer和证据范围：旧Nav兼容检查在主题修复前完成，新通用主题在独立示例验证；不合称修复后两个应用所有流程重验。这一组手写示例检查没有Android真机、商店安装、个人Notes或模型自主使用技能的结论，尚未作为官方组件发行。
+
+技能资源映射归package.json的skill_resources。生成资源不是第二份canonical样式：修改只在material.splash，helper随后重物化Navigation与独立consumer。Navigation现有catalog递归列files，因此reference物化后会随既有目录注册；复制catalog和main由其单一源码owner完成。
+
+通用语言入口为技能包内references/splash-entry.md，包含构造表达式／:=命名、函数调用与on_render共首屏路径；它独立随包复制，不依赖Navigation技能目录。原语与语言入口均可由read_skill的相对path按需读取，应用仍必须在自己的render schema声明source嵌入位置和可调用的业务helper。
+
+## 独立应用的模型生成验收
+
+2026-10-12另做了一次有限的同上下文M3实验：初始只提供技能metadata、公开合成Notes事实和应用helper合同；模型实际调用read_skill读取技能正文，并在恢复过程中按需读取真实primitives.splash和splash-entry.md。三个工具结果的全文、对应call ID及后续模型请求均逐字核对。render_ui把模型原稿与SDK、应用合同组成自身appid为org.agentic26.examples.notes-review的包，使用当前锁定card-host执行，并把实际控件、错误和点击结果返回模型。实验使用curl连接相同MiniMax-M3 profile的HTTPS API；read_skill/render_ui是实验适配工具，不是官方card-host提供的model.chat或新宿主标准。
+
+第21版原稿在412×892真实Android样式下通过可读文案、两个记录可访问、第二条详情身份、第一条详情、合成事实更新、返回列表的更新时间及重开详情的同版本正文。原稿未被人工改写，最终原生日志无错误，所有自有实例已停止；SDK摘要3975fe7fb724ac20ad0c68dab4ef0bc4869bce0ad3cfb038877b630dbb736382，prelude仍为2280b462288e4cb2d7bf1040500c69602bac3dbe4d490e5fad36a4cf485bc96b。实际截图已查看；这两条记录在生成布局中均能直接访问，没有据此新增长列表滚动或多主题结论。
+
+这不是首稿可靠性证明：一次请求在120秒超时，原上下文接续4次，保留21版原稿与20次模型修订。期间补了真实API资料，并修正验收器把Splash源码文本当界面、假设28像素caption及强求摘要列表复写全文的错误；修订次数不能全部归因于技能或模型。返回的26份usage合计966100 tokens，其中多数为重复上下文；第3次超时请求的用量未知，不能计零或据此推断实际账单。完整证据归本地忽略目录build/research/native-ui-notes-model/report.json及final-source21-recheck/report.json，不能从这一次公开fixture实验推断个人Notes接入、Android真机或通用生成成功率。

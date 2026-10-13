@@ -1,5 +1,6 @@
 """出行目标守护的隔离原生检查，由 smoke.py --guardian 启动。"""
 import hashlib
+from test_trip_snapshot import read_record
 import json
 import time
 
@@ -13,7 +14,7 @@ def run(work, jail, request, stop, launch, original, injected):
     def stored_goal():
         index = json.loads((jail / 'navigation-trips.json').read_text())['data']
         entry = next(e for e in index['trips'] if e['id'] == index['selected_id'])
-        return json.loads((jail / entry['file']).read_text())['data']['goal']
+        return read_record(jail,entry['file'])['goal']
 
     def wait_file(name):
         until = time.monotonic() + 30
@@ -31,6 +32,8 @@ def run(work, jail, request, stop, launch, original, injected):
         return rows
 
     def click(text, last=False):
+        if text == "确认此方案" and any(row.get("t") == "查看提案" for row in capture("before-open-proposal")):
+            click("查看提案")
         for attempt in range(5):
             rows = capture('before-click')
             visible = [row for row in rows if row.get('ty') == 'Button' and row.get('t') == text and row['r'][3] >= 20]
@@ -151,7 +154,15 @@ def run(work, jail, request, stop, launch, original, injected):
 
 FIXTURE = r'''
 let gt_stage=0 let gt_checks=[] let gt_version=0 let gt_original=nil let gt_evidence={} let gt_local_pending_checked=false let gt_local_rejected=false
-fn gt_saved_text(){let saved=trip_read("navigation-trips.json") if saved==nil {return nil} for trip in saved.data.trips {if trip.id==saved.data.selected_id {return {goal:trip.goal}.to_json()}} return {goal:nil}.to_json()}
+fn gt_saved_text(){
+ let index=read_text("navigation-trips.json").parse_json().data
+ for entry in index.trips {if entry.id==index.selected_id {
+  let text=read_text(entry.file) let parsed=text.parse_json()
+  if parsed.complete=="navigation-trip-parts-v1" {text="" for part in parsed.parts {text+=read_text(part.file)} parsed=text.parse_json()}
+  return {goal:parsed.data.goal}.to_json()
+ }}
+ return {goal:nil}.to_json()
+}
 fn blocks_mount(params){interface_revision+=1 return mount_ui_blocks(params,run_id,interface_revision)}
 fn gt_layout(case){
  clear_generated() interface_error=""
@@ -184,6 +195,8 @@ fn gt_context(){
 }
 fn gt_propose(id){return guardian_propose({route_id:id preferences:"尽量便宜" risk_acceptance:"接受供应商估计，不保证到达" basis:"合成原生状态验证"})}
 fn gt_poll(){
+ if trip_loading || trip_pending_commit!=nil {start_timeout(0.1,||gt_poll()) return}
+ if trip_selected_id==nil {trip_new() start_timeout(0.1,||gt_poll()) return}
  if gt_stage==0 {
   let trigger=read_text("guardian-test-resume.json") if trigger==nil {trigger=read_text("guardian-test-go.json")}
   if trigger==nil || trace_state==nil || trigger.parse_json().instance!=trace_state.instance {start_timeout(0.1,||gt_poll()) return}
@@ -249,27 +262,38 @@ fn gt_poll(){
  if gt_stage==3 && guardian_goal.spent_cents==4500 {
   gt_check("真实确认费用派生剩余预算",guardian_snapshot().remaining_budget_cents==500 && guardian_goal.version==3)
   gt_check("目标版本变化后旧确认被拒",!guardian_confirm(gt_version) && guardian_goal.selected_route.id=="guardian-b")
-  let report=guardian_report({route_id:"guardian-a"})
+  gt_stage=31
+  guardian_report({route_id:"guardian-a"},fn(report){
   gt_check("替代费用不足不伪称原路线已核验",report.success && !report.check.original_plan_verified && report.check.status=="unknown" && report.check.remaining_budget_cents==500)
   gt_check("固定核验区保留具体原因",regex("上次核验依据：","").test(guardian_label()) && regex("未取得原选定剩余路段的新证据","").test(guardian_label()))
   gt_evidence.fixed_label=guardian_label()
   fs.write("guardian-test-storage-ready.json",{checks:gt_checks}.to_json()) gt_stage=4
+  })
  }
  if gt_stage==4 && read_text("guardian-test-storage-go.json")!=nil {
   let previous=guardian_goal.to_json() let changed=previous.parse_json() changed.version+=1 changed.spent_cents=4900
-  let stored=guardian_store(changed)
-  gt_check("写入失败不能推进内存目标",!stored && guardian_goal.to_json()==previous)
+  gt_stage=41
+  guardian_store(changed,fn(committed){
+  gt_check("写入失败不能推进内存目标",!committed && guardian_goal.to_json()==previous)
   fs.write("guardian-test-storage-checked.json",{checks:gt_checks}.to_json()) gt_stage=5
+  })
  }
  if gt_stage==5 && read_text("guardian-test-storage-restored.json")!=nil {
   let before=guardian_goal.to_json()
-  fs.write("navigation-trips.json","{corrupt") guardian_goal=nil trip_load()
+  gt_stage=51
+  fs.write("navigation-trips.json","{corrupt") guardian_goal=nil trip_load(||{
   gt_evidence.recovery={before:before after:if guardian_goal!=nil {guardian_goal.to_json()} else {nil} error:guardian_error}
   gt_check("主记录损坏从确认备份恢复且明确说明",guardian_goal!=nil && guardian_error!="")
-  guardian_store(guardian_goal)
-  gt_check("结束后不能主动核验",guardian_finish() && guardian_goal.state=="ended" && !guardian_recheck())
-  gt_check("删除清除可恢复目标",guardian_delete() && guardian_goal==nil && gt_saved_text().parse_json().goal==nil)
-  trip_load()
+  guardian_finish()
+  gt_stage=52
+  })
+ }
+ if gt_stage==52 && trip_pending_commit==nil && guardian_goal!=nil && guardian_goal.state=="ended" {
+  gt_check("结束后不能主动核验",!guardian_recheck()) guardian_delete() gt_stage=53
+ }
+ if gt_stage==53 && trip_pending_commit==nil && guardian_goal==nil {
+  gt_check("删除清除可恢复目标",gt_saved_text().parse_json().goal==nil)
+  gt_stage=54 trip_load(||{
   gt_check("删除后再次读取不会从备份复活",guardian_goal==nil)
   clear_generated()
   blocks_mount({blocks:[{id:"guardian-inline-isolated" height:180 source:"inline_scroll := ScrollYView{width:Fill height:Fill flow:Down for i in 8 {Label{text:\"独立inline检查\"}}}"}]})
@@ -279,6 +303,7 @@ fn gt_poll(){
     gt_evidence.inline_isolated={rect:rect diagnostic:if block!=nil && block.installed {block.handle.diagnostics()} else {interface_error}}
     gt_check("显式高度inline滚动容器实际非零",rect!=nil && rect.height>0)
     gt_layout(1)
+  })
   })
  }
  if gt_stage==6 && read_text("guardian-layout-next-1.json")!=nil {gt_layout(2) gt_stage=7}
@@ -290,3 +315,133 @@ fn gt_poll(){
 }
 start_timeout(0.2,||gt_poll())
 '''
+
+# 只验证异步业务提交边界，不启动手机交互、模型或交通查询。
+COMMIT_BOUNDARY_FIXTURE = r'''
+let gc_checks=[] let gc_callbacks=0 let gc_primary="" let gc_deleted_generation=0
+fn gc_check(name,passed){gc_checks.push({name:name passed:passed})}
+fn gc_finish(){fs.write("guardian-commit-report.json",{checks:gc_checks generation:trip_generation}.to_json())}
+fn gc_goal(version){
+ let now=time_now()
+ return {schema:1 state:"active" version:version confirmed_at:now deadline_ts:now+2400 total_budget_cents:5000 currency:"CNY" spent_cents:0 progress:"合成提交边界" preferences:"" risk_acceptance:"供应商估计" destination:{name:"合成目的地" longitude:114.03 latitude:22} selected_route:{id:"gc-route" kind:"public_transit" plan_key:"gc-plan" segments:[] departure_ts:now source_ts:now price_cents:1000 duration_seconds:900} selection_basis:"隔离回归" confirmations:[]}
+}
+fn gc_start(){
+ if trip_loading || trip_pending_commit!=nil {start_timeout(0.05,||gc_start()) return}
+ let now=time_now()
+ trip_records=[] trip_selected_id=nil trip_next_id=1 trip_generation=0 guardian_goal=nil
+ let rows=[] for i in 2 {rows.push({id:"trip-"+(i+1) title:"提交边界" input:"fixture" created_at:now updated_at:now status:"draft" goal:nil snapshot:nil _dirty:true})}
+ trip_commit({schema:1 selected_id:"trip-1" next_id:3 trips:rows},fn(committed){
+  gc_check("两个实际出行记录提交前置成功",committed && trip_generation==1)
+  if !committed {gc_finish() return}
+  let goal=gc_goal(1)
+  guardian_store(goal,fn(saved){
+   gc_callbacks+=1 gc_check("守护成功回调才发布目标与记录",saved && gc_callbacks==1 && guardian_goal.version==1 && trip_by_id("trip-1").goal.version==1 && trip_generation==2 && trip_pending_commit==nil)
+   fs.read_async("navigation-trips.json",fn(reply){gc_primary=reply.text gc_guardian_failure()})
+  })
+  gc_check("守护异步保存成功前不推进内存目标记录或代际",trip_pending_commit!=nil && guardian_goal==nil && trip_by_id("trip-1").goal==nil && trip_generation==1 && gc_callbacks==0)
+ })
+}
+fn gc_guardian_failure(){
+ fs.remove("navigation-trips.json") fs.mkdir("navigation-trips.json")
+ guardian_store(gc_goal(2),fn(saved){
+  gc_callbacks+=1 gc_check("守护写失败回调不推进原目标与记录",!saved && gc_callbacks==2 && guardian_goal.version==1 && trip_by_id("trip-1").goal.version==1 && trip_generation==2 && trip_pending_commit==nil)
+  fs.remove("navigation-trips.json") fs.write("navigation-trips.json",gc_primary)
+  gc_deleted_generation=trip_generation trip_delete("trip-1")
+  gc_check("删除提交完成前保留当前记录",trip_pending_commit!=nil && trip_by_id("trip-1")!=nil && trip_generation==gc_deleted_generation)
+  start_timeout(0.05,||gc_deleted())
+ })
+ gc_check("守护失败事务完成前仍保原目标",guardian_goal.version==1 && trip_by_id("trip-1").goal.version==1 && trip_generation==2)
+}
+fn gc_deleted(){
+ if trip_pending_commit!=nil {start_timeout(0.05,||gc_deleted()) return}
+ gc_check("删除完成后内存仅保剩余出行",trip_by_id("trip-1")==nil && trip_selected_id=="trip-2" && trip_generation==gc_deleted_generation+1 && guardian_goal==nil)
+ trip_read("navigation-trips.json",fn(primary){
+  gc_check("删除后的primary恢复不复活记录或目标",primary!=nil && primary.data.trips.len()==1 && primary.data.trips[0].id=="trip-2" && primary.data.trips[0].goal==nil)
+  trip_read("navigation-trips.previous.json",fn(previous){
+   gc_check("删除后的previous恢复不复活记录或目标",previous!=nil && previous.data.trips.len()==1 && previous.data.trips[0].id=="trip-2" && previous.data.trips[0].goal==nil)
+   fs.write("navigation-trips.json","broken")
+   trip_load(||{
+    gc_check("主索引损坏经生产load恢复备份仍不复活已删除出行",trip_by_id("trip-1")==nil && trip_selected_id=="trip-2" && trip_records.len()==1 && guardian_goal==nil && guardian_error!="")
+    gc_finish()
+   })
+  })
+ })
+}
+start_timeout(1,||gc_start())
+'''
+
+
+def commit_boundary_source(original):
+    return original + '\n' + COMMIT_BOUNDARY_FIXTURE
+
+
+def run_commit_boundaries(work, jail, original, injected):
+    target = jail / 'guardian-commit-report.json'
+    until = time.monotonic() + 30
+    while not target.exists() and time.monotonic() < until:
+        time.sleep(.1)
+    assert target.exists(), f'异步提交回归未完成：{work / "native.log"}'
+    report = json.loads(target.read_text())
+    report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(), model_called=False,
+                  provider_called=False, production_trip_delete=True, production_guardian_store=True,
+                  production_trip_load=True)
+    report['budget_errors'] = [line for line in (work / 'native.log').read_text().splitlines()
+                               if 'budget exceeded' in line or 'instruction limit exceeded' in line]
+    (work / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
+    assert not report['budget_errors'] and all(item['passed'] for item in report['checks']), report
+    print(f'PASS: {len(report["checks"])} 项异步守护/删除提交边界；{work / "report.json"}')
+
+# A focused phone interaction group; it shares the existing synthetic Route/context helpers.
+PROPOSAL_FOLD_FIXTURE = r'''
+fn trace_initialize(){}
+fn trip_load(done){}
+fn amap_request(path,params,token,done){}
+let gf_case=0 let gf_checks=[]
+fn gf_check(name,value){gf_checks.push({name:name passed:value})}
+fn gf_propose(){let basis="" for i in 10 {basis+="合成选择依据：当前仅已查路段小计，目的地通达和真实候车尚未核实；确认不保证到达。"}
+ let result=guardian_propose({route_id:"guardian-a" preferences:"尽量便宜" risk_acceptance:"接受明确未知" basis:basis})
+ gf_check("生产准备新提案保持未保存",result.success && guardian_goal==nil)
+}
+fn gf_poll(){if gf_case==0 && fs.exists("fold-next.json") {let old=guardian_pending let version=old.goal.version gf_propose() gf_check("同目标版本新提案对象重新折叠",guardian_pending!=old && guardian_pending.goal.version==version && guardian_open_proposal==nil) gf_case=1 fs.write("fold-replaced.json",{checks:gf_checks}.to_json())}
+ if gf_case==1 && guardian_pending==nil {gf_check("真实拒绝清提案和展开且未保存",guardian_open_proposal==nil && guardian_goal==nil) gf_propose() gf_case=2 fs.write("fold-rejected.json",{checks:gf_checks}.to_json())}
+ if gf_case==2 && guardian_goal!=nil && guardian_pending==nil && trip_pending_commit==nil {gf_check("真实确认完成目标与磁盘事务",guardian_goal.version==1 && guardian_open_proposal==nil && trip_by_id(trip_selected_id).goal==guardian_goal) fs.write("fold-result.json",{checks:gf_checks goal_version:guardian_goal.version}.to_json()) return}
+ start_timeout(0.05,||gf_poll())}
+start_timeout(0.7,||{run_id+=1 agent_active=false phase="waiting" trip_records=[{id:"trip-1" title:"合成提案折叠" input:"合成原生验证" status:"planned" goal:nil snapshot:nil created_at:time_now() updated_at:time_now() _record_file:nil _dirty:true}] trip_selected_id="trip-1" trip_next_id=2 trip_generation=0 trip_replay=false trip_loading=false guardian_goal=nil guardian_mode=false composer_open=false
+ gt_context() candidates[0].request_bound=false candidates[0].endpoint_complete=false gf_propose() render_content() fs.write("fold-ready.json",{summary:guardian_proposal_summary_label() full:guardian_proposal_label()}.to_json()) gf_poll()})
+'''
+def proposal_fold_source(original):
+    for name in ['trace_initialize','trip_load','amap_request']:
+        original=original.replace('fn '+name+'(','fn product_'+name+'(',1)
+    helpers=FIXTURE[FIXTURE.index('fn gt_route('):FIXTURE.index('fn gt_propose(')]
+    return original+'\n'+helpers+'\n'+PROPOSAL_FOLD_FIXTURE
+
+def run_proposal_fold(work,jail,original,injected):
+    from test_trip_replay import controls
+    import agent,re
+    from urllib.parse import urlencode
+    def wait(name):
+        until=time.monotonic()+20
+        while not (jail/name).exists() and time.monotonic()<until:time.sleep(.05)
+        return json.loads((jail/name).read_text())
+    ready=wait('fold-ready.json');time.sleep(.4);m=re.search(r'listening on 127\.0\.0\.1:(\d+) pid=(\d+)',(work/'native.log').read_text());assert m
+    def request(route,**args):return agent.remote({'port':int(m[1])},route+('?' +urlencode(args) if args else ''))
+    rows,capture,click,_=controls(work,request)
+    def scroll(dy):request('m',k='scroll',x=210,y=680,dy=dy,precise=1,wait=1);time.sleep(.12)
+    def seek(widget):
+        for _ in range(18):
+            found=[r for r in rows() if r.get('i')==widget and r['r'][3]>=30]
+            if found:return found[0]
+            scroll(220)
+        raise AssertionError('widget unreachable '+widget)
+    def tap(widget):
+        r=seek(widget);x,y,w,h=r['r'];request('click',x=x+w/2,y=y+h/2,wait=1);time.sleep(.2)
+    initial=capture('fold-compact');summary=next(r for r in initial if r.get('i')=='guardian_proposal_summary')
+    checks=[{'name':'长unknown提案默认紧凑且真实确认未构造','passed':summary['r'][3]<300 and not any(r.get('i')=='guardian_accept' for r in initial) and '费用：' in ready['summary'] and '到达范围：' in ready['summary'] and '未知' in ready['summary']}]
+    tap('guardian_proposal_toggle');seek('guardian_accept');expanded=capture('fold-expanded-confirm-reachable');checks.append({'name':'实际展开原全文且真实确认可滚达','passed':any(r.get('i')=='guardian_accept' and r['r'][3]>=30 for r in expanded)})
+    for _ in range(12):scroll(-220)
+    tap('guardian_proposal_toggle');collapsed=capture('fold-collapsed');checks.append({'name':'实际收起后确认隐藏且保摘要','passed':not any(r.get('i')=='guardian_accept' for r in collapsed) and any(r.get('i')=='guardian_proposal_summary' for r in collapsed)})
+    tap('guardian_proposal_toggle');(jail/'fold-next.json').write_text('{}');wait('fold-replaced.json');time.sleep(.3);replaced=capture('fold-new-proposal');checks.append({'name':'同目标新对象默认折叠实际按钮不继承','passed':not any(r.get('i')=='guardian_accept' for r in replaced) and any(r.get('i')=='guardian_proposal_toggle' and r.get('t')=='查看提案' for r in replaced)})
+    tap('guardian_decline');wait('fold-rejected.json');tap('guardian_proposal_toggle');tap('guardian_accept');result=wait('fold-result.json');capture('fold-confirmed');checks.extend(result['checks'])
+    index=json.loads((jail/'navigation-trips.json').read_text())['data'];entry=next(e for e in index['trips'] if e['id']==index['selected_id']);goal=read_record(jail,entry['file'])['goal'];checks.append({'name':'确认经生产存储读回goal版本1','passed':goal['version']==1})
+    report={'checks':checks,'main_sha256':hashlib.sha256(original.encode()).hexdigest(),'native_errors':[l for l in (work/'native.log').read_text().splitlines() if '[E]' in l],'model_requested':False,'provider_requested':False,'boundary':'复用existing synthetic Route/context，生产prepare/summary/full/真实toggle/reject/confirm/store与磁盘read；无模型DSL或交通。只覆盖新增折叠交互，不重跑旧guardian全矩阵。'}
+    (work/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));assert all(c['passed'] for c in checks) and not report['native_errors'],str(work/'report.json')

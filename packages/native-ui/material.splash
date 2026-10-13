@@ -1,0 +1,18 @@
+// Material-inspired visual primitives; copied into each app at build time.
+// Read the current theme at each template evaluation; retained scalar aliases keep an old appearance.
+let MaterialSurface = RoundedView{width:Fill height:Fit flow:Down spacing:12 padding:16
+    draw_bg +:{color:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) border_radius:16}}
+let MaterialCard = RoundedView{width:Fill height:Fit flow:Down spacing:8 padding:16
+    draw_bg +:{color:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) border_radius:12}}
+let MaterialTitle = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}
+    draw_text +:{text_style:mod.theme.font_bold{font_size:22} color:mod.theme.color_text}}
+let MaterialBody = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}
+    draw_text +:{text_style:mod.theme.font_regular{font_size:16} color:mod.theme.color_text}}
+let MaterialMeta = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}
+    draw_text +:{text_style:mod.theme.font_regular{font_size:13} color:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}}
+let MaterialAction = ButtonFlat{height:48 margin:0 padding:Inset{left:16 right:16}
+    draw_text +:{text_style:mod.theme.font_regular{font_size:16} color:#xffffff color_hover:#xffffff color_down:#xffffff color_focus:#xffffff color_disabled:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}
+    draw_bg +:{color:#x285cd6 color_hover:#x3468df color_down:#x204cb8 color_focus:#x204cb8 color_disabled:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) border_size:0 border_radius:12}}
+let MaterialSecondaryAction = ButtonFlat{height:48 margin:0 padding:Inset{left:16 right:16}
+    draw_text +:{text_style:mod.theme.font_regular{font_size:14} color:mod.theme.color_text color_hover:mod.theme.color_text color_down:mod.theme.color_text color_focus:mod.theme.color_text color_disabled:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}
+    draw_bg +:{color:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) color_hover:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) color_down:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) color_focus:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) color_disabled:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) border_size:0 border_radius:12}}

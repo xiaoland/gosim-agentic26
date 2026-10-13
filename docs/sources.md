@@ -2,6 +2,12 @@
 
 初始核对日期：2026-10-01，北京时间；后续核对日期按各条记录。动态信息需重新核实。
 
+## 评奖轮核对（2026-10-12）
+
+官方网站仓库固定版本 `600c32305f0e70261c91f01d328af73c0971e756` 的[评奖标准](https://github.com/gosimfoundation/hackathon-agenticapp26/blob/600c32305f0e70261c91f01d328af73c0971e756/src/components/AwardEvaluation.vue)分别强调真实任务完成、恢复与用户控制，以及可复用生态／系统贡献和效果证据；技术突破无需先获 Best Agentic。数字权重及奖项兼得细则尚未公开，不从初赛四个25分维度推算。
+
+[冻结规则](https://github.com/gosimfoundation/hackathon-agenticapp26/blob/600c32305f0e70261c91f01d328af73c0971e756/docs/competition-schedule.md)要求展示10月9日冻结版本；其后阻塞修复须登记并由评审组处理，不能据此新增功能或贡献得分。继续开发和生态贡献不自动取得替换评审版本的资格。当前官方内容核对与源码入口见[后续优化调查](../tasks/semifinal-readiness/official-ecosystem-findings.md)，不将调查提议当已交付能力。
+
 ## 一手资料
 
 - [比赛官网](https://create.gosim.org/agenticapp26/)：用户给出的 `/agentic26` 返回 404，有效地址是 `/agenticapp26/`。浏览器实时页面使用 Rinx 名称；搜索缓存中的 robrix2 名称较旧。

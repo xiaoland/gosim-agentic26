@@ -1,25 +1,35 @@
 ---
 name: native-ui
-description: "Navigation的render_ui嵌入环境、共享事实、区块交互、字体和地图接口，用于将Makepad/Splash源码交给当前宿主执行。"
+description: "Navigation的render_ui嵌入环境、手机候选比较、共享事实、当前facts绑定、区块尺寸、滚动、交互、字体和地图接口，用于将Makepad/Splash源码交给当前宿主执行。"
 license: Apache-2.0
 ---
 
 # Navigation原生界面适配
 
-render_ui的源码在已存在的View.on_render中执行，可以包含脚本和控件表达式；不是独立Rust应用、script_mod!宏或Canvas HTTP服务。snapshot()、emit()、NavRegular和AutoNaviMapView由Navigation提供；任务工具在父Agent中调用，不是子VM的脚本函数。
+通用Material样式与自由组合见按需技能`material-ui`。Navigation提供兼容Nav名称和业务事实／事件桥；Material原语不读取或选择Route。
 
-[宿主接口与实际可用示例](references/host-interface.md)说明source／blocks、事实更新、详情显示、地图事件及诊断。通用语言和布局知识分别见技能makepad-2-0-splash与技能makepad-2-0-layout。这些是资料入口，不规定读取或调用顺序。
+render_ui的源码在已存在的View.on_render中执行，可以包含脚本和控件表达式；不接受XML/HTML，也不是独立Rust应用、script_mod!宏或Canvas HTTP服务。snapshot()、emit()、NavRegular和AutoNaviMapView由Navigation提供；任务工具在父Agent中调用，不是子VM的脚本函数。
+
+[宿主接口与实际可用示例](references/host-interface.md)说明source／blocks、当前facts绑定与更新、详情显示、地图事件及诊断；费用和到达直接呈现price_label与arrival_label，解释保留当前unknown与原因。通用语言和布局知识分别见技能makepad-2-0-splash与技能makepad-2-0-layout。这些是资料入口，不规定读取或调用顺序。
 
 技能资源相对路径可用read_skill的path参数读取，例如{name:"native-ui",path:"references/host-interface.md"}。原生类型及API随锁定版本变化；上游列表中的控件或Rust方法不自动成为当前子VM可调用接口。
 
-区块源码被嵌在内容自适应Fit父body，父应用已有ScrollYView；overlay与整稿也如此。未指定区块height时，顶层ScrollYView{height:Fill}会显示为零高；此结构会收到具体渲染错误，请自行修正源码。普通内容以自然Fit布局展开；确需内部Fill滚动时显式指定区块height。不会自动改稿或追加地图模板。widget ID必须是本块实际构造的名字；隐藏或离屏控件的rect为零不是布局失败证据。
+新render默认content_sizing:natural，父body以Fit随内容增长，并由应用ScrollYView滚动。height仅约束外部视口，不限制自然内容总高度；自行用有限高度ScrollYView管理滚动时显式content_sizing:viewport；只有Fit根的长内容使用natural。横向wrap中的Fill占当前行剩余宽度，短并列Label与NavSurface明确width:Fit，保留Fill的Surface或长描述放Down流。旧保存记录缺少此字段时保留原height布局规则，不自动改旧稿。不会自动改稿或追加地图模板。widget ID必须是本块实际构造的名字；隐藏或离屏控件的rect为零不是布局失败证据。
 
-render_summary/render_explanation/render_routes/render_suggestions/render_route_detail均接收任意source；默认实际ID分别为summary、explanation、routes、suggestions、route_detail，可显式覆盖。show_block使用实际目标ID，hide_self()关闭发起块。详情默认overlay且初始隐藏，打开父容器后根内容须正常可见；原块更新保留其它块状态。
+自然高度的列表卡片及其嵌套View应明确写width:Fill height:Fit，并按内容设置flow。仅给外View设置padding和背景不会使默认尺寸随子控件展开；当前宿主实测可导致标题可见而整张卡及按钮零尺寸。installed只确认源码安装，rendered确认控件及首次事实绑定已完成通知；包括隐藏详情的本次修改块都会等待初始化，超时为success:false/initialization_unconfirmed，源码安装状态仍保留。空diagnostics不证明所有内容可见或可点击；保留布局自由，但需核对实际手机效果。
 
-交付已评估方案及其分段、费用、耗时、限制和真实地图；不成立的候选同样有查看价值，不只给摘要。文案面向用户，使用线路/站点名称和格式化时间，不暴露内部Route/node ID或原始时间戳；本次处理结束后不用“正在处理”标题。布局与信息组织由Agent决定，不套固定模板。
+render_summary/render_explanation/render_routes/render_suggestions/render_route_detail均接收任意source；默认实际ID分别为summary、explanation、routes、suggestions、route_detail，可显式覆盖。show_block使用实际目标ID，hide_self()关闭发起块。详情默认overlay且初始隐藏；generic render_ui的新overlay同样默认隐藏，新普通块默认显示，显式visible优先。打开父容器后根内容须正常可见；原块更新未指定visible时保留显示状态。
+
+任务上下文的presentation_task是普通规划与守护共有的产品交付目标，不是用户偏好。手机列表用于先比较已评估候选：交通组合、费用及覆盖、到达范围和关键未核事项是主要决策信息，关键unknown与价格、时间同等可见。用户再通过本地操作打开同一Route的完整分段、来源和真实地图；不成立的候选同样有查看价值。文案面向用户，使用线路/站点名称和格式化时间，不暴露内部Route/node ID或原始时间戳；本次处理结束后不用“正在处理”标题。布局与信息组织由Agent决定，不套固定模板。
+
+较长中文的到达提示、期限与未知依据适合width:Fill height:Fit且可换行的正文，不应在横向标签行中假定剩余宽度足够；样式和信息组织仍由Agent决定。
 
 文案忠实呈现navigation-data的独立判断：已知行驶/公交耗时与候车未知分开显示，不将余量补成总耗时，不把估价写成成交价；未知项存在时不给到达保证。
 
-展示事实须按同一Route id读取当前snapshot，使用格式化价格/耗时和assessment依据。多个候选共用详情时，on_facts_changed按current.viewed_route_id更新文案和地图；使用独立详情块同样合法。守护状态也须读取snapshot().guardian及事实更新，静态“待确认/已保存/仍成立”标题会在用户点击后失真；本地确认不另请求模型修标题。守护业务边界见journey-guardian。
+展示事实须按同一Route id读取当前snapshot，绑定格式化价格、门到门duration_label、arrival_label和assessment依据；cost.coverage为queried_legs_only或full_journey_amount_cents未知时，只能陈述已查段小计，不能把它写成已确认门到门总价；不把查询时的区间文案硬编码成完整方案。铁路腿rail_service的departure_label、arrival_label、duration_label表示固定列车区间；它们不包含前后接驳和出发后的跨夜等车，不能用列车区间耗时替代整条Route耗时。 snapshot().routes的实际字段包括kind_label、price_label、duration_label、reason、currency和source.provider；没有provider_label。可选字段先检查是否存在再读取，不能从字段名称猜造接口。received_at、arrive_by、departure_ts、estimated_arrival_ts是Unix秒，不是可直接展示的当地钟面；本轮中国交通事实提供timezone:"Asia/Shanghai"、顶层received_at_label（本次起始时刻）、arrive_by_label与Route的estimated_arrival_label，应直接使用这些带日期和北京时间的真实标签；缺失estimated_arrival_label表示请求目的地到达未知；queried_endpoint_arrival_label仅为已查路段终点，arrival_label明确实际范围，不把中间终点写成目的地。不手算或抄UTC钟面。完整字段边界见宿主接口引用。多个候选共用详情时，on_facts_changed仅在current.viewed_route_id非空时更新文案和地图；空字符串表示尚未选择，不能覆盖详情已指定的Route id。使用独立详情块同样合法。守护状态也须读取snapshot().guardian及事实更新，静态“待确认/已保存/仍成立”标题会在用户点击后失真；本地确认不另请求模型修标题。守护业务边界见journey-guardian。
 
-地图目录与绑定、每图最多4条独立paths及跨图/本地分页覆盖方式见宿主接口引用。目录未加载不是只有四条；get_route按需取得该目标目录，extend后的新几何不沿用旧目录。布局与分组由Agent决定，不追加固定地图模板。
+地图目录与绑定、每图最多4条独立paths及跨图/本地分页覆盖方式见宿主接口引用。目录未加载不是只有四条；仅已知目录≤4条时可省略path_indices。map_metadata.selection_groups给出覆盖全部路径的可选分组，未知目录可读Route或等facts目录后明确选组；get_route按需取得该目标目录，extend后的新几何不沿用旧目录。布局与分组由Agent决定，不追加固定地图模板。
+
+NavSurface、NavCard、NavTitle、NavBody、NavMeta、NavAction、NavSecondaryAction是可自由组合的通用样式原语，不选择或排序路线。NavAction是按钮，不能放任意子控件；卡片可以自由组合任意内容；需要整卡交互时使用宿主实际支持的on_item_tap，不把自然Fit父中的Fill按钮当作已占满可触区域。路线内容和详情使用同一Route id的真实facts，不能将铁路区间耗时当门到门总耗时。
+
+Navigation的生成VM在导入通用SDK后，局部将MaterialTitle／Body／Meta／Action／SecondaryAction默认文字适配为Navigation Sans，保留通用字号、颜色和布局。Nav兼容名称沿用同一Sans字族；普通Label／按钮／输入默认同样适配。此处不改全局主题或其它应用，Agent仍可显式选择自己的字体。

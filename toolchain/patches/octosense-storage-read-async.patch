@@ -1,0 +1,359 @@
+diff --git a/runtime-patches.lock.json b/runtime-patches.lock.json
+index b4a027c..3996be9 100644
+--- a/runtime-patches.lock.json
++++ b/runtime-patches.lock.json
+@@ -4,7 +4,7 @@
+     "base_revision": "e29a0eaa68781231eb9ec582e5f02648c6dad7e9",
+     "patch": "tools/runtime-patches/makepad-settings.patch",
+     "sha256": "1bf3c9d5367bb35a0e2ab0eb92b614507817066d31d8030404cbb0655c758268",
+-    "tree": "2635589c0280e8f02fd957abed28a40dfe72ed36",
++    "tree": "1c35294a6ee0e0395f56ae2d85bda69037592c2f",
+     "product_fixes": [
+       "Settings integration: Android IME synchronization, accessibility and reduced motion, GLES program-cache validation, obscured-gesture cancellation and scroll-position observation.",
+       "Contained-app isolation and secret-input restrictions come from the pinned upstream runtime; the Settings overlay preserves those gates.",
+@@ -15,7 +15,8 @@
+       "A map that is not drawn (Maps sent to the background) no longer asks for a frame and a full redraw every frame, nor ticks its tile fades every 16 ms, while it waits to draw (OctoSense-org/makepad#79).",
+       "Navigation runtime overlay: confined ui.find(name), direct ui.child(index) instance handles and WidgetRef.rect() read-only drawn clipped geometry. Splash.diagnostics() exposes raw current-instance execution diagnostics to its parent.",
+       "Navigation fragment structure diagnostics use the existing tokenizer to check complete lexical endings and token delimiter boundaries without executing source or changing streaming evaluation.",
+-      "Navigation restored UTF-8 source: incremental recompilation treats an invalid prefix character boundary as full content replacement instead of panicking."
++      "Navigation restored UTF-8 source: incremental recompilation treats an invalid prefix character boundary as full content replacement instead of panicking.",
++      "Navigation jailed fs.read_async: filesystem work runs off the UI thread; bounded UTF-8 results return once to the owning live isolate under its existing entry budget. String.utf8_chunks splits text at UTF-8 byte boundaries with existing heap allocation accounting, avoiding per-character script calls for complete immutable trip revisions."
+     ],
+     "stacked": [
+       {
+@@ -41,6 +42,10 @@
+       {
+         "patch": "tools/runtime-patches/makepad-ui-find-rect.patch",
+         "sha256": "3176fe44a8874fae40ae26f75bfdcd65c0441bb30e9a78c4dc5ae252e5f223b1"
++      },
++      {
++        "patch": "tools/runtime-patches/makepad-storage-read-async.patch",
++        "sha256": "e3ffc9519c7c75e07de77396111505143c796818639812691196730432701db1"
+       }
+     ]
+   }
+diff --git a/tools/runtime-patches/makepad-storage-read-async.patch b/tools/runtime-patches/makepad-storage-read-async.patch
+new file mode 100644
+index 0000000..8329a92
+--- /dev/null
++++ b/tools/runtime-patches/makepad-storage-read-async.patch
+@@ -0,0 +1,319 @@
++diff --git a/platform/script/src/string.rs b/platform/script/src/string.rs
++index f3368e0..ad757fb 100644
++--- a/platform/script/src/string.rs
+++++ b/platform/script/src/string.rs
++@@ -217,6 +217,35 @@ pub fn add_type_methods(native: &mut ScriptNative, heap: &mut ScriptHeap) {
++             },
++         );
++ 
+++        // Storage callers can split UTF-8 without per-character script calls or byte truncation.
+++        native.add_type_method(
+++            heap,
+++            ScriptValueType::REDUX_STRING,
+++            id!(utf8_chunks),
+++            script_args_def!(max_bytes = NIL),
+++            |vm, args| {
+++                let sself = script_value!(vm, args.self);
+++                let size = script_value!(vm, args.max_bytes).as_number().and_then(utf8_chunk_size);
+++                let Some(size) = size else {
+++                    return script_err_invalid_args!(vm.trap(), "max_bytes must be a finite integer >= 4 within the native size range");
+++                };
+++                if let Some(array) = vm.bx.heap.string_mut_self_with(sself, |heap, text| {
+++                    let array = heap.new_array();
+++                    let mut start = 0;
+++                    while start < text.len() && !heap.allocation_exceeded() {
+++                        let end = utf8_chunk_end(text, start, size);
+++                        let value = heap.new_string_from_str(&text[start..end]);
+++                        heap.array_push_unchecked(array, value);
+++                        start = end;
+++                    }
+++                    array
+++                }) {
+++                    return array.into();
+++                }
+++                script_err_unexpected!(vm.trap(), "utf8_chunks: self must be a string")
+++            },
+++        );
+++
++         native.add_type_method(
++             heap,
++             ScriptValueType::REDUX_STRING,
++@@ -953,3 +982,51 @@ fn expand_replacement(
++         }
++     }
++ }
+++
+++fn utf8_chunk_size(value: f64) -> Option<usize> {
+++    if !value.is_finite() || value < 4.0 || value.fract() != 0.0 || value >= usize::MAX as f64 {
+++        return None;
+++    }
+++    Some(value as usize)
+++}
+++
+++fn utf8_chunk_end(text: &str, start: usize, size: usize) -> usize {
+++    let mut end = start.saturating_add(size).min(text.len());
+++    while !text.is_char_boundary(end) {
+++        end -= 1;
+++    }
+++    end
+++}
+++
+++#[cfg(test)]
+++mod utf8_chunks_tests {
+++    use super::*;
+++
+++    #[test]
+++    fn utf8_chunks_preserve_text_and_byte_limit() {
+++        let mut host = ScriptVmHost::new((), ());
+++        let mut vm = ScriptVm {host: &mut host, bx: Box::new(ScriptVmBase::new())};
+++        for (text, size) in [("abcdefg", 4), ("中文测试", 4), ("a😀中🙂b", 5), ("", 4)] {
+++            let input = vm.bx.heap.new_string_from_str(text);
+++            vm.set_injected_global(id!(chunk_input), input);
+++            vm.set_injected_global(id!(chunk_size), (size as f64).into());
+++            let result = vm.eval(ScriptMod {file:"utf8-chunks.octoscript".into(), code:format!("chunk_input.utf8_chunks({size})\n;"), ..Default::default()});
+++            let array = result.as_array().unwrap();
+++            let mut restored = String::new();
+++            for index in 0..vm.bx.heap.array_len(array) {
+++                let value = vm.bx.heap.array_index_unchecked(array, index);
+++                vm.bx.heap.string_with(value, |_, piece| {
+++                    assert!(!piece.is_empty() && piece.len() <= size);
+++                    restored.push_str(piece);
+++                });
+++            }
+++            assert_eq!(restored, text);
+++            if text.is_empty() {assert_eq!(vm.bx.heap.array_len(array), 0);}
+++        }
+++        for invalid in [0.0, -1.0, 3.0, 4.5, f64::NAN, f64::INFINITY, usize::MAX as f64] {
+++            assert!(utf8_chunk_size(invalid).is_none());
+++        }
+++        vm.set_injected_global(id!(chunk_size), NIL);
+++        assert!(vm.eval(ScriptMod {file:"invalid-chunks.octoscript".into(), code:"\"text\".utf8_chunks(chunk_size)\n;".into(), ..Default::default()}).is_err());
+++    }
+++}
++diff --git a/widgets/src/splash_storage.rs b/widgets/src/splash_storage.rs
++index 778e6e7..5b76847 100644
++--- a/widgets/src/splash_storage.rs
+++++ b/widgets/src/splash_storage.rs
++@@ -30,6 +30,9 @@
++ 
++ use std::collections::HashMap;
++ use std::path::{Path, PathBuf};
+++use std::io::Read;
+++use crate::makepad_draw::makepad_platform::{Cx, SignalToUI};
+++use crate::widget_async::{CxSplashVmExt, WIDGET_SCRIPT_INSTRUCTION_LIMIT};
++ 
++ use crate::makepad_draw::makepad_platform::makepad_script;
++ use makepad_script::*;
++@@ -53,6 +56,8 @@
++     /// heap-key → total-bytes cap, for isolates the host has granted more
++     /// room than the default. Absent means [`MAX_TOTAL_BYTES`]. Kept host-side
++     /// beside the root so script can neither read nor raise its own quota.
+++    static READ_CALLBACKS: std::cell::RefCell<HashMap<(usize, u64), ScriptFnRef>> = Default::default();
+++
++     static JAIL_QUOTAS: std::cell::RefCell<HashMap<usize, u64>> =
++         std::cell::RefCell::new(HashMap::new());
++ }
++@@ -97,6 +102,7 @@ pub(crate) fn set_root_for_heap(heap_key: usize, root: Option<PathBuf>) {
++ 
++ /// Drops roots for reclaimed isolates (called from the isolate GC).
++ pub(crate) fn gc_roots(dead_heaps: &[usize]) {
+++    READ_CALLBACKS.with(|c| c.borrow_mut().retain(|(heap, _), _| !dead_heaps.contains(heap)));
++     SANDBOX_ROOTS.with(|r| {
++         let mut r = r.borrow_mut();
++         for heap in dead_heaps {
++@@ -238,10 +244,117 @@ fn target(vm: &mut ScriptVm, path_value: ScriptValue) -> Result<(PathBuf, PathBu
++     Ok((root, real))
++ }
++ 
+++// Only owned Rust data crosses threads; rooted script callbacks stay on the UI thread.
+++static READ_RESULTS: std::sync::Mutex<Vec<(usize, u64, Result<String, String>)>> =
+++    std::sync::Mutex::new(Vec::new());
+++static NEXT_READ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+++
+++type ReadRequest = (usize, u64, Option<PathBuf>, Option<String>);
+++static READ_WORKER: std::sync::OnceLock<std::sync::mpsc::Sender<ReadRequest>> = std::sync::OnceLock::new();
+++
+++fn read_worker() -> &'static std::sync::mpsc::Sender<ReadRequest> {
+++    READ_WORKER.get_or_init(|| {
+++        let (sender, receiver) = std::sync::mpsc::channel::<ReadRequest>();
+++        std::thread::spawn(move || {
+++            for (heap_key, id, root, path_text) in receiver {
+++                let result = match (root, path_text) {
+++                    (Some(root), Some(path)) => {
+++                        // Debug-only deterministic slow storage for native lifecycle regression tests.
+++                        #[cfg(debug_assertions)]
+++                        if path.trim_start_matches('/').starts_with("skills/") {
+++                            if let Some(ms) = std::env::var("MAKEPAD_TEST_ASYNC_READ_DELAY_MS").ok()
+++                                .and_then(|s| s.parse::<u64>().ok()).filter(|ms| *ms <= 1000) {
+++                                std::thread::sleep(std::time::Duration::from_millis(ms));
+++                            }
+++                        }
+++                        read_jailed_text(&root, &path)
+++                    }
+++                    (None, _) => Err("storage not available in this context".to_string()),
+++                    (_, None) => Err("path must be a string".to_string()),
+++                };
+++                READ_RESULTS.lock().unwrap().push((heap_key, id, result));
+++                SignalToUI::set_ui_signal();
+++            }
+++        });
+++        sender
+++    })
+++}
+++
+++fn read_jailed_text(root: &Path, path: &str) -> Result<String, String> {
+++    let real = resolve_jailed(root, path)?;
+++    verify_no_symlinks(root, &real)?;
+++    let file = std::fs::File::open(real).map_err(|_| "file not found".to_string())?;
+++    if !file.metadata().map_err(|_| "read failed")?.is_file() {
+++        return Err("not a file".to_string());
+++    }
+++    let mut bytes = Vec::new();
+++    file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes).map_err(|_| "read failed")?;
+++    if bytes.len() as u64 > MAX_FILE_BYTES {
+++        return Err("file too large".to_string());
+++    }
+++    String::from_utf8(bytes).map_err(|_| "invalid UTF-8".to_string())
+++}
+++
+++pub(crate) fn pump_read_results(cx: &mut Cx) -> bool {
+++    crate::widget_async::gc_dead_splash_isolates(cx);
+++    let results = std::mem::take(&mut *READ_RESULTS.lock().unwrap());
+++    let progressed = !results.is_empty();
+++    for (heap_key, id, result) in results {
+++        let callback = READ_CALLBACKS.with(|c| c.borrow_mut().remove(&(heap_key, id)));
+++        let Some(callback) = callback else { continue };
+++        let Some(vm_id) = crate::widget_async::vm_for_heap(cx, heap_key) else { continue };
+++        crate::widget_async::contain_isolate_panic("storage read callback", || {
+++            cx.with_script_vm_id(vm_id, |vm| {
+++                if vm.bx.heap.heap_key() != heap_key || !crate::splash_policy::may_run(heap_key) {
+++                    return;
+++                }
+++                let (success, text, error) = match result {
+++                    Ok(text) => (true, vm.bx.heap.new_string_from_str(&text), NIL),
+++                    Err(error) => (false, NIL, vm.bx.heap.new_string_from_str(&error)),
+++                };
+++                let obj = vm.bx.heap.new_object();
+++                let trap = vm.bx.threads.cur().trap.pass();
+++                vm.bx.heap.set_value(obj, id!(success).into(), success.into(), trap);
+++                vm.bx.heap.set_value(obj, id!(text).into(), text, trap);
+++                vm.bx.heap.set_value(obj, id!(error).into(), error, trap);
+++                vm.with_instruction_limit(WIDGET_SCRIPT_INSTRUCTION_LIMIT, |vm| {
+++                    vm.call(callback.as_object().into(), &[obj.into()]);
+++                });
+++                crate::splash_policy::charge(heap_key, vm.last_limit_consumed() as u64);
+++                for err in vm.take_errors() {
+++                    crate::makepad_draw::error!("splash storage callback error: {err}");
+++                }
+++            });
+++        });
+++    }
+++    progressed
+++}
+++
++ /// Registers the jailed `fs` module into an isolate VM.
++ pub fn script_mod(vm: &mut ScriptVm) {
++     let fs = vm.new_module(id!(fs));
++ 
+++    // Every accepted read resolves once asynchronously, including path and I/O errors.
+++    vm.add_method(fs, id_lut!(read_async), script_args_def!(path = NIL, on_result = NIL), |vm, args| {
+++        let path = script_value!(vm, args.path);
+++        let on_result = script_value!(vm, args.on_result);
+++        let Some(obj) = on_result.as_object() else {
+++            return script_err_invalid_args!(vm.trap(), "on_result must be a fn");
+++        };
+++        let mut path_text = None;
+++        vm.string_with(path, |_vm, s| path_text = Some(s.to_string()));
+++        let root = root_for_vm(vm);
+++        let heap_key = vm.bx.heap.heap_key();
+++        let id = NEXT_READ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+++        let callback = vm.bx.heap.new_fn_ref(obj);
+++        READ_CALLBACKS.with(|c| c.borrow_mut().insert((heap_key, id), callback));
+++        if read_worker().send((heap_key, id, root, path_text)).is_err() {
+++            READ_RESULTS.lock().unwrap().push((heap_key, id, Err("read failed".to_string())));
+++            SignalToUI::set_ui_signal();
+++        }
+++        NIL
+++    });
+++
++     vm.add_method(fs, id_lut!(read), script_args_def!(path = NIL), |vm, args| {
++         let path = script_value!(vm, args.path);
++         match target(vm, path) {
++@@ -418,6 +531,64 @@ pub fn script_mod(vm: &mut ScriptVm) {
++ mod tests {
++     use super::*;
++ 
+++    #[test]
+++    fn async_read_callback_is_consumed_once_and_dead_vm_is_dropped() {
+++        let mut cx = Cx::new(Box::new(|_, _| {}));
+++        cx.with_vm(crate::script_mod);
+++        let vm_id = cx.alloc_splash_vm();
+++        let heap = cx.with_script_vm_id(vm_id, |vm| {
+++            vm.eval(crate::makepad_script::script! {
+++                mod.read_count = 0
+++                mod.read_callback = fn(r) { mod.read_count += 1 }
+++            });
+++            let value = vm.eval(crate::makepad_script::script! { mod.read_callback });
+++            let callback = vm.bx.heap.new_fn_ref(value.as_object().unwrap());
+++            let heap = vm.bx.heap.heap_key();
+++            READ_CALLBACKS.with(|c| c.borrow_mut().insert((heap, 99), callback));
+++            heap
+++        });
+++        READ_RESULTS.lock().unwrap().push((heap, 99, Ok("text".to_string())));
+++        assert!(pump_read_results(&mut cx));
+++        READ_RESULTS.lock().unwrap().push((heap, 99, Ok("duplicate".to_string())));
+++        assert!(pump_read_results(&mut cx));
+++        cx.with_script_vm_id(vm_id, |vm| {
+++            assert_eq!(vm.eval(crate::makepad_script::script! { mod.read_count }).as_f64(), Some(1.0));
+++            let value = vm.eval(crate::makepad_script::script! { mod.read_callback });
+++            let callback = vm.bx.heap.new_fn_ref(value.as_object().unwrap());
+++            READ_CALLBACKS.with(|c| c.borrow_mut().insert((heap, 100), callback));
+++        });
+++        crate::widget_async::mark_splash_isolate_dead(vm_id);
+++        READ_RESULTS.lock().unwrap().push((heap, 100, Ok("late".to_string())));
+++        assert!(pump_read_results(&mut cx));
+++        assert!(crate::widget_async::vm_for_heap(&mut cx, heap).is_none());
+++        assert!(READ_CALLBACKS.with(|c| !c.borrow().contains_key(&(heap, 100))));
+++    }
+++
+++    #[test]
+++    fn async_text_read_boundary() {
+++        let dir = std::env::temp_dir().join(format!("mp_jail_async_read_{}", std::process::id()));
+++        let _ = std::fs::remove_dir_all(&dir);
+++        std::fs::create_dir_all(dir.join("skills")).unwrap();
+++        std::fs::write(dir.join("skills/a"), "中文技能").unwrap();
+++        assert_eq!(read_jailed_text(&dir, "/skills/a").unwrap(), "中文技能");
+++        assert_eq!(read_jailed_text(&dir, "missing").unwrap_err(), "file not found");
+++        assert!(read_jailed_text(&dir, "../outside").is_err());
+++        assert_eq!(read_jailed_text(&dir, "skills").unwrap_err(), "not a file");
+++        std::fs::write(dir.join("skills/b"), [0xff]).unwrap();
+++        assert_eq!(read_jailed_text(&dir, "skills/b").unwrap_err(), "invalid UTF-8");
+++        std::fs::write(dir.join("skills/b"), vec![b'x'; MAX_FILE_BYTES as usize]).unwrap();
+++        assert_eq!(read_jailed_text(&dir, "skills/b").unwrap().len(), MAX_FILE_BYTES as usize);
+++        std::fs::write(dir.join("skills/b"), vec![b'x'; MAX_FILE_BYTES as usize + 1]).unwrap();
+++        assert_eq!(read_jailed_text(&dir, "skills/b").unwrap_err(), "file too large");
+++        #[cfg(unix)] {
+++            std::os::unix::fs::symlink("a", dir.join("skills/link")).unwrap();
+++            assert!(read_jailed_text(&dir, "skills/link").is_err());
+++            std::os::unix::fs::symlink(&dir, dir.join("escape")).unwrap();
+++            assert!(read_jailed_text(&dir, "escape/skills/a").is_err());
+++        }
+++        std::fs::remove_dir_all(dir).unwrap();
+++    }
+++
++     #[test]
++     fn jail_resolution_contains_and_rejects() {
++         let root = Path::new("/jail/app");
++diff --git a/widgets/src/widget_async.rs b/widgets/src/widget_async.rs
++index a3d71a9..601b431 100644
++--- a/widgets/src/widget_async.rs
+++++ b/widgets/src/widget_async.rs
++@@ -1444,7 +1444,7 @@ fn on_widget_script_thread_completed(
++ }
++ 
++ fn pump_widget_async(cx: &mut Cx) -> bool {
++-    let mut progressed = false;
+++    let mut progressed = crate::splash_storage::pump_read_results(cx);
++ 
++     loop {
++         let req = cx

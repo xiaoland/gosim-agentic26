@@ -352,6 +352,26 @@ start_timeout(0.2,||trace_fixture_poll())
 '''
 
 MIXED_FIXTURE=r'''
+let mixed_private_cache_ok=false
+start_timeout(0.3,||{
+ reset_private_config() let original_private=read_text("private-config.json")
+ fs.write("private-config.json","{\"cache_fixture\":true}")
+ let retained=read_text("private-config.json")
+ reset_private_config() let refreshed=read_text("private-config.json")
+ mixed_private_cache_ok=original_private.is_string() && retained==original_private && refreshed=="{\"cache_fixture\":true}"
+ fs.write("private-config.json",original_private) reset_private_config()
+})
+let mixed_large_graph_ok=false
+start_timeout(0.5,||{
+ let prior_nodes=route_nodes let prior_refs=tool_node_refs
+ route_nodes={} tool_node_refs={}
+ for i in 300 {let ref="stop:large-"+i route_nodes[ref]={ref:ref name:"真实格式站点"} if i<250 {tool_node_refs[ref]=true}}
+ let large_added=tool_new_nodes() let correct_added=large_added.len()==50
+ for node in large_added {if tool_node_refs[node.ref]==true {correct_added=false}}
+ route_nodes=prior_nodes tool_node_refs=prior_refs
+ mixed_large_graph_ok=correct_added
+})
+
 let mixed_done=false let mixed_first_response=nil let mixed_default_response=nil
 fn agent_tool_result(result){
  if active_tool!=nil && active_tool.id=="mixed-taxi-a" {mixed_first_response=result}
@@ -394,7 +414,14 @@ fn agent_pump(token){
  let short_bytes=short.to_json()
  let warm_detail=route_segment_facts(complete,true)
  let cached_quote=route_quote_variant(complete,{ref:"quote:cache" price_cents:900},final.legs[0].id,"合成缓存验证").candidate
+ let hour_limits=explicit_limits("现在从广州珠江新城出发，4小时内到深圳宝安机场T3国内出发，预算200元，优先铁路或城际。")
+ let minute_limits=explicit_limits("240分钟内到机场，预算200元。")
  fs.write("harness-smoke.json",{checks:[
+ {name:"私有配置初读后同查询复用且新查询刷新" passed:mixed_private_cache_ok}
+ {name:"大站图新增节点差集只返回本次新增且保留全部节点" passed:mixed_large_graph_ok}
+ {name:"显式小时与分钟期限等价且拒绝混合单位" passed:hour_limits!=nil && minute_limits!=nil && hour_limits.minutes==240 && hour_limits.budget_cents==20000 && hour_limits.currency=="unspecified" && hour_limits.to_json()==minute_limits.to_json() && explicit_limits("4小时30分钟，预算200元")==nil}
+ {name:"高德六位小数精确金额不丢价且亚分金额不截断" passed:route_cents("39.000000")==3900 && route_cents("28.010000")==2801 && route_cents("0.001")==nil && route_cents("39.999999")==nil && route_cents("-1")==nil}
+ {name:"固定班次不能平移且接驳迟到明确错过" passed:route_timing({departure_ts:1000 duration_seconds:800 legs:[{duration_seconds:200} {rail_service:{trip:"G测试" departure_ts:1400 arrival_ts:1800}}]},1100).arrival_ts==1800 && route_timing({departure_ts:1000 duration_seconds:800 legs:[{duration_seconds:200} {rail_service:{trip:"G测试" departure_ts:1400 arrival_ts:1800}}]},1300).missed.len()==1 && route_timing({departure_ts:1000 duration_seconds:800 selected_legs:[{duration_seconds:200} {rail_service:{trip:"G测试" departure_ts:1400 arrival_ts:1800}}]},1300).arrival_ts==1800}
  {name:"query中转前缀只含起点到站且回执保routes和new_nodes" passed:mixed_first_response.success && mixed_first_response.routes.len()==1 && mixed_first_response.new_nodes.is_array() && first.legs.len()==1 && first.legs[0].from_ref=="origin" && first.legs[0].requested_to_ref=="stop:a" && first.price_cents==1200 && first.legs[0].duration_seconds==300 && second.legs.len()==2 && second.legs[1].duration_seconds==900 && second.legs[1].from_ref=="stop:a" && second.legs[1].requested_to_ref=="stop:b" && second.price_cents==1800 && second.duration_seconds>=1200}
  {name:"省略query目标保持原整程查询及返回形状" passed:mixed_default_response.success && mixed_default_response.routes.len()==1 && mixed_default_response.new_nodes.is_array() && candidates[3].legs.len()==1 && candidates[3].legs[0].from_ref=="origin" && candidates[3].legs[0].requested_to_ref=="destination" && candidates[3].duration_seconds==900 && candidates[3].price_cents==600}
  {name:"短回执含每条线路上下站ref和真实用时距离" passed:short.steps[0].buslines.len()==2 && short.steps[0].buslines[0].line_id=="line-a" && short.steps[0].buslines[0].departure_node_ref=="stop:transfer-shared" && short.steps[0].buslines[0].arrival_node_ref=="stop:transfer-end" && short.steps[0].buslines[0].duration_seconds==600 && short.steps[0].buslines[0].distance_m==3000 && short.steps[0].walking.duration_seconds==60}
@@ -446,22 +473,24 @@ start_timeout(1,||{
 '''
 
 LATE_FIXTURE=r'''
-let late_started=false let late_checks=[] let late_point=nil let late_token=-1
+let late_started=false let late_checks=[] let late_point=nil let late_hidden=nil let late_token=-1
 fn agent_tool_result(result){
  if active_tool!=nil && active_tool.function.name=="render_ui" {late_point={diagnostics:result.diagnostics notified:generated_render_notified complete:generated_render_complete}}
+ if active_tool!=nil && active_tool.function.name=="render_route_detail" {late_hidden=result}
  product_agent_tool_result(result)
 }
 fn agent_pump(token){agent_active=false phase="waiting" answer_text="迟到渲染前的文字兜底" render_content()}
 fn late_after(){
- late_checks.push({name:"诊断点通知未到不误锁存" passed:late_point.diagnostics=="" && !late_point.notified && !late_point.complete})
+ late_checks.push({name:"隐藏详情安装回执明确pending且不强求打开" passed:late_hidden!=nil && late_hidden.success && late_hidden.blocks[0].installed && late_hidden.blocks[0].status=="installed_pending_render" && !late_hidden.blocks[0].complete && !late_hidden.blocks[0].visible})
+ late_checks.push({name:"可见稿工具回执等待实际迟通知" passed:late_point.diagnostics=="" && late_point.notified && late_point.complete})
  late_checks.push({name:"终端后真实迟通知恢复原生单一结果" passed:!agent_active && generated_render_complete && generated_render_notified && ui.generated_area.visible() && !ui.final_answer.visible() && ui.generated.find("kept").text()=="Late native result"})
  fs.write("late-ready.json",{stage:1}.to_json())
 }
 fn late_wrong(){
  late_checks.push({name:"成功后局部错误不清成功锁存" passed:generated_render_complete && ui.generated_area.visible() && !ui.final_answer.visible() && interface_error!=""})
  // 故意排队旧同run通知，然后换稿，验证现有generation隔离。
- let token=run_id let generation=map_generation
- enqueue_generated_line(0,"{\"action\":\"rendered\"}",0,token,generation)
+ let token=run_id let old_block=block_by_id("__document") let generation=old_block.revision
+ enqueue_block_line(old_block,0,"{\"action\":\"rendered\"}",0,token,generation)
  interface_revision+=1 mount_interface("View{show_bg:true draw_bg:{color:#xff0000} Label{text:\"Invalid draw type\"}}",token,interface_revision)
  answer_text="首次执行失败的文字兜底" render_content()
  start_timeout(0.03,||{late_checks.push({name:"同run已排队旧通知不能误锁新稿" passed:!generated_render_notified && !generated_render_complete})})
@@ -476,7 +505,7 @@ fn late_tick(){
  if !late_started && fs.exists("late-start.json") {
   late_started=true run_id+=1 late_token=run_id agent_active=true phase="running" received_at=time_now()
   agent_messages=[{role:"user" content:"合成迟通知测试"}]
-  agent_calls=[{id:"late-render" function:{name:"render_ui" arguments:{source:"kept := Label{text:\"Late native result\"} Button{text:\"Local operation error\" on_click: || emit({action:\"runtime_error\" message:\"Local operation failed\"})}"}.to_json()}}]
+  agent_calls=[{id:"late-render" function:{name:"render_ui" arguments:{source:"kept := Label{text:\"Late native result\"} Button{text:\"Local operation error\" on_click: || emit({action:\"runtime_error\" message:\"Local operation failed\"})}"}.to_json()}} {id:"late-hidden" function:{name:"render_route_detail" arguments:{source:"Label{text:\"Hidden detail installed without opening\"}"}.to_json()}}]
   agent_call_index=0 start_timeout(0.01,||agent_execute_next(late_token)) start_timeout(1.2,||late_after())
  }
  if fs.exists("late-next.json") && !fs.exists("late-claimed.json") {fs.write("late-claimed.json","{}") late_wrong()}
@@ -497,7 +526,7 @@ fn agent_tool_result(result){
   let name=active_tool.function.name
   let legacy=result
   if name=="query_route" {let origin=false let destination=false for node in result.new_nodes {if node.ref=="origin" {origin=true} if node.ref=="destination" {destination=true}} performance_origins=origin && destination legacy={success:true facts:performance_legacy_facts() records:[]}}
-  elif name=="compare_routes" {legacy={success:true comparison:comparison_summary() mixed_attempts:route_graph_facts().prefixes queried_transit_count:transit_count queried_driving:driving_done facts:performance_legacy_facts()}}
+  elif name=="compare_routes" {legacy={success:true comparison:comparison_summary(result.routes) mixed_attempts:route_graph_facts().prefixes queried_transit_count:transit_count queried_driving:driving_done facts:performance_legacy_facts()}}
   elif name=="render_ui" {legacy={success:result.success diagnostics:result.diagnostics viewport:result.viewport facts:performance_legacy_facts()} performance_render=result.success}
   elif name=="get_route" {performance_detail=result.success && result.route.segments.len()>0 && result.route.price_cents==1200}
   elif name=="get_route_graph" {performance_graph=result.success && result.graph.nodes.len()>=75}
@@ -581,37 +610,38 @@ start_timeout(1,||performance_tick())
 
 SKILLS_FIXTURE = r'''
 fn agent_pump(token){}
-fn skills_tick(){
- if !fs.exists("skills-go.json") {start_timeout(0.1,||skills_tick()) return}
- agent_begin()
- let checks=[]
- let catalog=agent_skill_catalog()
- let mixed=read_agent_skill({name:"mixed-routing"}) let guardian=read_agent_skill({name:"journey-guardian"})
+let skills_results=[] let skills_index=0
+let skills_requests=[{name:"mixed-routing"} {name:"journey-guardian"} {name:"mixed-routing" path:"references/hypotheses.md"} {name:"native-ui"} {name:"native-ui" path:"references/host-interface.md"} {name:"makepad-2-0-splash" path:"UPSTREAM.md"} {name:"makepad-2-0-layout" path:"references/layout-patterns.md"} {name:"native_ui"} {name:"native-ui" path:"absent.md"}]
+fn skills_next(){
+ if agent_messages.len()==0 {start_timeout(0.01,||skills_next()) return}
+ if skills_index<skills_requests.len() {
+  read_agent_skill(skills_requests[skills_index],run_id,fn(result){skills_results.push(result) skills_index+=1 start_timeout(0.01,||skills_next())}) return
+ }
+ let checks=[] let catalog=agent_skill_catalog()
+ let mixed=skills_results[0] let guardian=skills_results[1]
  checks.push({name:"搜索与守护技能可由目录发现并按需读取" passed:mixed.success && guardian.success && mixed.files.len()==2 && mixed.content==read_text("skills/mixed-routing/SKILL.md") && guardian.content==read_text("skills/journey-guardian/SKILL.md")})
- let extend_schema=nil
- for schema in agent_tools() {if schema.function.name=="extend_route" {extend_schema=schema.function}}
+ let extend_schema=nil for schema in agent_tools() {if schema.function.name=="extend_route" {extend_schema=schema.function}}
  checks.push({name:"实际extend参数说明保留完整前缀与返回ID累计契约" passed:extend_schema.parameters.properties.route_id.description.split("origin").len()>1 && extend_schema.parameters.properties.route_id.description.split("不会裁到内部站点").len()>1 && extend_schema.parameters.properties.to_ref.description.split("非滴滴").len()>1 && extend_schema.description.split("Route.id").len()>1})
- let examples=read_agent_skill({name:"mixed-routing" path:"references/hypotheses.md"})
+ let examples=skills_results[2]
  checks.push({name:"接驳例子仅按需读取完整引用" passed:examples.success && examples.content==read_text("skills/mixed-routing/references/hypotheses.md")})
- let prompt=agent_messages[0].content
- let metadata_ok=true
+ let prompt=agent_messages[0].content let metadata_ok=true
  for skill in catalog {if prompt.split(skill.name).len()<2 || prompt.split(skill.description).len()<2 {metadata_ok=false}}
  checks.push({name:"首次模型消息包含所有名称与描述" passed:metadata_ok})
- let entry=read_agent_skill({name:"native-ui"})
+ let entry=skills_results[3]
  checks.push({name:"默认读取完整SKILL.md" passed:entry.success && entry.path=="SKILL.md" && entry.content==read_text("skills/native-ui/SKILL.md")})
  checks.push({name:"呈现技能加载包含真实耗时估价与未知表达边界" passed:entry.success && entry.content.split("不将余量补成总耗时").len()>1 && entry.content.split("不把估价写成成交价").len()>1 && entry.content.split("未知项存在时不给到达保证").len()>1})
  checks.push({name:"技能正文不提前进入模型上下文" passed:prompt.split(entry.content).len()==1})
- let host=read_agent_skill({name:"native-ui" path:"references/host-interface.md"})
+ let host=skills_results[4]
  checks.push({name:"按需读取完整宿主引用" passed:host.success && host.content==read_text("skills/native-ui/references/host-interface.md")})
- let upstream=read_agent_skill({name:"makepad-2-0-splash" path:"UPSTREAM.md"})
- checks.push({name:"上游正文按需读取" passed:upstream.success && upstream.content.len()>10000})
- let reference=read_agent_skill({name:"makepad-2-0-layout" path:"references/layout-patterns.md"})
- checks.push({name:"按需读取上游嵌套引用" passed:reference.success && reference.content==read_text("skills/makepad-2-0-layout/references/layout-patterns.md")})
- let legacy=read_agent_skill({name:"native_ui"})
- checks.push({name:"旧工具调用名称兼容" passed:legacy.success && legacy.content==entry.content})
- let missing=read_agent_skill({name:"native-ui" path:"absent.md"})
- checks.push({name:"不存在的引用返回实际资源目录" passed:!missing.success && missing.files.len()>0})
- fs.write("harness-smoke.json",({checks:checks}).to_json())
+ let upstream=skills_results[5] checks.push({name:"上游正文按需读取" passed:upstream.success && upstream.content.len()>10000})
+ let reference=skills_results[6] checks.push({name:"按需读取上游嵌套引用" passed:reference.success && reference.content==read_text("skills/makepad-2-0-layout/references/layout-patterns.md")})
+ let legacy=skills_results[7] checks.push({name:"旧工具调用名称兼容" passed:legacy.success && legacy.content==entry.content})
+ let missing=skills_results[8] checks.push({name:"不存在的引用返回实际资源目录" passed:!missing.success && missing.files.len()>0})
+ fs.write("harness-smoke.json",{checks:checks}.to_json())
+}
+fn skills_tick(){
+ if !fs.exists("skills-go.json") {start_timeout(0.1,||skills_tick()) return}
+ run_id+=1 agent_active=true agent_begin() start_timeout(0.01,||skills_next())
 }
 start_timeout(1,||skills_tick())
 '''
@@ -751,6 +781,54 @@ def main():
  for p in [a.STATE,a.HOME_DIR,a.CORE]:p.mkdir(parents=True,exist_ok=True)
  original=(ROOT/'bundle/main.splash').read_text();recovery='--render-recovery' in sys.argv;source=original.replace('fn minimax_request(','fn product_minimax_request(',1).replace('minimax_request("",agent_messages','smoke_request("",agent_messages')+'\n'+FIXTURE
  if '--tool-contract' in sys.argv:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_begin(','fn product_agent_begin(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1).replace('fn amap_request(','fn product_amap_request(',1).replace('fn map_geometry_uncached(','fn product_map_geometry_uncached(',1).replace('fn load_map_slot(','fn product_load_map_slot(',1)+'\n'+CONTRACT_FIXTURE
+ if '--trip-snapshot' in sys.argv:
+  import test_trip_snapshot as snapshot
+  source=snapshot.source(original)
+ if '--model-graph-projection' in sys.argv:
+  import test_model_graph_projection as model_graph_projection
+  source=model_graph_projection.source(original)
+ if '--trace-payload' in sys.argv:
+  import test_trace_payload as trace_payload
+  source=trace_payload.source(original)
+ if '--route-graph' in sys.argv:
+  import test_route_graph as graph
+  source=graph.source(original)
+ if '--route-extension' in sys.argv:
+  import test_route_extension as extension
+  source=extension.source(original)
+ if '--map-geometry' in sys.argv:
+  import test_map_geometry as geometry
+  source=geometry.source(original)
+ if '--render-facts' in sys.argv:
+  import test_render_facts as render_facts
+  source=render_facts.source(original)
+ if '--terminal-render' in sys.argv:
+  import test_terminal_render as terminal_render
+  source=terminal_render.source(original)
+ if '--destination-entry' in sys.argv:
+  import test_destination_entry as destination_entry
+  source=destination_entry.source(original)
+ if '--query-entry' in sys.argv:
+  import test_query_entry as query_entry
+  source=query_entry.source(original)
+ if '--render-entry' in sys.argv:
+  import test_render_entry as render_entry
+  source=render_entry.source(original)
+ if '--material-primitives' in sys.argv:
+  import test_material_primitives as material_primitives
+  source=material_primitives.source(original)
+ if '--checked-timer' in sys.argv:
+  import test_checked_timer as checked_timer
+  source=checked_timer.source(original)
+ if '--model-response-entry' in sys.argv:
+  import test_model_response_entry as model_response_entry
+  source=model_response_entry.source(original)
+ if '--rail-egress' in sys.argv:
+  import test_rail_route as rail
+  source=rail.egress_source(original)
+ if '--rail-routing' in sys.argv:
+  import test_rail_route as rail
+  source=rail.source(original)
  if '--source-contract' in sys.argv:
   import test_source_contract as sources
   source=sources.source(original)
@@ -776,6 +854,9 @@ def main():
   legacy=legacy[legacy.index('fn interface_facts(){'):legacy.index('fn generated_context(){')].replace('fn interface_facts(){','fn performance_legacy_facts(){',1)
   source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1).replace('fn agent_begin(','fn product_agent_begin(',1).replace('fn amap_request(','fn product_amap_request(',1).replace('ui.generated.fact_state.set_text(', 'performance_set_facts(')+'\n'+legacy+'\n'+PERFORMANCE_FIXTURE
  if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
+ if '--guardian-commit-boundaries' in sys.argv:
+  import test_goal_guardian as guardian
+  source=guardian.commit_boundary_source(original)
  if '--guardian' in sys.argv:
   import test_goal_guardian as guardian
   source=guardian.source(original)
@@ -823,7 +904,53 @@ def main():
   if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv or '--guardian' in sys.argv or '--tool-contract' in sys.argv or '--trace' in sys.argv or '--late-render' in sys.argv or '--performance' in sys.argv or '--ui-blocks' in sys.argv or '--map-sections' in sys.argv or '--loop-settle' in sys.argv:
    d=jail/'dev-trace/0123456789abcdef0123456789abcdef';d.mkdir(parents=True);(d/'instance-counter.json').write_text('{"next":1}');(jail/'trace-large.txt').write_text('中'*180000)
   if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv:trips.prepare(jail)
+  if '--trip-snapshot' in sys.argv:snapshot.prepare(jail)
+  if '--rail-egress' in sys.argv:rail.prepare_egress(jail)
+  if '--render-facts' in sys.argv:render_facts.prepare(jail)
+  if '--terminal-render' in sys.argv:terminal_render.prepare(jail)
+  if '--destination-entry' in sys.argv:destination_entry.prepare(jail)
+  if '--query-entry' in sys.argv:query_entry.prepare(jail)
+  if '--render-entry' in sys.argv:render_entry.prepare(jail)
+  if '--material-primitives' in sys.argv:material_primitives.prepare(jail)
+  if '--checked-timer' in sys.argv:checked_timer.prepare(jail)
+  if '--model-response-entry' in sys.argv:model_response_entry.prepare(jail)
+  if '--model-graph-projection' in sys.argv:model_graph_projection.prepare(jail)
+  if '--trace-payload' in sys.argv:trace_payload.prepare(jail)
   launch('native');report=None
+  if '--guardian-commit-boundaries' in sys.argv:
+   guardian.run_commit_boundaries(w,jail,original,source);return
+  if '--trip-snapshot' in sys.argv:
+   snapshot.run(w,jail,original,source);return
+  if '--model-graph-projection' in sys.argv:
+   model_graph_projection.run(w,jail,original,source);return
+  if '--trace-payload' in sys.argv:
+   trace_payload.run(w,jail,original,source);return
+  if '--route-graph' in sys.argv:
+   graph.run(w,jail,original,source);return
+  if '--route-extension' in sys.argv:
+   extension.run(w,jail,original,source);return
+  if '--map-geometry' in sys.argv:
+   geometry.run(w,jail,original,source);return
+  if '--render-facts' in sys.argv:
+   render_facts.run(w,jail,original,source);return
+  if '--terminal-render' in sys.argv:
+   terminal_render.run(w,jail,original,source);return
+  if '--destination-entry' in sys.argv:
+   destination_entry.run(w,jail,original,source);return
+  if '--query-entry' in sys.argv:
+   query_entry.run(w,jail,original,source);return
+  if '--render-entry' in sys.argv:
+   render_entry.run(w,jail,original,source);return
+  if '--material-primitives' in sys.argv:
+   material_primitives.run(w,jail,original,source);return
+  if '--checked-timer' in sys.argv:
+   checked_timer.run(w,jail,original,source);return
+  if '--model-response-entry' in sys.argv:
+   model_response_entry.run(w,jail,original,source);return
+  if '--rail-egress' in sys.argv:
+   rail.run_egress(w,jail,original,source);return
+  if '--rail-routing' in sys.argv:
+   rail.run(w,jail,original,source);return
   if '--source-contract' in sys.argv:
    sources.run(w,jail,original,source)
    return
@@ -870,20 +997,13 @@ def main():
    assert all(row['passed'] for row in report['checks']),report
    print('PASS: '+str(len(report['checks']))+'项统一工具与引用原生检查；'+str(w/'report.json'));return
   if '--skills' in sys.argv:
-   time.sleep(3)
-   q('k',c='Space',cmd=1,wait=1)
-   for ch in 'android':q('k',c='Key'+ch.upper(),wait=1)
-   q('k',c='enter',wait=1);time.sleep(1)
-   q('m',k='down',x=200,y=300,wait=1)
-   for y in range(320,570,25):q('m',k='move',x=200,y=y,wait=1)
-   q('m',k='up',x=200,y=570,wait=1);q('t',t='Navigation',wait=1);q('k',c='enter',wait=1);time.sleep(1)
    (jail/'skills-go.json').write_text('{}')
    for _ in range(100):
     if (jail/'harness-smoke.json').exists():break
     time.sleep(.1)
    report=json.loads((jail/'harness-smoke.json').read_text())
    assert all(row['passed'] for row in report['checks']),report
-   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),mode='Android',agent_external_requests=False,model_called=False)
+   report.update(product_source_sha256=hashlib.sha256(original.encode()).hexdigest(),mode='native-hidden',agent_external_requests=False,model_called=False)
    (w/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
    print('PASS: '+str(len(report['checks']))+'项技能原生检查；'+str(w/'report.json'));return
   if '--loop-settle' in sys.argv:

@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "id": "org.agentic26.examples.notes-review",
+  "version": "0.1.0",
+  "name": "Synthetic Notes Review",
+  "capabilities": [],
+  "network": {
+    "hosts": []
+  },
+  "agent": {
+    "profile": "read-only",
+    "instructions": "AGENT.md",
+    "skills": [
+      "material-ui"
+    ],
+    "tools": []
+  },
+  "integrity": {
+    "bundle_blake3": ""
+  }
+}

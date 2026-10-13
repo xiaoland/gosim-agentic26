@@ -1,0 +1,11 @@
+{
+  "name": "material-ui",
+  "version": "0.1.0",
+  "description": "Render and verify native UI from the current application contract; no business or host privileges.",
+  "uses": [],
+  "prompts": {
+    "include": [
+      "SKILL.md"
+    ]
+  }
+}

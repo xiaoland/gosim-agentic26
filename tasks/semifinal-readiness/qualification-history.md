@@ -1,0 +1,120 @@
+# 验收历史与证据边界
+
+这是截至2026-10-13的保留记录，不是当前执行计划。最新状态、责任和下一步以[任务入口](packet.md)为准。
+
+# 评奖轮标准下的后续优化
+
+## 目标与授权
+
+用户授权：“我们先继续按照复赛的标准，推进优化”，技术贡献希望 material design package / agent skill，也允许其他方向；必须对 OctoSense 生态有贡献。主 Agent 整合，有界实现与调查委托稳定 owner。用户当前不在电脑前，不代点个人权限、不读取新个人数据、不下单、不改已发布标签／冻结参赛版本，不提交上游 PR 或赛事材料。
+
+首批完成依据是落地旧固定班次当前可执行性及费用差额合同，并把七种视觉原语整理为独立源码包／通用技能；Navigation和一个非出行示例消费同一份原语，验证卡片、详情返回、事实更新和界面重建后的实际交互。独立模型使用技能已取得真实生成与交互证据，当前目标守护核心条件闭环也有同一次真实循环的完整记录；未完成候选的解释准确性仍有缺陷，不以样式 fixture 代替业务验收。后续完整成熟度不以一次展示、旧版测试或组件数量证明。产品主线为目标确认→状态变化→前台核验→替代差异→用户确认，技术贡献须能由第二个独立场景复用。
+
+## 当前事实与约束
+
+用户最新要求10月14日08:00冻结决赛版本，需加速。本次收紧为当前完整真实验收与影响可信度／手机使用的具体修复，不扩新能力／组件库，不做统计矩阵或穷尽地图。完成后优先复现记录、README与最小冻结检查；最新时限按用户通知执行，旧官方冻结资料不作为阻止当前工作依据，外部发布仍沿既有明确授权边界。layout_diagnosis只读整理现有冻结命令与交付缺口；guardian_qualification独占当前online10运行。
+
+用户2026-10-13追加“那就还需要继续推进”，本次继续修复候选解释夸大并验证实际改善，保Agent自主编排与自由DSL，不用文本NLP拦截、固定workflow或静默改写生成稿。online9实际覆盖范围呈现准确性且FAIL：最新资料与正确比较字段完整进入成功M3请求；动态详情显示小计、费用／目的地到达未知正确，静态卡片、解释与提案依据仍把partial当作整程到T3，并将unknown衔接称为已验证可执行。提案依据错误发生在读取UI资料之前，不能仅归因于缺少UI说明。实际点击局部方案的正文／地图身份正确，静态标题硬写另一Route ID。没有确认错误提案；goalv1、20:34:24期限／200元／支出0保持。
+
+online9唯一业务VM／一次query／15响应／36工具对／256连续事件，自然stop，地图HTTP与局部像素／返回通过。全部实例已停，真实当前日账本50calls／2790011tokens；报告build/research/journey-guardian/current-online-9/result-safe.json。mainbd665b36／sourcef5fc121e／binaryd3189251，恢复身份修复未遇到服务失败，故没有在线覆盖该恢复分支。online8的provider失败与Continue缺失已由layout_diagnosis修复：启动表单身份和模型指令分开，现有普通／守护及编辑／取消／版本边界原生15项通过；不恢复已停旧VM历史，保原始失败记录。
+
+用户同时提醒“UI/UX 开始恶化”。root已观察online9手机图中的长文列表、Route ID主标题、重复信息与按钮式候选，presentation_advisor只读判断信息层级和卡片／详情任务的最小改善；不在比较回放前并行修改UI技能，避免混杂变量。最终验收同时关注手机呈现，不能只以语义正确为完成。
+
+当前修复采纳presentation_advisor的有区分力建议：comparison_route_index只输出候选身份、完成范围、三个显示标签、比较费用及评估状态／理由，完整POI、端点别名、原始时刻和长来源说明留给get_route。保所有候选、原计算与snapshot／保存合同；comparison_summary仍计算原fullroutes。layout_diagnosis独占main、必要原生纯投影验证及封包，guardian_qualification离线准备online9首次错误basis之前实际完整请求的真实M3受控回放，root统一交运行槽。回放仅替换原compare91的两条候选投影，不加入后来entry，不改其余消息／推理／工具／模型参数／期限，不调用交通供应商；若新输出改善才考虑完整在线链。纯投影原生5/5通过，6620B→2804B，原comparison/fullsummary/snapshot/graph/persistence未变；封包main9666bc00／source6c67b2fe／binary2740dc2d，check/stamp/build/doctor通过，全停回执compare-purpose-probe/preflight-safe.json。root已采纳并将唯一native/provider槽交guardian_qualification执行request145的隔离回放，36messages/26tools，仅messages[26]compare91 content替换；首propose完整输出即止不执行业务提案，若先get_route则只允许对应原捕获回执，不调用交通。不能以字段更少直接宣称解释已修复。
+
+受控回放已完成且全停：实际request145保持36messages/26tools、全部锚定reasoning及设置，只替换compare91消息26 content，哈希审计通过。1次官方host真实M3改为report_goal_check(route_1_7)+读取native-ui/navigation-data，未propose；原无该新report完整回执，按预定边界停止，未编造回执／执行提案／查询交通，故basis准确性未覆盖，不作为投影改善证据。报告online9-comparison-counterfactual/result-safe.json，真实账本51calls／2874778tokens。本批不追加采样追绿。
+
+root已授权layout_diagnosis落实手机呈现目标最小调整：已有candidate_interaction及native-ui产品段明确列表便于比较交通组合、费用及到达范围、关键unknown，与完整分段／来源／地图详情分工；不固定模板／布局／原语／流程，不改变Route或标签。UX目标已封包main9f4c3e2b／sourcef7f81a82／binaryda292205，check/stamp/build/doctor通过，全停回执mobile-comparison-objective/preflight-safe.json。root已采纳并授权guardian_qualification独占native/provider实际执行current-online10一轮真实整合：原online9合成承诺期限20:34:24／200／支出0保持，16:45核钟尚余3h48m，历史班次不作为本轮fresh证据。判据包括范围解释、手机可比较候选、两条不同Route详情标题／正文／地图一致、合理条件提案父确认与磁盘读回；自然stop不追绿续谈，不以包装检查冒业务成功。
+
+online10已全停17:01:24：唯一VM1／run1／query1，10实际dispatch／8成功assistant／18工具对，真实账本61calls／3169262tokens，两provider失败usage未知。第一次失败后真实Continue成功，原消息前缀保持、17对已完成工具没有重放，恢复身份修复在线PASS。首render118的5块原稿11.98KB，详情有未闭合括号，诊断119已回模型；修稿请求再次provider failure，暂无可用候选交互，UI交付未通过，basis的170→70／一票制错误未修，goalv1未确认。完整原件和allstop在current-online-10，原deadline不变。
+
+为加快冻结，root允许guardian_qualification复用官方host最小counterfactual入口，独立续生成原failed request121，不重查交通、不生产旧会话恢复、不手改模型DSL；真实生成稿用现有native重放实际online10事实与几何验证手机比较／两Route详情／返回，明确隔离重放边界而非新生产整轮通过。新分支若无真实只读回执不伪造。root仅纠正listing持久化旧事实／0.16 release notes与旧截图版本，不改变main或当前stage，不在实验运行期间build/stamp。
+
+online7已完成当前版本核心条件守护闭环：唯一业务VM／一次实际付费自然循环，23响应／36工具对／320连续事件；前置漏资源导致一次0dispatch失败，故query_started=2，未伪报1。M3自主接公交、今日S4837和步行形成route_2_7，真实卡片→同Route详情→高德HTTP／地图像素→返回→父确认／磁盘读回goalv2通过，18:41:31／200元保持。三段已查估价57元、官方入口最早16:29，站内接入／设施内部通达／整程费用unknown未升级；确认前从当前起点重走最早仍可接15:24班次，但数据过期与未知保留。仅首组0..3地图像素通过，不称全量翻页。root已查看详情地图、确认后主页与目标详情。报告build/research/journey-guardian/current-online-7/result-safe.json，source232d2050／main5912；当前日正常rollover为23calls／1311265tokens，旧106calls账本另存，全部实例停。
+
+未完成候选解释准确性仍FAIL：route_2_1／2_2的queried_endpoint_only时刻被写成T3到达，explanation称期限预算均满足，而实际budget／deadline unknown。该局部夸大不撤销已观察的条件流程，也不能被流程PASS冲抵。最后资料修正已经完成，仅用现有price_label／arrival_label及当前unknown作正向绑定示例；main5912不变，最终source1c6f4592／binary068104e2，check／build／doctor通过，回执current-online-7/facts-label-preflight-safe.json。online7实测source232d2050，新资料未重跑M3，不认证解释夸大已修；旧正常终态不续接、不自动改原稿；后续独立验证按用户继续推进的新授权执行。冷恢复尾端源码合同也已核：当前父目标从outer trip.goal v2恢复，pending清nil；历史facts v1只在history.current:false子界面，不覆盖当前父目标，旧proposal已nil。审计post-confirm-contract-audit-safe.json；未启动冷重启，不冒运行证据。
+
+online6布局归因与资料修复已完成。一个无模型／供应商的原生对照确认：Right换行中的Fill按剩余宽度逐项布局，双Fill文字会产生极窄长行；原稿又选择viewport却未自行管理滚动，内容不可达。同source仅用natural后，真实48px详情按钮可滚达；短并列文字使用Fit后正常同排。未发现运行时中断，不修改main、SDK或生成稿。root已查看实际自然滚动和Fit行截图。证据build/research/journey-guardian/online6-layout-probe/report.json；native-ui资料、摘要、catalog及包摘要已同步，check／build／doctor通过，main5912保持，新source232d2050／binary24d2da1f，封包package-preflight.json，全部实例停。此对照不是原online6成功或模型改善证据。
+
+online7当时由guardian_qualification独占native／provider槽完成一次真实自主集成，现已全停。使用广州原坐标、200元、无已确认进度与支出、启动时固定＋4小时绝对期限，保原S4831历史来源；不移动online6期限，不带旧模型答案或生成稿。继承106calls／6481756tokens账本。先完成Android模式和整个session零查询审计，再只启动一个业务VM的查询；确认须有合理真实Route与透明范围，不能将未知认证成立。主Agent整合；这轮自然终态若有实际缺陷，按具体证据处理，不盲重开或手修模型稿。
+
+2026-10-13接续时，最后online6已全停并导出：新独立合成目标固定10月13日01:46:09／200元，旧S4831来源不改；唯一业务VM／一次query／22模型响应／40工具对，账本106calls／6481756tokens。模型自主提案和修稿，父判定保持整程费用与期限unknown、goal1未确认；实际详情按钮虽构造但零rect／不可见，地图仅loading、无HTTP或像素，完整集成未通过。报告build/research/journey-guardian/current-online-6/result-safe.json与button-geometry-safe.json；这轮原记录不再启动或移动期限。恢复后的layout_diagnosis仅负责该原稿Flow.Right换行／Fill文字与viewport容器的有界归因，允许一个无模型无交通的原生对照，主Agent维护文档并决定必要修复；不自动改写生成稿。
+
+以下online5记录是保留的机械失败与修复前置，不是当前恢复点。原session采集存在vm1 13响应与vm2 12响应，两VM合计25次；正式vm2原M3已安装详情但viewed事实为空、地图未就绪，report{}执行超限后自主重试成功。原提案超过23:30未确认，未知价格／接入与旧解释缺陷保留；混杂session不能冒称单loop预算复现。原记录及审计归build/research/journey-guardian/current-online-5/。
+
+修复合法Route选择不等地图目录，几何用现UTF8片和checked归属，失败清pending／明确错误、取消不续旧等待者；原全部折线、端点、价格时刻不改。report检查与版本绑定提交只分一处入口。薄堆原负载测量未复现64ms，实际goal35KB，不能继续沿UI树390KB假设归因。已用原保存Route及逐字未改M3 routes182／detail194离线实际点击详情→一次高德静态HTTP→地图像素→返回，14目录的全字符串／端点／点数／bounds与原算法等值，main401f实测3PASS；根图及返回图已查看。最终main5912仅追加cancel清pending，小状态组4PASS，真实checked硬错通知一次／旧token不续／report{}真实落盘与回执一次，保原goal版本、来源时价与期限。证据归online5-ui-probe/ui-v1bsvxqy/report.json、online5-helper-probe/helper-3oi6d9ou/report.json，详细边界见[守护任务](../journey-guardian/packet.md)。未新增M3／交通规划，不重跑旧UI矩阵。
+
+最终main5912a1a811b5ced3d72c12fb4f26d4b88328666adea6ba2037d8f750e20d14f1／source2868eb38827ff3be59d764265c5d0d66309ccc7c6f2c170c1a587d8983bb797b／binaryeb4d0f4636668337d3af04cd490214bca9e8a862ef7708e95d8c674674db1743；check／stamp／build／doctor通过，receipt build/research/runtime-upgrade/rc6/guardian-map-job-preflight.json。SDK3975／prelude2280与host锁不变，封包账本36calls／655511tokens、d1f154e4 SHA前后相同，全部自有实例停。高德报价资料仅补“分段未拆不表示未包含、不同站对价格参考须保适用假设、预算预留非票价上界”，不改变金额、不认证原模型解释。下一验收由root限定，不默认新付费规划循环。
+
+
+online5验收未通过，实例已停，原件保留在build/research/journey-guardian/current-online-5。当前生成详情可实际打开，但显示路线不在结果中，地图未加载；模型已报告替代路线预计23:41到达，超过原23:30期限，没有确认替换。完整session审计发现两个VM各自执行了查询，真实账本59→84共25调用，最初只观察vm2而误报单循环；这轮不能作为单循环稳定性证据。rail_e2e负责离线核对创建／模式切换／触发的时序，rail_model负责详情facts与执行限额的源码合同诊断。停止新的付费整轮，先区分采集漏记与应用缺陷，勿暗改期限或手写生成稿。
+
+此前online4已完成真实条件提案确认与保存：9次模型响应、23组工具调用／回执、146连续事件，父应用实际点击使目标进入version2，预算200与期限23:30保持，费用／连接unknown未升级为成立。这一核心确认行为PASS，完整UI仍未通过：生成稿是静态MaterialCards，没有本地详情／地图入口，确认后文字仍停在pending。原始证据归build/research/journey-guardian/current-online-4/result-safe.json与confirmed-snapshot-private.json；唯一78197已全停。不能把缺地图解释成fixture用户不喜欢地图，也不将该轮写成完整闭环通过。
+
+本轮后续修复已冻结封包：普通规划与守护共用的model_task_context新增presentation_task，表达候选本地查看同Route详情、真实步骤／分图地图及缺数据说明、审批／选定状态来自当前facts或不重复父权威状态。这是产品交付目标，不伪造用户偏好、不规定工具／五槽／布局。Navigation生成VM导入SDK后局部将五个Material文字／按钮默认适配为既有Sans，保原字号／颜色／布局；canonical SDK与其它应用主题不改。原录制首请求与共享引用核4项、实际412×892字体一屏4项通过，截图已查看；没有额外规划或主题矩阵。证据入口为build/research/journey-guardian/presentation-context-check/report-safe.json及build/research/rail-integration/material-font-probe/calendar-8526upaw/report.json。
+
+最终main05ac15174ddc110d03aa3b1435704b3af1f71cd61c620d29a762450d3895b6ba、sourcec6734a6ab82738d49682fd0ffc6abb6f97c7accfecddde6049b6c4a529e64888、binaryd7090547849466282031d9cadc158a89756c2ba71301238097a8b71597e5f399；check／stamp／build／doctor全通过，回执build/research/runtime-upgrade/rc6/presentation-font-preflight.json。SDK3975／prelude2280／host锁不变，封包正常HOME36calls／655511tokens及d1f154e4 SHA前后相同，全部自有实例停。当时唯一native／provider槽交rail_e2e执行root授权online5，该阶段尚无验收结论；不提前改写README或本packet为完整UI成功。守护详细恢复点见[目标守护任务](../journey-guardian/packet.md)。
+
+
+当前已有真实 M3 function-calling loop、按需技能、确定性 Route、铁路前后接驳、动态 Splash 区块和七种通用视觉原语。旧真实核验只证明信息不足与拒绝自动替换；online7已补当前条件替代确认闭环，未将unknown认证为可行。最新模型恢复修复只证明同窗口人工继续机制，不能声称消除 MiniMax 间歇超时。
+
+2026-10-12 官方仓库 README 当前公开评奖版本10月9日23:59冻结、12日13–17时线上答辩，12日12时交 slides/video；最新开发不冒充已冻结参赛版本。赛事内容由官方资料核对归 docs/sources.md。网站规则与数字权重仍需核对，不将用户二手表作为已确认评分数字。
+
+七种样式已拆为独立源码包并构建期物化到 generated_context，通用material-ui技能与Navigation适配分开；独立consumer机械交互／主题与真实M3生成证据分别见恢复点，模型稿经诊断修正通过有限双记录交互，不作首稿稳定性结论。个人日历已成功授权并展示12个真实可选日历，个人选择／事件与 Notes 仍须用户实际操作；隔离测试不能冒充个人数据验收。
+
+## 责任与下一步
+
+官方标准与生态入口已核，见[调查](official-ecosystem-findings.md)。root采纳 Material 3 风格七原语＋通用 UI skill＋可执行动态交互合同，暂不抽整个多 VM 渲染／存储框架。官方构建期 interface.splash prelude 是分发先例，shared components 的 Wasm 函数组件不当作视觉包。
+
+当前SDK与宿主锁保持；layout_diagnosis唯一修改main的比较投影并封包，guardian_qualification仅离线准备下一受控回放，运行槽由root在封包全停后交付。root维护任务恢复点、采纳实际证据与更新README。当前未决项为候选静态解释与提案依据的范围准确性，不启动并行付费循环，不关闭其它任务实例，不重复已通过的主题／组件检查。
+
+首批实现与必要修复已获授权；不创建完整 Material 组件库、全新 Agent 框架或后台监听以扩大题目。实施前后记录具体来源、版本和实际行为，原 trace／私有业务材料留在忽略目录。
+
+## 首批交付与恢复点
+
+守护counterfactual与费用差额原生7项通过：固定班次不平移、实际乘车未知、小计与整程价差分开、未确认提案不写目标。报告build/research/rail-integration/guardian-reexecution-probe/guardian-pm_vvqjc/report-safe.json；未验证新真实M3重核与替代确认。
+
+agentic-native-ui 0.1.0的源码包、构建期物化helper、独立material-ui技能及Notes样例已完成。Navigation旧Nav七原语兼容实际通过；独立样例以真实appid、当前锁定card-host、412×892及真实Android stylesheet验证列表／滚动／详情／返回／合成更新／父样式重应用后交互，浅→深→浅背景和标题像素匹配theme，无native errors，root已查看实际浅色列表与深色详情图。两者证据范围分开：旧Nav兼容检查在主题修复前，新主题由独立consumer验证，不合称修复后的两个app全流程重验。SDK摘要617b1d414cd4a7a50168b2be1f0881f9cb736071d371f589057c901f9175df49，prelude2280b462288e4cb2d7bf1040500c69602bac3dbe4d490e5fad36a4cf485bc96b。
+
+旧runner失败、当前runner初样例栈错误、主题缓存及根背景失败均保留。样例改为首屏和更新共用review_content内容路径，取消任意首次timer；根容器使用实际绘色MaterialSurface。SDK直接读取mod.theme，移除跨preserve保留旧值的内部颜色缓存；七公开名字与Nav局部字体保持。源码入口packages/native-ui/README.md、examples/native-ui-notes/README.md；运行证据build/research/native-ui-navigation/report.json及build/research/native-ui-notes/report.json。独立consumer owner ui_package_runner已全停，PID20278 absent；runtime_update保留canonical知识归属，不再有runner前置待决定。
+
+rail_model同步最终canonical后check／stamp／build／doctor全通过，main ecd0d0218a9fe5cff002b8494d9f9f1edebe15fa4c4babcdc1ebe6b18d760f1c、source a1b2081afea84a1d100d33600990b4c2cbabeecc39b3017be71c462933800d74、binary22cf5897d71a4d9d15c99449ef1c83427421b91de02e274e25b3d989834da7a2。receipt build/research/runtime-upgrade/rc6/guardian-sdk-preflight.json；封包前后当前正常HOME账本36calls／655511tokens／SHA d1f154e4不变，不与过时27基线混称。正式host／lock未变，全部自有实例停。
+
+## 后续效果证据
+
+两条主线分别取得当前版本真实M3“原方案失效→自主替代→差异→确认更新”的有限条件闭环，以及第二consumer真实模型按需读取通用技能与生成UI的证据。前者需完整工具与确认记录，后者与本批合成UI复用分开；不做广泛A/B或统计性提升宣称。没有个人Notes、Android真机、商店安装、正式上游组件发行或当前版本全任务成熟度结论。本批是冻结后开发，不覆盖参赛标签／视频或提交材料。
+
+## 真实模型验收接续
+
+用户2026-10-12明确“继续，完成验收”，授权两项剩余验证及实际失败必要修复。rail_e2e稳定负责广州→宝安T3当前版本M3守护闭环：公开且明确的合成承诺＋既有真实历史铁路Route作为初态、真实交通与M3，Agent自主核原方案并提出替代，真实父确认与保存后状态；不把旧Route或fixture当当前供应商证据，不下单／读取个人背景。先回具体用例与完成范围，随后单次正式循环；失败保留原件、停机诊断，不自动新开整轮。
+
+ui_package_runner稳定负责独立sample模型按需读取material-ui并生成DSL、真实诊断和列表／详情／返回／更新。先离线准备最小function-calling验收入口，不复制Navigation框架，纯loop与工具属于实验且不冒官方API。等守护阶段全部停止后再单次付费循环及native验证。两项完整模型／工具／源码／确认／失败记录留在ignored build，root查看最终实际图并更新知识。既有主题与七Nav检查不重复，正式source／host／lock冻结；具体bug先导出全停、由既有源码owner修后才封包接续。
+
+
+## 已保留的验收接续记录（2026-10-12）
+
+以下记录历次阶段的原始失败、修复与当时恢复点；当前恢复点以上面的online7核心结论、解释缺陷和最终资料封包身份为准。
+
+首轮真实守护失败，原始模型／工具／保存快照保留于current-online-1。Agent确实读取技能并查询供应商，但未准备替代提案，误把局部票价说成完整预算依据；首稿show_block参数错误留下未修复的__document，后续区块成功不代表整界面成功。rail_model已修propose_goal职责说明、报价覆盖措辞、目标selection_basis验证及render_ui的整体诊断和同ID修复。守护合同原生检查通过，最终预检guardian-contract-preflight记录main317c97a1、source dc2dabbe、binary8214149f；还不能据此宣称真实守护闭环通过。
+
+独立应用实际M3已读取通用skill及canonical原语，但八份原始稿未挂出真实Label/Button；代码把ui.review_screen属性赋值当成挂载，工具未明确顶层源码入口。原消息、源码、实际空树与纠正后的可见性检查保留于build/research/native-ui-notes-model；一次HTTP超时的用量未知，不记零。当前增加通用references/splash-entry.md并明确实验工具的实际安装入口，SDK3975fe7f、原语2280b462不变。ui_package_runner独占native/provider，先做非业务入口探针，再在原上下文读取新资料并由M3自行修复，禁止手写业务稿替代。
+
+独立模型全停后，rail_model只同步最终canonical资源并一次封包；随后rail_e2e接续修复后的真实守护验收。两项仍未通过，不覆盖冻结参赛版，不启动并行付费循环或重复已完成的主题矩阵。root最终查看实际屏幕和工具证据，再回流持久知识。
+
+
+SDK最后同步已封包，sdk-entry-preflight回执记录main20a56ff3、source d2edd65c、binary328d4906，正常HOME36calls/655511tokens账本前后未变；未再跑主题矩阵。独立模型失败诊断勘误：原第9–15稿有部分真实Label，不能统称空树；hello world位于顶部且被验收过滤，第15稿中文字为provider原始uXXXX，标准JSON解码未改写。required fixture内容仍缺失，判据不放松。owner修实验反馈为mounted/viewport-visible/required-content三项，保留原日志并在同上下文纠正后接续；本次不增加自动中文修复或手改模型业务稿。
+
+
+独立consumer真实模型最终PASS：source21 b998c839为request26/provider toolcall原稿，未手改。实际8项通过，两个record可达、详情身份一致、合成更新revision2、返回标题/更新时间正确、重新打开显示版本2正文。root查看final-list与reopened-updated-detail，receipt build/research/native-ui-notes-model/final-source21-recheck/report.json。初始只skillmetadata，实际root/primitives/splash-entry三次read/fullforward审计保留；这是隔离HTTPS experiment loop与read_skill/render_ui adapters，不能冒称官方standalone model.chat。中途21份稿/诊断恢复不作首稿稳定性结论；source20“列表必须全文”false-negative已纠正，原件保留。PID4581/3639已全停，SDK3975/prelude2280不变。rail_e2e已获本native/provider槽，正式守护current-online-2用main20a56ff3/source d2edd65c/binary328d4906单次自然循环开始；仍待其真实替代提案/确认/保存/详情地图证据。
+
+
+独立实验总报告已PASS，原始provider源码21/21逐字相等；27请求/26回执，已返回usage966100tokens，request3未返回usage仍未知。四次同上下文恢复及21稿/20修订不能解释为首稿稳定性，归因和false-negative勘误见package与sample README；root已采纳其交互/真实skill读取结论，未重复主题矩阵。SDK与正式source未再改动。
+
+
+守护online2真实复测仍FAIL，已全停PID5214，249seq连续／16responses／37call-result，目标仍version1未确认。自主propose已成功准备待确认version2，选route_1_5约164分钟／已查小计10／整程价与末程未知，却basis称所有候选可按时到；未实际get_route/render_route_detail或地图，最终文本称详情完成。原件见build/research/journey-guardian/current-online-2/result-safe.json。提案之前模型已收到estimated_arrival_ts=null/deadlineunknown，首次夸大不能归为缺字段；但提案回执guardian_assess又给无scope的非空arrival，是真实后置投影不一致。root采纳advisor授权rail_model复用route_arrival_facts、标明duration范围、父确认分开权威事实与Agent推荐理由，不改basis原文、不禁止unknown提案、不给正常stop植入续谈。用同原route固定评估时刻做一个合同对照；model首次解释是否改善仍待真实验收。ui_package_runner只读调查本轮UI API资料读取／工具合同与actual blocks回执，提供最小改进后交main单owner，未新增SDK或模型人工稿。
+
+
+UI根因进一步核实：native-ui正文170/171与host-interface181/182完整进入后续真实模型请求，并非skill无法读取。模型192把详情source放在未声明的render_ui.item，宿主静默忽略、只安装summary且返回success；模型因此误认为详情已就绪。当前patched View的on_item_tap是真实API，不能把它误判不存在；子NavAction没有自身on_click会吞点击。root授权main单owner修render参数实际边界（未知key/互斥source+blocks）与current_blocks库存，native-ui仅补真实事件与已安装目标合同，无硬渲染顺序/五槽/自动详情。无get_route不是地图缺失根因，view_route本来可读目录。另末程已支持extend_route({route_id,to_ref,mode:"walk"})及/v5/direction/walking，无需新walking能力；此轮局部station入口与T3facility间缺41.6m实际延长，endpoint判定不是坐标机械误拒。
+
+
+本批guard/render真实合同修复已封包，main3dfa44a3/source76b596d4/binarye84fe4a2，receipt guardian-scope-preflight.json；7局部合同＋1完整到达反例＋3实际定位输入兼容组分别通过，原件不重跑或合称真实M3规划。实际origin经纬度对象旧传String距离helper得到nil，已按合法coord_text转换，8.4826m；缺坐标unknown、String/location兼容、实际登乘unknown仍保留。check/stamp/build/doctor均通过，正常HOME36calls655511tokens账本未改，SDK3975/prelude2280/host锁不变，全部自有实例停。当时rail_e2e接唯一native/provider槽进行online3，继续原goal1/23:30/200/S4831与online2用量，不植入正常stop续谈／人工propose；仍须实际正确解释、详情地图与父确认保存version2证据才能宣布守护闭环通过。

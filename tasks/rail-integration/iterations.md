@@ -1,0 +1,342 @@
+# 实施轮次与诊断记录
+
+第三轮冻结source_sha256=7656cb5553443d24823db5d6852049fc1aa980e5ed55a3e1e857d4e00bc6b0c9，Android模式同一原文只提交一次。位置／目的地／小时约束成功，铁路与四次市内接驳回执均正常；seq92 search_places后未续，尚无完整铁路Route或最终UI。
+
+native采样显示同步文件操作耗694ms，script time budget exceeded runtime748:6对应read_text读取后的检查。下一地图查询入口重复读取private-config.json；rail_model负责改为单次查询内存缓存，新查询刷新，不进入模型或trace。第三轮92事件及原始日志已导出round3，pid36220已停止。此修复不承诺消除宿主初读／其它文件I/O的预算问题，复跑仍须观察。
+
+缓存修复原生27项通过（build/smoke/navigation-harness-exhoatri/report.json），包含修改实际文件验证同查询缓存与下次刷新。第五build source_sha256=af1a5c38f233356210888284546483326712bb1e50476b4b4adbcfd71ec9dd05已完成，rail_e2e接续第四正式轮相同输入。下一步等待端到端结果。通过后查看真实截图、同步README与架构，停止并导出唯一实例，再盖包摘要并进行最终预检。未授权购票、推送或发布；未实现能力不写为当前事实。
+
+第四正式轮无native异常，但暴露地点有效范围缺陷：机场搜索返回B02F38ZM54，后续车站／起点搜索替换place_results，adopt_destination拒绝本轮先前实际返回的机场ID；两次原始搜索与采用回执均证明它不是模型虚构。rail_e2e导出并停止45305，rail_model核修本轮POI复用范围及下一query隔离。尚未形成完整铁路Route，不宣称通过。
+
+POI范围已修，来源14项（build/smoke/navigation-harness-p2vqfyq2/report.json）与混合27项（build/smoke/navigation-harness-ukornpf1/report.json）通过：真实工具入口机场→车站→采用机场成功，新query旧ID拒绝。复用route_nodes，完整供应商id与内部ref独立保留；同ID再次搜索更新事实，不并存另一套缓存。第六build source_sha256=c67a4c48d93d1f6b84bbe79ff1cddb07fd37a928fc547201e60bc5bfd7a811b2已完成，rail_e2e接续第五正式轮；完整铁路方案仍待证明。
+
+第五轮189事件／12次M3响应全部保留round5，唯一53898已停止。Agent已尝试具体班次：一次因确已迟于发车拒绝，一次因37.669米connection_gap拒绝，随后自主extend步行补连接；还未成功铁路入完整Route或终态UI。seq189读取native-ui后预算阻断。
+
+advisor与rail_model反汇编把采样close定位到宿主append/write返回边界，不能归咎技能正文；宿主每次写前jail_usage递归扫描完整jail，trace每事件append+status两次扫描，日志另有1.8秒walk采样。普通Python外／内卷读写均<0.1ms，不覆盖宿主扫描。当前先由rail_model用同binary／同规模完整jail副本做原生读技能 vs trace写、外卷 vs内卷判别，不再盲复跑M3、不加技能缓存／宿主预算。原始ledger不清零；若内卷真实路径正常，可迁隔离state继续E2E并如实报告环境。
+
+完整jail native外／内卷A/B及最大真实45消息、1,007,277B trace envelope（含实际私有scrub keys）均未复现预算错误：序列化约9–10ms，append约1–1.5ms，status约0.5ms。结论及原始记录归build/research/rail-integration/fs-native/findings-safe.md；所有probe已停，无M3调用，不证明产品已修。下一步rail_model仅加开发模式私有内存IO阶段标记，利用现有隐藏trace_identity对齐读／append／status实际耗时与返回情况，无额外FS／密钥／模型字段，再继续正式M3，不改宿主预算、技能策略或候选数量。
+
+开发IO观测已冻结，来源15项原生通过build/smoke/navigation-harness-noeihroh/report.json，包括普通模式不生成状态；第七build source_sha256=5e0250714001ba5895faf3d0158eabd9f0ffc262a4af2d7500af83e229babccd完成，rail_e2e接续第六正式轮同输入，仍留WorkSSD以取得实际phase判别证据。此变更只观测，不声明预算异常已解决。
+
+第六轮仅启动事件／0模型请求，已停止68607并归档round6；诊断即时trace_marker刷新可能触碰根View构造前生命周期，已最小撤掉begin/end UI刷新，保留内存与既有刷新，不保证bail瞬时标签。来源15项通过build/smoke/navigation-harness-gghpqlek/report.json；真实Android原文启动到query_started／model_request／model_dispatch，无budget／no-root，证据build/research/rail-integration/diagnostic-init/report-safe.json及已查看截图。启动实例已停，下一轮继承该实际dispatch后private-state-1791706334661343000账本，不能退回旧轮。
+
+第八build source_sha256=8edd33263f588fa37db540cafa240bc40d4250bb768e9ac82a4ecf25b09a77e2完成，rail_e2e接续第七正式轮同原文，尚无完整铁路Route／终态UI验收。
+
+
+第七77702已停止，round7保留可用原始材料并标incomplete：16模型响应、8请求日志／16派发、42调用／41回执，无完整铁路Route／终态UI。当前规则决定及下一步归[任务包](packet.md)。
+
+第八：冻结381ed569，同原文Android真实查询。112连续事件、5模型响应、29调用28回执，无具体rail join或最终UI；get_route同步整条跨城折线验证instruction超限，非trace警告根因。已停2411并保存round8全部可用材料。该轮原始几何未留，不宣称可重放；owner使用既有真实高德17,636点样本复现。
+
+第九：冻结08e2a21a，get_route真实成功但get_route_graph指令超限，graph入口累计19候选90steps44buslines。具体错配证据round9/rail-mismatch-evidence-safe.json：请求GGQ→SCA返回实际GZQ→SZQ C7167，模型泛化到GGQ→IOQ并错配地图站；采用错误回执只有generic身份不符，actual仅大型203服务列表可见。216实际/max217、缺209模型请求和217工具回执，已停17158，没有铁路完整Route或终态UI。
+
+第十：冻结f8000cc，12连续事件／首模型响应／read_skill call后无回执第二派发，未到交通查询。native实际read_to_string385ms+write close317/343/423ms，预算不暂停native耗时；已保存round10并停36207。下一录制回放保真实生产初始化与调度链，不是isolatedFS探针。
+
+第十一：冻结f8000cc，236连续事件、16模型响应、43工具全回。精确站对和前置接驳生效，S4839 PTQ→SCA无座54元；正确带设施括号POI被shared站名normalizer误拒三次，无rail Route或render，已存round11并停47192。下一仅规范化末端已识别设施标签，保基础站名差异。
+
+第十二：冻结49058884，110连续事件、6模型响应、26工具调用25回执，无铁路完整Route或最终UI。seq108 route_leg_query实际call_id对应seq110，供应商已进入，异步trace排序不能被误读为未发请求。native budget位置对应query_route_summary.assessment，生产accept_route_extension多方案同步投影待复现；另外两次extend_route(route_2_1)因node_ref=nil在未知终点检查之前被route_node访问而泛化报错。IO close采样不能单独解释seq110。完整原始材料保留round12，61066已停止；下一修复和针对性检查后继续真实M3。
+
+第十二后针对性修复：真实记录尾空segment会抹掉终点，现只跳真正空对象；非空未知末段保持未知。11既有＋20真实segments方案（synthetic对齐请求origin）旧同步回执路径复现instruction limit，按option解析／接入和candidate摘要分入口后9项通过navigation-harness-yqe6ncr4，包含全量／引用／两caller／取消代际、nil与轻量context。该记录不是round12缺失原响应精确重放，不排除独立FS风险。main冻结3438747c，root构建后继续正式。
+
+第十三：冻结b99bf814，107连续事件、6完整M3请求／响应、22工具调用21回执。具体PTQ→SCA班次、POI、滴滴报价已回，read_skill(rail-routing)读取后的return{content:text}预算中止，109秒无回执。当前仅能确指读后边界，不将独立trace IO end误认本call根因。材料归round13，85176已停，ledger继承private-state-round13。下一先处理读取边界，不继续盲重试。
+
+第十三后窄异步读取修复：fs.read_async worker做真实文件／路径校验，现有UI pump回原VM，保持错误／UTF8／jail语义。目录异步缓存，正文和reference仍按需，run与call绑定。最终宿主重建/Rust5项、skills12项和200ms真实round13响应链5项通过；UI28heartbeats、pending时129ms返回、正文/工具/续派发各一次、取消不污染。main fbe950f1，具体证据归packet。同步trace写仍未异步，不声称全部FS风险消除。root构建后继续正式第十四轮。
+
+第十四：冻结5e44fc0a，技能async真实成功，333连续事件／21模型响应／46工具全回／query_ended。C4967 NUQ→SCA固定19:32→20:59（43元）加前公交8元、末walk165秒0元，route_2_10有条件全腿51元／11001秒；检票／站内未知保留，真实错过139秒班次拒绝。终态保存失败，磁盘仅running679B/snapshotnil；livefacts244659B仍包含route2_10，不能说候选清空。详情DSL空viewed_route_id覆盖ID；列表button存在但不可点击，当前布局因果待证。旧seq272“无座”变量错误不能归因当前routes。完整原始材料round14，尚未通过保存/UI/map验收。
+
+第十四后：实际snapshot1,185,397B超过单文件限额。统一trip异步completion／分片清单及必要caller，隐藏installed源码保存、可见render通知等待、真实容器rect；技能补嵌套Fill/Fit与非空ID。regex／逐码点U32皆在真实record失败，最终采用标准UTF8边界原生utf8_chunks，整数文字量actual调用亦验证。main8968d770／Makepad1c35294a／hosta825bd82冻结；同VM17项真实record通过a0bmtrcy，6render边界通过ub2tgdkc。JSON字段顺序假差异已按实际读回结构等值更正，不改业务数据。下一构建及必要caller边界后正式15，未冒称UI/map通过。
+
+第十五：冻结4069ec47，264实际/max268终态事件、15模型响应、40工具全回。真实render成功，completed trip1-3分片403372B/2parts/11routes；实际rail前缀route2_11详情map seq277–280 HTTP20030832B/ready/imageaccepted。G6239广州南19:53→深圳北20:25二等74.5元加前公交6元已查80.5；后公交54.136m／高德taxi34.433m起点缺口拒，尚无完整机场rail Route。最终summary却手算被拒后地铁为全程88.5/2h36，证据render-summary-latest.splash:8–10、seq241。40596已停，ledger335真实calls归private-state-round15。根因出站未复用入站条件语义，advisor支持窄同站／bound分支，下一必要修复及同原文正式验证。
+
+第十五后：main8f9168d8窄铁路出站对称join冻结，13项原生检查7kt4qcar通过；观察坐标／真实服务与合成provider合同明确区分，包含错误站／绑定／端点反例、未知传播、实际分片提交恢复。工具回执registered_routes_only/no_registered_connection及技能禁止将拒段手算全程。host/lock未改；root正在构建后交正式16。
+
+第十六：source e7f46e56，完整C7099广州东→深圳站＋前后公交形成T3 route2_20..23，2_20已查82元／10402秒、未知衔接保留，出站修复在线成立。14模型响应／50调用49回执，render_ui seq249首XML稿未回执83秒，native route_get边界instructionlimit；不是正常语法反馈，不作为生成成功。完整原件round16，53369已停，ledger349归private-state-round16。下一必要render入口反馈预算修复及同原文正式17。
+
+第十六后：first-render-2-stage证明fragment check返回后interface_facts逐Route在第14项耗尽指令，非XML自身/FS。共同逐Route异步完整facts/JSON缓存供render/refresh/保存，站点登记同步分批；真实nil leg.to_ref在guardian_materialize表索引另失败，改既有route_node guard。main e1f00e79冻结，23真实+2明确重复负载检查中XML真实诊断反馈、合法稿安装、全25facts刷新、实际保存恢复通过；旧run归属正在收尾。
+
+第十七：source5f75606f，302查询事件连续无模型/工具缺口、18responses37pairs。正确生成列表卡并实际click route2_9，但route_detail on_facts_changed访问不存在provider_label触diagnostic，详情/map未更新；UTC误显北京时间。completed保存4683400B/18parts/9routes成功。具体rail未探索替代站，实际skill和emptyservices otherpairs均完整在seq65/88 context，seq70注意替代班次但选择高德城际，不是读技能失败。71486已停、不coldrestore失败稿，ledger367归private-state-round17。下一必要rail探索与UI字段/时区契约调整。
+
+第十七后：main68c1aa4c／source d19c6387，rail探索与native-ui字段资料纠正，无模板/假alias。事实层本地期限/到达标签及Asia/Shanghai，4项native t2y07jkr通过，旧检查预期遗漏北京时间后缀假失败已纠正，不改产品迎合测试。正式18继承367账本。
+
+第十八：source d19c6387、PID83660，原文一次submit后只seq1 instance_started，无query_started/model，native runtime1118:53时间超限，按offset+4在explicit_limits数字正则边界但不能据此猜FS。83660停并ps确认，ledgerSHA未变367calls。完整启动业务材料round18/private-state-round18，待稳定owner精确入口诊断，不新付费重试。
+
+第十八后：隔离真实state/input/commit全链未复现，写0.598ms/callback1.031ms/UI0.366ms/parser0.155ms，报告submit-probe/submit-hpg64_a2。原件gen2/index/running已提交，不能认FS/regex根因；main de261af3仅正常commit后下个timer启动并run/trip/generation校验，不改recheck/transaction。source94bae119构建，窄旧callback检查收尾后正式19。
+
+第十八后最终：actual submit-lyjdd431两项通过，真commit callback返回17.668ms后独立timer→limits240/20000→截获agent_begin，旧run/版本不启动。隔离mount前置已按smoke正式warmup/digest修正，不算产品failure；无模型/provider/ledger变。正式19源94bae119冻结启动。
+
+第十九：source94bae119启动query/M3通过，120连续events/7messages/22calls21results，自主具体站对/rail＋前后公交到T3 route2_18已查82未知保留。另一extend route2_13 seq119/120后88秒pending，native2059/2911时间budget，根因待确指。无终态render/save/UI，649停并ps确认，raw/候选保round19，latestprivate-state-round19 ledger374/16822496tokens。稳定owner必要诊断，不paid盲试。
+
+第十九后：result-wp2bygbo实际59020B seq118+28messages生产result→execute→pump无复现，serialize0.887ms/total0.926ms，traceappend完整；非pending119 exact/liveheap。main680199d3共享result独立timer及run/call/job归属落盘，无provider/JSON/trace框架变，窄回归待报告。
+
+第十九后最终：result-7actvxad三项actual通过，59020B完整/重复一次/旧run-call不推进，capture0.018ms后21.378ms独立commit0.477ms，trace完整、无模型/provider/nativeerror，实例停。source d3858d60冻结构建，正式20继承374账本同原文。
+
+第二十：source d3858d60，195连续/10responses/42tools成对，第10finish_reason=tool_calls但实际无calls，invalid_tool_response/transport_error终止，无具体railjoin/render/queryended。12334停，原可得model.chat完整body.response归round20，ledger384/17363315 private-state-round20。advisor允许下一专项用例明确具体班次+前后接驳，不指定站/车次，旧轮输入不重述。
+
+第二十只读定案：原host response确无tool_calls，source host complete/chat直接serde parse/原样response，无适配丢字段证据；无截断/敏感标志。应用failfast符合test_agent_protocol既有契约，不新增自动retry/源码。专项21明确具体班次+前后接驳原文，source d3858d60不变，继承384。
+
+专项21：源d3858d60，新需求/skill/schema完整实际可达，seq180/182真实railjoin，后公交29..32端点仍false；compare211 pending98秒/runtime94时间budget，无terminal/render。10M3/49calls48results/211连续，18329停，raw/facts参数保round21，ledger394/18119425 private-state-round21。必要共享compare分批及公开入口同根因盘点，目的地false先只读不放证据。
+
+专项21后：main82da3b64比较共享分批及事实轻比较，移除同步fullsummary，公开同根因检查收束。compare-v89ek4ln三项actual绿：32publicfacts完整/sharedcompare/取消，rawgeom不可得明确segments[]，不改阈值/skills/容量。末实际arrival coords未到T3，可真walk继续；rootbuild后专项22继承394。
+
+专项22：源9c99817f，239终态+hide事件共240连续/15M3/36工具，C4991+前后51元到T3中心仍311m实际gap，2440563B完整保存。afterhide图已列表/normalheader，误读隐藏旧节点报告纠正；无hide源码bug。原business/DSL冷恢复准备，ledger409/19240003。main4ecfe165终态父shell/phase/cache与genericoverlay合同统一、晚render保completed，terminal-kjuq9ric8项绿。入口detail来源及真实walk到entry3.58m证明字段可路由，下一独立入口节点/目标scope必要实现经advisor支持，不改25m。
+
+冷恢复22：原business/DSL+终态修复源6e8e9143，C4991卡可见点击却detail_text/旧uid不在tree。mailbox/viewed_route_id证明事件已消费，非整体丢点击；采集漏计数文件造成trace不全另记，不归产品。源967ec2a2/main6f71b9ec仅overlay显示重取当前container，原生成稿不变；实际原卡详情/高德map→返回→重开map成功，HTTP200/ready/imageaccepted，26连续events，账本b671e4e3未变，无模型/交通规划/报价。root实际查看地图图，唯一77183已停；证据cold-restore-round22/attempt2-*。trace预算warning保留，不冒称所有IO已修。
+
+入口主链main2698f2cf原生10项entry-kkqbyr6u通过，scope保留名改target_kind，center不变/3.584m/旧311m/unknown/完整确认保存及guardian沿binding均证。正式23源6fd5af39，9M3/24results/150连续，seq150公交到广州南POI入口109秒pending，native40:87 route_point regex附近budget；无本call route_leg_query或供应商回执，不能断provider失败/正则根因。唯一96694停，round23保原件，ledger418/19586181 SHA064fc8e9。稳定ownerexact入口诊断，不新paid盲试。
+
+共享query入口0438的5项query-bdj9o5nj与一次205ms同步FIFO阻塞判别完成：下一独立timer业务一次派发，真实call/run/trace最终seq齐；同batch未证、不造异步IO框架。正式24源545244c5，T3入口实际seq30已bind；广州东→深圳北及C7119广州东→深圳具体railjoin成功，C8031过期拒后自主换班次。seq210 XML render_ui无feedback147s，native3480:28 budget，不仅最后行猜原因；原稿UTC文字错。210continuous/15responses/34calls33results，无terminal/save/detail。22708停止，round24保全原件，ledger433/20800011 SHA2a1e42a8，稳定owner原入口/skill上下文诊断。
+
+sharedrender ebdf及5项render-n3onf27l通过，原XML反馈/合法实际渲染/旧归属/异步重准备齐，未完整复现原budget；catalog/tool明确Splash非XML按需资料，模型仍可自行决定读取。正式25源2af12dc4，99continuous/5responses/24calls23results，seq97 route_leg_query b667与pendingseq99同call、入口coord正确，前广州南b607另call。native1479:24/register node附近budget，113秒无结果，无railjoin/render；无rawresponse不可猜规模，错误前1183ms close及trace_io_end budget不能按顺序归因。39264已停，ledger438/20932455 SHAff25ab20，原件齐，稳定owner预算guard/回调原件阶段诊断，暂停paid盲跑。
+
+checked timer main683/Rust2+app9通过且overlay可重建；正式26源fe8d6f2c job22/23/24硬错误都明确一次failure→下一M3dispatch，真实不再tool静默挂。22高德原response33110B/20POIs完整；24私有原件完整，23dispatch前无raw。seq129第9model_response后164s无action，native末2124:6不凭末行归因；129continuous、24tools全回执/9responses。79785停，all原件round26，ledger447/21146366 SHAddf71110。stable owner接模型response处理边界协议/归属修复，无paid盲retry。
+
+## 2026-10-11 接续快照原件
+
+以下保留整理前的接续事实；当前计划以 packet 为准，历史授权、版本与证据不得拼成当前成功。
+
+
+专项22源9c99817f已终态：15真实M3/36工具成对，C4991新塘南21:45→深圳机场23:11无座43元＋前公交8＋末步行0，已查小计51元；保存2440563B/10parts。末真实端点距目标中心311.64米，不能认定已到T3；站内等未知保留。原snapshot、DSL、facts与模型/工具原件在私有build/research/rail-integration/e2e/round22。
+
+终态父shell/phase/overlay默认及晚render状态已修。原记录冷恢复曾可消费点击却不能显示详情，native证实旧overlay容器不在tree；仅显示时重新取得当前容器。源967ec2a2595828e7e6b1f855632f225be45550793471028cb0af45ead9ac35fc/main6f71b9ec0055ab604e067c8188c650982f19814c9e43d3a988798b5629126781实际原卡详情/map→返回→重开成功，root已查看截图。26连续events，地图HTTP200/ready/imageaccepted，无新模型/交通规划/报价；77183已停。证据cold-restore-round22/attempt2-*，未隐藏原trace预算warning。采集漏计数文件已单独修正，不归产品。
+
+最新实际账本 state-round26：447calls/21146366tokens，SHAddf71110…，不清零。正式23同专项输入、新业务与最新账本已交原owner一次启动授权；冻结main2698f2cf59dabb0505b1e489035170264c5e5514785a9408846b994d1d4c33da，构建source6fd5af393b3be9a2dae5d7492a4d75e2471e69e9cd5ebf58a6f1ed199979ab7c。
+
+## 正在实施与下一步
+
+rail_model正在接入生产高德text本已有的T3 entr_location113.814563,22.6246，不新增接口。保poi中心113.811840,22.627554不变，独立入口ref/parent/source；明确航站楼采用后绑定路由点，明确门/用户坐标不覆盖。query、候选、extend、完整Route、详情、保存及guardian使用同绑定，旧无binding记录保持原坐标。一次真实walking到该入口260m/208s、端点gap3.58m证明可路由，不证明楼层、楼内通达、安检或全程确定性；原25米校验不变。
+
+入口主链已落盘且10项原生检查全部通过，报告entry-probe/entry-kkqbyr6u/report.json：真实text/walking、center不变、入口ref/负例、3.58m与旧311m、unknown、实际confirmed提交/完整读回/guardian及legacy不改。scope保留名序列化缺陷已改target_kind；无模型/provider/ledger变化，实例停。正式23源6fd5af39：150连续events、9真实M3/24工具回执，seq150 query_route公交到广州南POI pending109秒，native runtime40:87 budget落route_point，不能凭行号断根因；尚无route_leg_query/供应商回执/railjoin/终态。原模型、参数、状态、native与图保round23，96694已停ps无，不自动付费重试。已证共享入口重复登记累计segments。main0438cde3f9bca4beb77cbe7a96a8de9d0fbbe5ca07b18e5bdbd448600b62ac63移除同步全候选准备，普通入口用base/current registry，新leg/POI仍入场登记，完整图异步重建。5项query-bdj9o5nj通过；旧基线1.175ms也未复现原64ms，不能将减负等同全部live根因修复。advisor建议一次真实同步写阻塞判别：隔离FIFO append约205ms触budget，下一独立query正常一次派发，trace seq1/2/3和status完整。仅证独立后timer可恢复，不扩同batch装置、不新异步IO框架；报告fifo-pmi8mpdv最终归属/序号齐，实例停。root已构建source545244c531d48bf8bc71a9bd03a1e6acf3ec9a8df2ef3480aa239c33e644e381，main0438冻结，原owner已获正式24一次启动授权，同专项输入/newbusiness/fresh广州/继承418真实账本；此为当前功能版本E2E，不称23全面根因回归。正式24实际绑定T3入口、两条铁路join成功且过期班次正确拒；但seq210 render_ui(XML FlowPad/IconText原稿)147秒pending，无语法反馈，native3480:28 budget落fragment height/route_get附近不能按最后行断因。北京时间被原稿写成UTC也保留。210连续/15M3/34calls33results，未终态/保存/详情map。原件齐在round24，22708已停ps无，不修稿或paid重试；实际34calls无read_skill，末modelrequest49messages只有目录，非读失败。原XML隔离回放能反馈，但完整facts序列化后inline mount约31.5ms累计，不能称原超时已复现。main ebdf0c78d6d37e281d7331905b8c79fab83ad621accdbff9d91815edbb9c8a16把sharedmount移独立timer，run/call/interface_revision及过期缓存重新async准备；原稿不改。5项render-n3onf27l通过（XML反馈、合法实际渲染、旧run/call不推进、完整19事实重准备）。工具/目录明确Splash输入及按需资料/当地label，不强制读技能或workflow。所有实例停，rootbuild source2af12dc465dd4c720294915d9f526d83fe2aed742e185381acf4606de818b0aa成功；正式25同专项输入/fresh广州/newbusiness/继承433账本已获一次启动，源码/lock/stage冻结。源码与验收不并行修改bundle、lock或stage。root查看实际图片，最终更新README/架构/工具链说明、停止实例、盖摘要及包预检；不重复无新增风险的广泛检查、不以付费重复刷成功。出现阻断先导出原件交稳定owner定位。
+
+正式25源2af12dc4：99连续/5M3/24calls23results，当前b667 call的seq97 route_leg_query已落、T3 entry请求正确，seq99等待113秒/native1479:24 budget落节点登记附近，尚无railjoin/render。前广州南b607是另call，不能混异步顺序；原provider response未保，不能假设规模。native错误前1183ms close采样及多trace_io_end budget保留，不直接等同本call原因。39264已停，round25原件齐；rail_model/稳定host owner已解冻做netcallback/多timer预算guard及入场登记阶段诊断，不按末行继续yield猜修、不新paid轮。
+
+当前决策：新966KB真实复查raw＋round25实际assistant/messages隔离accept→2候选→summary→commit→pump全部正常（option9.570/6.363ms），未复现liveheap，不再按末行猜yield。advisor已决断静默pending是独立确定缺陷；root授权稳定rail_model/host owner最窄checked业务timer，将硬错误在新入口按显式run/call/job归属一次失败回执。原provider响应/阶段按job保诊断；不监听全局日志、不按active_tool猜、不自动retry、不改预算。节点可能部分登记、已有完整Route保留并在失败中明确列出，本option未完整不能发表；旧/取消job失效，trace错误不误伤业务。先验证VM安全续行及注册前/完整发表后硬预算的必要边界，若无安全续证明则真实终止保结果，不伪恢复。完成后再当前版本真实E2E。
+
+恢复入口：checked宿主接口形态已确认为start_timeout_checked(delay, work, on_error)，仅该work的VM执行失败，错误在下一独立timer交付；普通timer/trace/子VM预期渲染诊断不参与。稳定host owner实施本地overlay/lock与硬预算证明；rail_model接显式run/call/job、partial完整候选与一次结算，尤其message已提交但pump前不得重复tool消息。当前没有正式实例/新增模型调用，尚无最终freeze或E2E完成声明。
+
+checked修复已冻结：main683f15be693297ceb907fa4863553e9610ec917e00de7c696e01cbacb14e0bbe，lock9cb8871ad214e3d0f0451dd761e2c8ca0b2169c4965203a131f3b90768717f42；本地Makepad overlay tree c2968033/OctoSense7a9d95c7可隔离重建并verify_source。Rust2项真实80ms触64ms及应用同VM9项真实instruction limit全部通过checked-q6frq24r/report-safe.json（不混同两种guard）：注册前/完整Route发表后/旧run-call/普通trace/normal/push后消息decision索引派发各一次/原XML诊断/合法render。原raw/liveheap局限明示、0model/provider、账本不变、所有实例停。供应商raw按job只留private失败分片，模型不收原件。root正式build成功sourcefe8d6f2c0ce23e2c06abca6720958b75b33e55336900e7b2fcf9904f4f9f37e9，26新business同输入/广州/438账本已获一次启动授权；source/lock/stage全freeze。真实error应返回工具失败由M3自主处理，不代改/no自动新paid轮。
+
+正式26源fe8d6f2c真实恢复成立：job22/23/24硬错误明确各一次tool失败，随后真实M3自主续派；job22原body33110B/20POIs JSON完整，不能归巨型数据或显式FS。job22/24失败私有metadata+1part完整，job23dispatch前无provider属实。但seq129第9model_response已HTTP返回164秒无model_action/assistant/后续tools（24均回执），native末2124:6不能仅行断因；尚无railjoin/终态。129continuous/all9model/最后seq124125129原件/currenthidden/native齐在round26，79785已停ps无，不paidretry。rail_model已解冻负责actualresponse协议与处理入口phase回放、当前run/request归属的最小响应续行/失败修复；不得猜全局日志/active_tool，不模型auto retry，不扩错误治理framework。
+
+模型处理修复已freeze mainfdd7752b76ae31a27321fe44a45feae7af6f444fb2ea8aac0492e9717b657fa2，host/lock9cb未变。actual seq129响应合法1241B单search_places，非missing-calls协议失败；request_stage同步构造envelope但FS本已独立，不能误归写盘。准备/派发/response action绑定run+record checked，harderror明确model_execution_failed终态不retry；诊断envelope独立，request JSON先固定避免mutable messages污染。5项model-bkf02tw3通过（原34messages/action once/硬失败保Route/旧run-request/trace错误隔离），旧Route夹具round22原2项而非round26liveheap；实例全停/ledger不变。rootbuild source26fc22ffbd284506a792c652280e1658a754bdc52511e0d4144749975a3ef1fc成功，正式27同专项/fresh广州/newbusiness/447账本已获一次启动，全source/lock/stage冻结。
+
+正式27自然终态：338连续events、20完整真实M3、37工具成对、13render；保存809542B/4parts/rev3/indexgen3成功。唯一94230已停，账本467calls/22382245tokens，SHA b4479663…。原件与实际截图在round27，root已查看round27-final.png。没有具体固定铁路join，整体E2E未通过；模型将次日空站对误称访问失败及陈旧数据描述为5分钟内，原文保留，不能把公交化方案或保存成功冒充铁路验收。
+
+当前解冻决定：advisor指出离屏/未布局/零高无法从零rect区分，模型却因此多轮无效修稿。rail_model移除模型render回执的container_rect/body_rect、保留私有测量和真实syntax/runtime诊断，澄清通知只证明执行、不证明可见布局；不新增offscreen推断、自动视觉检查、修稿次数限额或保底。另用既有guardian_deadline为first context/interface_facts补received_at_label，保epoch/期限不变，不新增绝对期限输入功能。必要边界验证后root构建，再由唯一E2E owner启动28。下一用例仅4小时改14小时以覆盖次日早班，保广州珠江新城→T3/预算200/具体班次前后接驳详情地图；不改时钟、预指定车次或注入路线答案。27开始22:41:12、期限次日02:41:12，仅查次日不证明窗口全无班次；历史失败不改写。
+
+次日覆盖只读判别已完成：case27-provider/summary.json记录2次正常匿名queryG（status=true/httpstatus字段200），按真实码IZQ→IOQ180班06:18～23:25、GGQ→SZQ61班06:10～22:34，午前分别59/22；同城expanded亦含HAA/PYA→SCA4班。SCA有效、接口正常，不证明27所选PTQ/IOQ/GGQ→SCA有直达车。无模型/宿主/源码变化；只作14小时真实用例可覆盖的判别，不向模型注入固定答案。27实际读取rail/native等技能seq18/20/22/24/26/39，非技能读取失败；rect纠错实际定位见round27/rect-decisions-safe.json。
+
+两项修正已冻结main ae735938139f55a8d796910eda00b093183cfcfef382d65f8b5eaa003c772f14，lock/host未改。必要同VM实测报告render-contract-probe/contract-wdqh28ao/report-safe.json：跨午夜起止label/原epoch正确，合法render、真实hidden pending非失败、原XML具体诊断均成立；公开无rect，私有保真实几何。原生测试期望漏既有北京时间后缀，原false断言保留并明确独立核正确值，不重跑产品或掩盖实测。该组不证明实际像素可见，visible/notified非视觉验收；0M3/供应商/账本变化，实例全停。root正在正式build28，后续唯一E2E owner单次真实用例。
+
+root正式build28成功source be642745cd13f51fe91e9ec52251698038898fb8e22a885911bf9f69a004cfc6，已交rail_e2e一次启动授权，main ae735938/host/lock冻结；输入仅4h→14h，继承467真实账本。待同版本具体rail Route/前后T3接驳/实际Android详情map与冷恢复，不将正常终态/通知/保存单独视为E2E通过。
+
+正式28源be642745首模型前阻断：seq2 query_started后106秒无request/dispatch，hidden model_request=null，native2091:20/3293:358预算错误及294/704ms close采样不作为因果结论；原件round28，唯一17429已停ps空，ledger467/22382245原SHA b447966338c03d5fc8305b63973b2be13a832676dc45ac6b576898ac126310c8不变、0M3。稳定owner已发现start_task_ready→ordinary agent_begin→catalog回调直接model_task_context/messages/agent_pump，checked request owner在pump后才创建；first context同步read私有配置且未有start归属硬错误回执。rail_model解冻负责此启动阶段实际归属诊断及必要checked续行/终止，不按label/最后行猜根因，不提高预算/看门狗/自动retry；rootchecked文档段已补，不冲突。修复后同14小时真实用例验收，非付费盲重试。
+
+首启动修正冻结main44a55280d68d03b6e1d64e0eff3fd2700a80bcdfe2b5e645f1fb538b5cdb5eeb，lock9cb未变：UI/私有读之前建立request record；每query首私有配置fs.read_async→缓存，catalog解析/context/status/request准备绑定run/record checked；缺文件沿旧nil语义，其它读取错误明确结束。model-bootstrap-probe/bootstrap-kgxca_10/report-safe.json三项实测：真实异步worker排队210.6ms/7UI心跳/一次hostdispatch、旧run不写缓存不派发、firstcontext真实instruction硬错误一次失败/零派发。测试未冒称配置本身磁盘耗时211ms。最终新增对象类型guard不改变核心组三项，0M3/供应商/账本变化、实例停。畸形文本宿主parse_json返回partial object，bootstrap-_qh9bz5r原严格JSON假设FAIL保留；advisor收敛不为本机生成配置另建strictparser，不加首尾括号假验证，不将该额外假设阻挡主E2E。root构建29，同14小时业务验收。
+
+root build29成功source878a145ed029857f7ea05695f590d9eb5b778a3724a9b28a38b9825d7c9d0a81，正式唯一29956/50372/session7d45be567ba84cbfaa903b5f995051d0已获同14h一次授权，main44a55280/host/lock冻结。真实query_started北京时间2026-10-11 23:16:13.747，期限10/12 13:16:13.747；已越过首同步读阻断，87连续events/4M3响应、第5dispatch，技能/位置/目的地/班次/高德均回执，尚无具体railjoin。继续等待自然结果，不提前通过。
+
+正式29启动已顺利进入真实M3，43工具全回执并成功C7001广州东GGQ→深圳SZQ二等72 railjoin route_2_22，但尚未延长到机场。第11model回执seq201明确host_error arguments exceed1MiB，202transport_error终态；无完整机场Route/UI/E2E。1..202只缺196完整request正文写入（hidden incomplete），step10原请求520048B保，job40provider95061B私有分片齐。29956已停，账本477/23071751、SHA2b94081b52a7b22720a3902074cd4ae0a297895489684045639ba741604b785d。rail_model先只读重建实际arguments/逐消息占用，不按铁路多班次猜、不清历史或任意截候选。advisor推荐基于字节证据：必要决策摘要+稳定ref、完整事实registry按需读取，共同metadata批次一次；保所有候选发现与原始历史，不提高宿主限制或贸然context compaction。先判实际最大项，root采纳后再实现。
+
+29字节归因已证：用step10原520048B＋真实seq190assistant/192graph/194railjoin原字符串重建第11请求1055860B，超过宿主1048576B7284B；重建不是缺失seq196原件。192graph嵌入消息522714B（原464377B），516nodes281323B/21Route摘要139765B/54relations43104B；194railjoin仅9904B。限制在宿主args_json、HTTP前。advisor决定及root授权：get_route_graph默认全部节点/Route/关系轻量索引，不任意截候选、多线路/Route归属与站序方向时刻保；可选node_refs读指定完整node/全部关系并报missing、不再全图，完整Route仍get_route。UI内部graph/facts/save保全。rail_model负责必要公开合同/按ref详情/真实arguments压缩验证，完成后build30同14h，不改宿主容量/完整历史/模型自主步骤。
+
+
+## 2026-10-12 最终组合构建前的接续快照
+
+# 铁路与城际班次接入
+
+## 目标、授权与完成依据
+
+用户：“同意，推进，直到端到端完成（测试从广州去深圳宝安机场）”。必要实现、修复和验证已授权，不登录、购票、推送或发布。
+
+同一版本真实 M3 自主查询具体铁路／城际班次，形成铁路＋前后接驳到宝安T3的Route；自然终态、实际Android模式候选详情与地图、完整保存及冷启动恢复均完成。站内、安检、检票、购票和铁路几何允许诚实未知，不能把部分结果或跨版本证据拼成E2E通过。
+
+正式输入现为：“现在从广州珠江新城出发，14小时内到深圳宝安机场T3，预算200元。请比较具体铁路或城际班次加前后接驳的完整方案，尽量便宜，并显示方案详情和地图。”仅模拟新鲜广州GCJ02位置113.3229,23.1190；M3／12306／高德／滴滴真实，不预指定站、班次或答案。最初4小时用例在夜间缺少早班覆盖，27失败原件保留，28起只改14小时，不改时钟。验收为macOS arm64宿主Android模式412×892，不冒称真机。
+
+## 知识与责任
+
+[来源调查](research.md)、[轮次与原恢复快照](iterations.md)保留来源、版本、原件与诊断。README归产品当前能力，docs/architecture.md归Route／harness合同，toolchain/README与锁文件归本地可重建宿主扩展。私有日志、业务快照、重建请求均在忽略的build，不进Git／bundle。
+
+rail_model稳定负责源码、技能与必要验证，复用其native owner；rail_e2e是唯一正式实例owner，root负责采纳、构建和最终实际截图核验；guardian_design只作重要接口判断。源码、lock、stage和宿主在正式实例运行时冻结，不并行构建。下一付费轮须root在必要修复后明确单次启动，失败导出停止、不自动刷重试。
+
+## 已实现及已观察
+
+12306匿名网页动态查询、精确站对、真实固定发到时间／席别价格／余票与统一铁路Route已实现。同城展开只提供发现入口，需重新核真实站对和前后接驳；空站对不表示城市间无车或网页访问失败。末段明确T3 POI使用独立entrance ref，中心不改，真实260m/208s步行端点距入口3.584m；不能认定楼内／检票已验证。
+
+完整几何／路线事实／比较异步分批，技能读取fs.read_async，业务保存262144B UTF8分片完整提交和恢复已实现；既有真实C4991记录的冷详情／地图曾实际通过，root查看，但不是当前铁路全链验收。原overlay显示取当前容器，地图保真实接驳几何、不补铁路直线。
+
+宿主本地checked_timer_overlay提供start_timeout_checked：显式run/call/job硬错误下一入口一次反馈，已发表Route保留，消息已push不重复结算；模型错误绑定请求记录、明确失败不重试。原模型请求先固定再异步记录。首配置每query异步读取→缓存，首request在读前创建，首context／catalog／status纳入checked。对象类型guard不冒称宿主严格JSON校验。渲染公开回执去掉不可解释的rect，私有测量保；通知不证明像素可见，hidden pending非失败，真实DSL错误仍返回。
+
+必要证据均归build/research/rail-integration：entry-probe/entry-kkqbyr6u(10项)，query-entry-probe/query-bdj9o5nj(5项)，render-entry-probe/render-n3onf27l(5项)，checked-timer/checked-q6frq24r(原生9项与Rust2项)，model-response-probe/model-bkf02tw3(5项)，render-contract-probe/contract-wdqh28ao(三原生状态＋真实跨午夜label精确核；原期望漏后缀已明示)，model-bootstrap-probe/bootstrap-kgxca_10(真实worker排队210.6ms／7UI心跳／首派发一次、旧run、硬错误)。严格JSON额外假设bootstrap-_qh9bz5r FAIL保，不新建解析器。已复现的边界不表示所有原live超限根因完全重现；不提高预算／容量、不加看门狗。
+
+## 当前事实与恢复点
+
+27源26fc22ff自然终态：20M3／37成对工具／338连续events，保存809542B/4parts，但无具体railjoin，不通过。13render多轮被零rect诱导修稿，原messages保；实际读rail/native等技能，非技能读失败。只查次日三精确站对，不覆盖当日晚班，模型误称访问失败保留。独立case27-provider两次正常公开query证10/12广州南→深圳北180班、广州东→深圳61班，SCA本身有效，不给模型注入答案。
+
+28源be642745首模型前106秒无request，2events，未checked首次准备同步读配置缺口已修；0M3，实例17429停。29源878a145ed029857f7ea05695f590d9eb5b778a3724a9b28a38b9825d7c9d0a81/main44a55280已顺利首派发，query_started10/11 23:16:13.747、截止10/12 13:16:13.747，真实C7001广州东GGQ→深圳SZQ二等72元接入route_2_22，但仍未到机场。第11请求host_error arguments exceed1MiB，终态失败，无完整UI/E2E。唯一29956已停止，所有原件e2e/round29保；43tools全回执，1..202仅缺196request正文，hidden incomplete明示，不能称完整trace。step10原520048B和job40provider95061B原件保。
+
+最新实际账本490calls／24547438tokens，SHAa094c99331d276f0fac44abcc1f1dc8d1ca188c3b4b09db10460eb391e86ac38，state-round30。不清零，无应用用量上限。正式30原运行lock9cb8871ad214e3d0f0451dd761e2c8ca0b2169c4965203a131f3b90768717f42、Makepad tree c2968033、OctoSense tree7a9d95c7；RC6迁移由runtime_update当前持有；公开图投影已完成，main2850c98c是正式30原运行版本，后续修复当前main为d696d24ad19c37ebcc40176e26b6ceb17b3ab8b97f6ecb80cdeca6bed90794cc；正在同原记录隔离验证详情与地图，尚未重新付费规划。
+
+## 当前决策与下一步
+
+29step10＋真实seq190assistant/192graph/194railjoin重建step11为1055860B，比宿主1048576B多7284B。重建明确非缺失seq196原件。get_route_graph原464377B、嵌入522714B，占516nodes/21全Route摘要/54关系；railjoin只9904B。限制确在宿主args_json、HTTP前，不是M3能力或铁路接口。
+
+advisor决定已获root授权，rail_model实施：同get_route_graph默认全部node精简身份／坐标、全部Route身份／模式／耗时费用及未知摘要、全部关系的线路身份／有序站ref／角色索引与实际line duration；不按节点去重多归属，不造未知站间时间。可选node_refs仅读指定完整node与全部关联，明确missing；全Route仍get_route。内部完整graph/facts/save不变，无新工具、任意候选截断、历史删除、宿主容量增加或固定workflow。
+
+用29真实516/21/54原件验证全部可发现、关系顺序多归属、按ref完整事实及实际args编码明显低于1MiB；复用既有分批避免返回边界同步全投影超限。公开图合同组及正式30已执行，原件与结果见下文；当前继续正式30保存记录的动态详情与地图修复，不重新启动该旧恢复点。最终root查看实际截图，更新README、包摘要及make check，必要finalbuild；不重复无新增风险的广泛检查。
+
+公开graph最后组六项实际PASS，root已核model-graph-probe/graph-q_ntgld9/report.json与report-safe.json：生产默认20候选与selector各一次dispatch、真实多归属/missing/完整指定node与内部full等值、captured516/21/54全身份费用未知与停站顺序、完整第11历史＋实际新schema由1055860→724309B。captured图投影203113B（原464352B），无新供应商/模型/raw或liveheap补造。graph-j5ntmsx9旧fixture缺id失败原件保，不代表最终结果；root采纳稳定native owner及report实证，母owner旧目录误读已纠正。native_errors=[]、全部实例停/账本不变，不等待额外叙事或重复验证。
+
+正式30原运行sourcef1a2c359c958957c90d592bde73896896298c21b792ce1e79ae228dda92e89e2，原实例49261已完成该轮并停止，见下文；这不是当前活实例恢复入口。
+
+正式30源f1a2/main2850终态：13M3，S4903实际07:50→09:09、完整route2_33到T3entry，预计09:11/34228.49s≈571min含等车/已查64元/assessmentunknown。2230392B9parts完整snapshot保存，但UI未过：卡硬编码11:30→13:49/150错误，动态详情571/09:11正确；HTTP20026142B/accepted后地图实际不可见。root已view detail-drag.png。return列表/重开正常但map仍无，不扩cold回归。49261已停，原件e2e/round30：saved-full-snapshot-private.json、render-ui-latest-private.json、各实际截图/原事实。trace270缺227/236/237/238/248明确incomplete。rail_model负责原DSL下overlay520→wrapperbodyFill截滚动extent的离线Fit对照、卡字段发现与大消息诊断记录边界；不手改原Agent稿/兜底/付费重试，bodyFit兼容旧内ScrollFill需先advisor选择。
+
+用户睡觉前授权继续工作，追加todo‘OctoSense升级最新版；真实日历笔记；rich候选卡（地图缩略图）；考虑minimal Material2/3库’。保持本目标直到完整E2E，新增工作稳定owners：runtime_update先官方release/patch隔离升级调查（tasks/runtime-upgrade），context_sources核最新真实calendar/notes与权限（tasks/real-context），guardian_design给minimal视觉原语/卡事实绑定与滚动viewport判断（tasks/ui-ux-foundation）。不要并行改当前main/正式stage/host，必要账户系统权限不能代授权，先推进独立部分，不将新todo当取消当前闭环。
+
+恢复诊断接续：两次原30非付费恢复（63983/83442）仅发view_route，子fact_revision4、618KB facts的viewed_route_id空，仍14字占位；未到动态571min，不能作Fill→Fit布局或trace预算因果证明。history分支不依赖agent_active，checked facts错误清job/done(nil)；无ui_facts_preparing变量。下一用轻量父viewedid/revision/replay/factsjob/geometryjob primitive hook明确停点，不盲改布局/加catch。旧bodyFill针对height520根Fit内容可能裁map仍待真实对照；advisor推荐显式natural/viewport内容尺寸选择保旧契约，不解析DSL。
+
+大日志缺227/248字节已证：body831138/865383B仍低1MiB，双编码envelope1278683/1320458B被旧trace跳过。新完整scrub-envelope私有UTF8分片≤262144B，JSONL只引用，tools读/export校路径顺序片长总长/UTF8JSON事件身份后恢复，小记录不变，缺片明确incomplete；不声称防恶意同长度篡改，不增SHA宿主API。trace-payload-probe/payload-2jqp4lj3六项原生PASS（model1278684B/render1289326B各5片等值）、14readerPASS。rail-label-probe/labels-x75r9hax4项实际固定S4903与门到门labels正确/epoch不变。trace-scrub-probe/scrub-gy7c2sqb3项大原件无key/有key/URLkey等值，无匹配先search不拆整个大串，消除无效复制但非全部GC根因声明。全部实例停/零M3供应商/490账本不变。当前maina7e0accf，正式host/lock未变；稳定source与map owner继续原Fill阶段判别，未build/newpaid。
+
+
+## 当前修复验证与下一恢复点
+
+30大事件缺口已证为双重JSON编码后的单envelope超过1MiB：重建step12 model body831138B、事件1278683B（非缺失227原件），step13为865383B／1320458B。源码现将完整脱敏事件按UTF8边界分片，全部片完成才发表JSONL引用，tools/agent.py读出原事件；原事件时间／run／call／seq及小事件不变。native六项见trace-payload-probe/payload-2jqp4lj3，model1278684B与真实render1289326B各五片完整等值，中片缺失明确incomplete。标签四项见rail-label-probe/labels-x75r9hax：真实S4903固定07:50→09:09／79分钟，整Route571分钟／09:11，epoch不变。trace_scrub无key先native search，避免无意义的大字符串复制，三个等值边界见trace-scrub-probe/scrub-gy7c2sqb。以上不是同步诊断IO和所有超限问题均已消除。
+
+初次Fill/Fit地图对照未闭合，不能拿占位地图正rect证明布局。后续原Fill只读phase实证（e2e/phase-replay-round30）表明geometry完成、父viewed_route_id=route_2_33、revision/cache=4，三个子块facts仍空；没有native预算错误。单VM生产history投影复现动态string key与静态字段共存：对象读值正确，但to_json出现两个viewed_route_id，旧空值最后覆盖。history-facts-probe/history-sun2833i保存原失败证据；排除history/viewport/viewed_route_id三个覆盖键后history-bel4mira实测对象／编码均route_2_33、仅一个键、原历史facts不变、账本不变、实例已停。当前source d696d24a包含该修复，不使用强制全缓存刷新。
+
+原E2E owner继续同30完整snapshot／原AgentDSL／旧固定binary的有界恢复：先原Fill实际动态571分钟详情，再必要单Fit地图可见性对照，0M3／交通规划；每组结束停止，不改原稿或共享stage。当前主线仍需地图像素与同版本完整E2E，不能拼历史单项。RC6正式host迁移由runtime_update持有lock／patch／wrapper，旧源码已备份；尚待main定位接口迁移和freeze后正式build。calendar／Notes adapter、通用Material原语由稳定独立owners先验证临时片段，再一次内联main，不增加include框架、背景文件或固定规划workflow。个人权限待真实用户明确操作，不阻塞显式广州→T3用例。
+
+原Fill d696实际动态详情恢复，571分钟／09:11正确，但持久化facts.routes.map_paths仍nil，子块未发map事件；新wrapper第39–40行位于Agent公交文字拼接，预算诊断不能仅此推断完整facts解析根因。4条空bullet来自原snapshot空description与原稿只判nil，非字段缺失证明。history branch仅复制旧route facts，恢复route_data已算几何目录未合回，确定缺口已修：只合回新map_paths/map_metadata，排除同名动态键，不改历史业务时价/segments。history-facts-probe/history-nx7uj2th实际编码catalog非空/ready、原facts catalog仍nil/时长不变/viewed唯一正确、native无错/全部停止/账本不变；本组仅完整真实facts+选中身份与明确缓存夹具，不替代完整geometry验证。当前main b0fd4837e83164dabf309b0fa225750f6bb8be2e208e1cec02b547af6b00ef1e冻结给原owner原Fill实际地图验证，仍不做Fit或新M3。
+
+原Fill b0fd控制已取得完整动态详情／13条map_paths／真实HTTP20026142B与accepted，但scroll/drag后地图仍零矩形；唯一同snapshot/原DSL/520视口的bodyFill→Fit控制实际显示街道与绿色接驳折线，map rect[8,453,396,262]。history-map-replay-round30与history-map-fit-round30原件分别保存，全部实例停止、490账本未变、零M3／交通规划。由此确认wrapper内容extent布局原因，而不是拿此前占位稿推断。新render默认content_sizing:natural并显式保存metadata，viewport为Fill内容opt-in，旧记录缺字段仍保持原height规则；生产八项见content-sizing-probe/sizing-l7bl4xz0，不含地图像素重复检查。
+
+当前main短冻结5e61ab4f3291ad656700c51ea394c5fdc160d673d130f02b8fbd0ebca61d4f49、manifesta273cb2b；已一次inline通过的真实Calendar／Notes adapter与通用Material原语。read_calendar窗口／1..200 limit由Agent选择，默认本次接收至期限与200；read_notes关键词摘要、read_note实际id原文，来源独立，不强制两个证据。权限与日历选择只由前台用户按钮发起，read工具不自动授权。定位改官方location.sample/cancel和platform/fresh字段，保WGS84→GCJ02；manifest requires host-api-v1、agent.tools两Notes声明，不启动宿主Agent。runtime_update唯一持有RC6正式stage/build，原owner后续E2E仍待root授权；Material与必要组合原生接口检查使用离线隔离slot，不新增paid或交通矩阵。
+
+RC6组合收束：main5e61ab4f下location-sample-probe/location-d9qob0qn六项官方消费形状／转换／错误陈旧／取消迟到PASS，仅合成fix与本地截获，不宣称真实OS定位获权。Material原生七项见build/smoke/navigation-harness-tzw7zru2/report.json，长文换行、按钮尺寸／disabled与实际整卡标题／内部留白on_item_tap均通过，源码七原语不需修改。Overlay自然Fit父＋Fill按钮实测零高，不采用；native-ui改为已验证的可选NavCard单content View/on_item_tap组合，不预制业务卡。全部实例停止、490账本不变／零模型与交通规划。
+
+最终main冻结168396e0e1c7d1599fc3e9dedb35b246624e03af0c34f82f9f825ab7e57ec8d7；相比5e61仅修正natural/viewport错误提示文字，不改变逻辑。技能／reference旧height说明已收束；manifest已按实际RC6官方check加必填agent.profile:read-only，不加instructions/background、不启动原生Agent。runtime_update持有最终项目匹配offer的官方包门、stamp、短build/doctor（stock gate拒notes.search原事实保留）；完成后root授权唯一同版本真实E2E，仍未将离线分项拼为完整用户闭环。
+
+## 正式31终态与下一恢复点
+
+正式31使用冻结main168396e0、source3a7f2778及RC6 binarya2a1d4e2，独立state-round31只继承state-round30的真实490calls／24547438tokens／SHAa094c993账本，业务为空；仅模拟新鲜广州GCJ02位置。原14小时专项输入只提交一次。实际接收为北京时间2026-10-12 01:07:03.562，期限为同日15:07:03.562；没有改时钟、预注入站或班次。
+
+该轮自然终态seq232，13次M3响应，最终245events连续无缺，完整保存2107678B业务快照。但没有任何extend_route_with_rail调用，未取得具体班次的完整Route，因此专项E2E失败。四组search_rail_services调用seq56／58／60／62查询广州南IZQ、广州东GGQ到深圳机场SCA／深圳北IOQ，回执57／59／61／63均为空；后续未继续查其它实际站对或组合具体班次。模型最终只有高德公交化城际与机场巴士方案，不能将其当作具体12306班次覆盖。技能、空查询及后续全部模型决策原件在build/research/rail-integration/e2e/round31/trace-private.jsonl和vm-trace-private。
+
+最终摘要／卡片硬编码“期限≤23:07”“方案A11:58到达／171分钟”，与真实01:07起算、15:07期限不一致。终态原文见seq231／232；原render_ui稿、query-started-facts、各模型响应及保存快照均独立留存。候选A／B／D可实际滚动发现。早先“卡无响应”的口述已更正：卡标题点击延迟产生seq238 view_route及239 show_block；不能按较早截图推断没有回调。地图随后seq242调用net.http_request GET https://restapi.amap.com/v3/staticmap，params达306464B、12条折线、352×240、zoom7，seq245进入on_error通用错误；无HTTP响应、原err正文或可见地图像素。现有native日志不足以区分网络、请求长度或宿主原因，不重发请求猜因。map-error-safe.json记录小摘要，map-request-242-private.json保全部请求参数。
+
+原实例41848已停止并ps确认。未执行冷恢复或新增付费重试，也不拼30的离线地图结果。最新真实账本为503calls／25263838tokens，较490增加13calls／716400tokens，SHA70ea131e77fd43434f994d24766fa51f005e177ba605630513c7813e13531b39；恢复HOME为build/research/rail-integration/e2e/private-state-round31/home，账本位于apps/.host/model/ledger.json。round31保完整保存index／manifest／分片／snapshot、原DSL、native、截图和trace。rail_model继续三项实际缺口的只读定位，后续正式在线轮仅在root冻结构建并单次明确授权后启动。
+
+
+### 正式32当前恢复点
+
+第32轮已获单次真实在线授权并启动。冻结 main `f0bc2252`、source `689072f1`、RC6 binary `0b0de70a`；采用 Android 桌面宿主模式 412×892。明确从第31轮隔离 HOME 继承真实503次调用、25263838 tokens账本（SHA `70ea131e`），新业务仅使用新鲜广州 GCJ-02 模拟位置。14小时、200元、具体铁路或城际班次加前后接驳到宝安T3的专项原文已断言并仅提交一次；已有首条真实模型响应及工具回执，仍在自主规划。当前尚未取得具体班次完整路线、终态UI或冷恢复验收，不能判通过。原件与实例恢复入口在忽略的 `build/research/rail-integration/e2e/private-state-round32/`；唯一验收owner继续低频固定session保存完整消息、分片与实际截图，阻断则导出停止，不自动付费重试。
+
+
+### 第32轮终态与恢复验收
+
+第32轮同版本真实在线自主取得 S4835（琶洲12:27→深圳机场13:28，无座54元）及 S4831 的前后接驳条件完整路线。S4835 对应 `route_2_6`：前程地铁已查3元，末段步行171秒到高德T3官方入口，预计13:30、门到门约712分钟；进站37.8米关联、登乘、购票和航站楼内部/安检仍未知。自然终态后实际点击该卡，详情时间与原Route一致；手机地图真实像素及接驳折线可见，返回与重开正常。338310字节、2片完整业务快照已保存；同版本冷副本恢复原卡、详情、地图和返回重开成功，无新模型调用且账本哈希未变。正式原件421连续事件、27模型响应、47工具调用均有47结果；冷恢复39连续事件，两个自有实例均已停止。
+
+这一轮证明具体班次完整条件路线、实际地图、完整保存及冷恢复链，尚不能称费用和所有候选措辞通过：模型原卡将已查段57元写成“总价”；另高德候选 `route_2_8` 的真实末段未核实，但卡写14:57到T3。原稿与完整cost/assessment已保留，不能靠详情正确掩盖卡片误述。最新真实账本530次调用、27314435 tokens，SHA `377706aa2a4ca4ec7849ccf23422b9bf69134cce22fceeb0842405c69fa45282`；恢复 HOME 为忽略的 `build/research/rail-integration/e2e/private-state-round32/home`，完整原件见 `round32/`、冷恢复见 `cold-restore-round32/`。下一步由稳定源码owner据原模型上下文判别费用/未完成候选呈现，未授权新付费轮。
+
+
+### 第33轮实际阻断与恢复点
+
+第33轮采用冻结 main `48aacf1a`、source `5d8f78ca`、binary `b1a8b88e`，从第32轮530次真实账本继承并只提交一次相同14小时专项原文。模型自主形成 S4831/S4835 加前后接驳到T3入口的完整条件路线，新公开费用均明确已知小计与全程未知；随后界面初稿收到真实反馈并自主修正。第315事件为 `render_suggestions` 的语法失败回执，下一第20次模型准备持续pending、request_id为空，原生发生JSON序列化堆分配错误。runtime2450映射主源码2446的trace envelope构造，不能仅凭行号认定最终根因。完整315连续事件、19模型响应、54调用与54回执、原稿和运行日志已保存；自有71056实例已停止，无手动重试。
+
+没有自然终态或完整业务提交，已提交的697字节仅为原输入记录，因此不运行冷恢复、不把第32轮成功拼入第33轮。实际阶段截图仍有“机场楼内”“无需再换乘”的误述，作为原稿证据保留。原件入口为忽略的 `build/research/rail-integration/e2e/round33/`；最新恢复HOME为 `private-state-round33/home`，549次调用、29475759 tokens，账本SHA `3c7284a1dfbe38e8c2649a2c0859c99445a53d74537e58381c3cfb9cdfb6bd5c`。稳定源码owner接续精确模型派发/trace边界调查，未授权自动新付费轮。
+
+
+### 第34轮终态协议失败
+
+第34轮采用冻结 main `2c01a96d`、source `7ac615f4`、binary `df198f90`，新业务继承549次账本并只提交一次同14小时专项输入。新副本移除已归档旧trace约20.4MB，原HOME及第33轮证据不删除，账本哈希保持不变。模型自主形成 S4831 前后接驳到T3官方入口的完整条件路线；实际公开结果明确小计57元、全程金额及站内未知。
+
+第13次真实模型响应以 `finish_reason=stop` 返回，消息没有结构化 `tool_calls`，却在普通content中写入Minimax工具标记和界面源码。宿主按普通正文结束，自然终态显示源码文本，`generated=false/rendered=false`，没有实际候选卡/详情/地图，不能验收UI，也不运行冷恢复假冒成功。原正文和完整请求工具schema/选择参数已交稳定源码及runtime owner；测试人员未解析正文代调用或重试。
+
+保存1864994字节、8片完整业务快照包含这一失败正文，不代表可用界面。212个可用事件连续、13模型响应、39调用均有回执；日志status仍明确incomplete，原生日志存在trace_status写入预算警告，因此不称全部日志完整。唯一84022实例已停止。原件入口为忽略的 `build/research/rail-integration/e2e/round34/`；恢复HOME为 `private-state-round34/home`，562次调用、30398837 tokens，SHA `a3a67646349e1d3d5a696373315d534b614180c178aba39b21cc4c8f22dc8547`。下一步仅按真实provider协议材料处理，未授权自动新付费轮。
+
+
+## 第31–34轮任务包历史合回
+
+以下为恢复点清理时保留的历史调查与版本事实，不是当前运行状态。
+
+铁路和城际班次已通过12306匿名网页实际查询并接入统一Route；固定发到时刻、席别价格、前后接驳、等待及未知连接由代码计算并保留来源。正式30轮真实M3已取得S4903番禺→深圳机场，完整route_2_33抵达T3入口，已查小计64元、门到门571分钟含候车、09:11到达；站内、检票等仍未知。该轮摘要手抄班次错误、地图不可见，因此未通过完整E2E。原件、失败日志和2230392B九分片保存记录保留在build/research/rail-integration/e2e/round30。
+
+接续诊断已分别关闭三个缺口：历史事实动态键与静态键共存生成重复JSON字段，旧空选择覆盖新选择；恢复时重建的map catalog未进入历史界面事实；自然内容的body Fill使外层滚动看不到地图。历史投影仅更新选择和地图目录，历史时价与原稿不改。原Fill/Fit单变量对照已实际看到高德图与真实接驳折线，root查看截图；不是新在线E2E通过。新稿content_sizing默认natural并显式保存，viewport显式选择有限内容；旧保存记录缺字段保持legacy规则。
+
+大trace完整UTF8分片、铁路固定区间与门到门独立labels、公开graph轻量完整身份索引、checked异步入口与模型首配置读取等修复均有原生证据。原30缺失的旧trace仍明确不完整，不以重建数据冒称原件。必要验收入口与旧失败夹具细节见iterations.md。
+
+31轮基线main为168396e0e1c7d1599fc3e9dedb35b246624e03af0c34f82f9f825ab7e57ec8d7；该轮已停并解除应用源码冻结，正式RC6发行f9f6已迁移。Calendar/Notes读取、官方location.sample及前台许可入口、七种通用视觉样式已整合；实际个人授权和数据读取未通过，独立状态见各任务。组合离线检查：content_sizing生产保存恢复8项、RC6定位消费6项、Material手机触控7项均通过，全实例已停。样式不模板化路线，Agent仍自主选择工具与DSL。
+
+runtime_update持有RC6 lock/patch/wrapper及Navigation配套host的薄预检入口；仅复用官方gate和该应用真实offered Notes工具，不放宽全局或冒称stock gate通过。最终项目check→盖摘要→短build→doctor均已通过；root采纳formal-adoption回执，main168396/source3a7f2778/hosttree51089110/binarya2a1d4e2，bundle保持冻结。rail_model的源码/技能必要修复已交回；material/context各自原生契约已交回，剩余临时片段清理不改变源码真相。
+
+root已明确授权rail_e2e唯一新在线31轮：完整相同14小时用例、真实M3/12306/高德/滴滴、模拟新鲜广州位置；自然终态→同Route真实候选卡与分段/地图→完整保存→同版本冷启动恢复与点击返回。未过时导出并停止，按具体原因修复，不自动重复付费刷结果。root查看实际成功截图并核对工具/Route/时价/地图/存储/完整trace证据后才称E2E完成。
+
+必须从state-round30的实验HOME克隆继承490calls/24547438tokens、SHAa094c99331d276f0fac44abcc1f1dc8d1ca188c3b4b09db10460eb391e86ac38，不清零、没有M3开发调用上限。默认.local-state HOME的旧19calls/61208tokens、SHA6682e8并非该实验账本，不能混称或擅自合并。升级确认正式fs jail/ledger目录未变，没有复制迁移用户业务数据。
+
+个人日历许可/选择和Notes共享同意须用户醒后实际操作；这只限制真实个人背景验收，不阻塞明确目的地的铁路闭环。本次不推送、发布、购票或冒称Android真机。
+
+31唯一实例已启动41848/62872/session35d43a3c27bc49f88de7535c130a54a1；preflight明确继承490calls/24547438tokens/a094原账本。Android模式与原文输入正在核验，尚未取得新结果；其它owner无native、全源/lock/stage冻结。
+
+上文31启动状态已结束：冻结main168396e0／source3a7f2778／RC6 binarya2a1d4e2下，原14小时用例实际北京时间2026-10-12 01:07:03.562提交一次，期限15:07:03.562。13次真实M3后自然终态，245events连续、2107678B快照完整保存，但无具体班次railjoin，仅高德公交化城际；最终卡片／总结又误述23:07期限和11:58到达。因此尚未通过E2E。卡标题点击实际延迟产生view_route／show_block，已更正先前无响应口述；静态地图请求参数306464B后仅取得on_error通用失败，无HTTP响应或可见像素，不能据此断言供应商原因。
+
+原件入口为build/research/rail-integration/e2e/round31，详细事实与恢复索引见iterations.md末节。41848已停止、无活动正式实例，未冷恢复或付费重试。下一轮须继承private-state-round31/home的真实503calls／25263838tokens、SHA70ea131e77fd43434f994d24766fa51f005e177ba605630513c7813e13531b39（本轮增加13calls／716400tokens），不使用默认HOME旧账本。rail_model负责具体班次探索、时刻语义与实际地图错误边界的定位；等待root最终冻结身份与单次启动授权，生产源码未由E2E owner改动。
+
+RC6的std.local_time已叠加设备时区，应用原先再次加28800，导致01:07/15:07显示为09:07/23:07、高德查询钟面同样错八小时；12306到达时分校验也错八小时，将553条全部拒掉并错误表现为空。模型实际已读取铁路、navigation-data、native-ui与host-interface资料；response72将空解释为测试限制后转高德线路级方案，不是技能读取失败。新china_time独立按固定UTC+8分解，同一helper覆盖日期、供应商时刻校验和标签；不改历史Unix事实。china-time-probe/time-pnh37fr8/report-safe.json五项原生通过，原case27真实553全部解析、IZQ→IOQ窗口89班及18其它站对，零模型/供应商请求，实例停。
+
+地图同参复核HTTP414，原31有12paths/12240点/306464B参数且中心超过六位精度。共享地图显示边界按相机约1px误差分批派生，原几何、目录与存储不变；每幅至多四独立路径，超出明确失败及完整索引，不自动截取或补线。zoom重新派生，六位坐标和安全网络错误诊断已接。map-render-probe/map-dyyoznf3/report.json七项原生合同通过：四路径87显示点/2437B、一条真实HTTP200，省略点最大误差0.99888673px；首fixture截图未落到图片区域，尚不算像素通过。首组下载字节未保存；root据此明确授权唯一额外静态图请求。map-visible-probe/visible-fdfv9joo/report-safe.json四项通过，正常安装具名Image后Phone412×892实际像素可见，Image352×240，PNG34207B持久化并查看；所有实例停止，零模型/交通规划。辅助简化夹具缺segments的后台错误原log保留，不改生产或重跑。
+
+实际费用不按城际名称猜测：原工具已返回queried_legs_only及门到门金额未知；技能补充不能称已确认全价，并建议长中文到达/期限正文Fill/Fit换行。无固定站对、预定班次或强制workflow。最终main冻结f0bc225208a6683ecf40efd74d6e827ae4f4bbcf31affc25deb13286c743687c及停机回执已直接交runtime_update，按现有check/stamp/build/doctor收束；root已查看地图截图并采纳。由root单次授权32，必须继承31真实503账本；现在没有付费E2E实例，不再离线扩测。
+
+32所有正式及冷恢复实例已停止。源码owner依据真实公开回执修复同类范围歧义：公开cost.amount_cents／full_journey_amount_cents／complete及Route.price_cents只表示请求全程；queried_legs_amount_cents／queried_legs_complete保留内部已查组合报价，known_subtotal_cents保持原金额，小计标签同时说明全程未知。端点未核实的estimated_arrival_ts／label保持nil，queried_endpoint_arrival_ts／label保留原估计；arrival_scope与arrival_label明确中间终点、请求路由点或官方入口及内部未知。真实C／D的旧估计不能再由无范围到达别名称到T3。
+
+历史只重投影上述费用／到达范围与按selected_legs恢复的kind_label，原金额、Unix时刻、assessment及生成源码保持不变；旧键排除后唯一赋值。历史get_route读取保存的公开事实，不以当前时刻重算旧行程。内部候选、逐腿报价、组合计算和预算判定不改。冷类型错为打车＋公共交通的原因是历史仅保存selected_legs而旧kind_label只读legs，现沿真实模式修正。main冻结48aacf1a0f262d38d8720b45be31926d9852eae6f7e7583818df2d2d24dbcb78。route-public-probe/public-sczbo7ay/report.json原生10项通过：实际32四条公开事实及原保存route_data、partial57／known whole控制／历史／guardian／到达范围／冷类别／JSON覆写单键；raw金额时刻未变，native_errors为空，全部实例停止，零模型或供应商请求、无共享stage构建。首两组动态键clone前置失败原件保留，最后组history／cost／arrival直接使用真实JSON读取的raw；只有summary补可选字段及known whole控制克隆经过JSON读取同型转换。已交runtime盖摘要构建，再由root单次授权33；32旧稿未被自动修改，尚不能宣称新在线措辞已通过。
+
+
+第33轮精确负载已核：由第19次实际请求、其响应和最后工具回执重建的第20次body为910273字节（不是缺失原请求）；旧trace先构造1074858字节内层与1404094字节外层，超过日志所示600716字节堆余量。宿主usizeMAX是bounded JSON失败统一标记，不是实际分配量，也不能单独证明循环引用；此类heap cap失败会使同堆后续分配失效。修复仅将已序列化的大body/source脱敏后直写私有原字段，小JSONL引用在写成功后提交；旧日志仍可读，未知超1MiB字段明确incomplete，不裁业务或自动重试。
+
+实际负载组 `build/research/rail-integration/trace-payload-probe/payload-vtcfm7hv/report.json` 七项通过，reader新旧十八项通过；910273字节body与真实第300事件444087字节source完整往返，JSONL总2019字节，生产minimax_request派发截获一次、零网络、账本不变、所有实例停止。没有重建原liveheap或证明通用heap错误恢复。此前两次失败保留：第一次复制的旧dev-trace约20.4MB使隔离jail超过默认16MiB；第二次对象迭代ScriptId与字符串比较未命中rawfield分支，已以字符串规范化修复。正式第34轮应只清新clone的旧dev-trace，原第33HOME及各轮归档不删，不提升配额。当前main `2c01a96d5043938ea4efe4430fabc7a7c66613994f9c73350e60207467e51693`；写入合同已核：fs.write直接按原UTF8字节写文件，成功返回nil、失败抛IO错误，不返回false；现try成功后才发布引用符合合同。单文件1MiB、整个jail默认16MiB保持。源码与受影响资料已冻结，交runtime封包；下一付费轮仅由root另行授权。
+
+
+### 第34轮工具协议原件判别
+
+第34轮以 main `2c01a96d`、source `7ac615f4`、binary `df198f90`运行，旧trace堆峰值问题未复发；实际S4831前后接驳route_2_10到T3入口已组成。第13次MiniMax-M3响应finish_reason为stop，message没有tool_calls键，正文3088字符含特殊MiniMax控制token及invoke render_ui稿；因此应用没有执行渲染，query_ended如实generated=false/rendered=false，没有可用卡片地图。212个可用事件连续、39调用均有回执，但status为incomplete并有trace状态写预算警告，不能称完整诊断成功。完整业务保存1864994字节八片含原伪稿；实例84022已停，不冷恢复失败作品，不自动新付费调用。
+
+原件在 `build/research/rail-integration/e2e/round34/`，第13原请求204与原响应209均保留；`protocol-contract-evidence-safe.json`核对13请求同26工具/schema、tool_choice=auto、reasoning_split=true，前12完整assistant对象与第13history对应对象结构一致。官方M3 OpenAI协议规定structured tool_calls及完整reasoning_details续传；自部署M2.5原XML指南不等于M3托管API的正文执行契约，当前伪稿也缺parameter标签。宿主provider源码已核：chat.rs仅复制原请求并加入model/stream=false，完整返回供应商响应，无tool_calls过滤。当前证据指向供应商OpenAI响应控制token泄露，不执行任意content或强制渲染workflow；普通stop文本仍是合法输出。待advisor界定精确marker错误边界。当前源码未改。最新恢复HOME为private-state-round34/home，562次调用30398837tokens，账本SHA `a3a67646349e1d3d5a696373315d534b614180c178aba39b21cc4c8f22dc8547`。
+
+
+第34轮窄修已冻结：main `5b25619ed45bba19f1e1130f4f904add0f75f036ec6ba5b37e7ae0009cfc19a1`。Navigation只对MiniMax-M3的stop/no structuredcalls＋确切tool_call控制序列＋已注册invoke控制序列判invalid_tool_protocol，经原request_failed保留成果，正文不执行、不保存为完成答案、不自动重试。普通stop文本和think字段、真实structuredcalls不变。trace状态提交独立checked入口，失败保留固定failure_phase/kind，状态写自身硬错误不递归写另一事件，也不归业务错误；没有声称同步写风险完全消除。
+
+实际单VM报告 `build/research/rail-integration/protocol-probe/protocol-zniv7y6m/report.json` 四项通过：原209泄漏回执一次失败/零工具，普通think文本完成，原108结构化工具一次派发，注入status硬退出只记录status_commit/execution_limit、不误停业务/不递归。该组空trip保存caller为本地no-op，不重放旧路线图；不是正式E2E或业务持久化回归。唯一原生instruction-limit日志是明确注入；仅夹具期望从instruction_limit校正为宿主实际execution_limit，原报告保留，未重跑。所有实例停止、原/隔离账本SHA不变、零模型与供应商调用。root采纳后交runtime封包第35轮，付费轮由root另授。
+
+
+
+## 正式35：具体条件路线已成，实际详情失败
+
+冻结main5b25619e/source8e392ea9/binary97317a07，继承562次账本，同14小时原文仅一次提交。M3自主形成S4903番禺07:50→深圳机场09:09，加地铁与末程171秒步行到T3官方入口，route_2_15预计09:11、约380分钟、已知小计64元，全程与站内仍未知。自然终态后可见卡点击实际产生view_route/show；生成详情调用不存在的number.tostr，留占位且无地图。未代确认目标、不cold恢复失败界面、不自动付费重试。另一D7577原实际深圳站被模型说成深圳北，原文与来源留存。
+
+238连续事件、15responses、36tools全有回执，新reader重组30body与5source，逐字段大小/hash及全部私有原件保留在round35；663827B三片业务保存不等于UI通过。91916已停止。恢复HOME为private-state-round35/home，577calls31767377tokens、SHAa69630fed4f72596c602afe0b3dac232ce4ade3821fa3b974be5a4b05a379d6e。实际已查看截图round35-terminal-scroll.png与round35-detail-actualclick.png；稳定源码owner接续原稿/迟到diagnostic入口调查。
+
+
+## 正式36：完整具体路线已成，模型派发明确拒绝
+
+冻结mainb868a635/source86414b16/binary187c960f，继承577次账本，同14小时原文一次提交。真实G3017/C7001及S4903已接统一Route并自主末程到T3入口；S4903 route_2_24预计09:11、约360分钟、小计64全程未知。第12次模型派发request_rejected，实际UI明确中断，native runtime1065 instructionlimit，具体因果交稳定owner。max203/202可用seq缺199原请求，trace failure_phase=field_size/failure_kind=file_limit。11responses41calls全有结果，但仅输入698B保存，无UI/cold、不重试。4286已停止。恢复HOMEprivate-state-round36/home，588calls32905601tokens、SHA39d9da3f07e07c6fdb9fc69baf163feb52dfc22a26564b888b7e5bde974d944d。原件round36，最后真实第11请求186及物理VM文件保留，不能冒充第12原请求。
+
+
+## 正式37：候选源码反复语法反馈，继而宿主provider错误
+
+冻结main2d25c613/source1e60be2e/binary1209c9f1，588账本继承且原文一次submit。S4831/S4903/D7577自主成Route并前后到T3入口，最便宜S4831 route_2_33小计57未知、08:20/约286分钟。4次render_routes收unterminated string反馈，第20请求host_error，response306仅通用provider文字，不猜cause。307连续、20responses含1error、47tools回执齐、完整rawbody/source重组，最后request301为964038B。只有说明无卡/地图，输入698B保存，no cold/retry；24560已停。最新HOMEprivate-state-round37/home，608calls35583597tokens SHAcdcb172c95bd763c1c891423c595cc727e7485230c8fffb86b95928ae3dde779。源码owner读四稿/反馈，runtimeowner读原hosterror，不启动provider。摘要总价措辞与说明“小计/额外接驳未知”全文保留，按语义而非词判断。
+
+
+## 第38轮：线上闭环通过，冷恢复正文缺失
+
+main05130a81/source6a182be5/binary18c46f84，继承608账本，单次原14小时输入。M3自主S4831琶洲07:15→深圳机场08:18（无座54元）＋前段地铁3元＋末步行171秒，route_2_7到T3官方入口08:20，约258分钟，已知小计57元且全程未知。自然query_ended366，最终386事件连续、25响应、49工具均有回执；原body/source重组与sha完整。实际卡→详情→地图像素→返回重开均已查看，完整保存1230275B/5片。live39100已停。
+
+同版本完整业务副本冷恢复47011，历史标题恢复，正文为空；trace4连续，__document渲染成功无诊断，其组织原稿仅空View，live动态blocks未出现在历史界面。未改原稿，不将此现象先验归于地图或数据丢失；供源码owner判断restore合同。冷账本SHA完全不变，0新M3，实例停止。整体尚未通过冷恢复标准。原件round38/与cold-restore-round38/，截图cards-loaded.png，ledger633calls37544171tokens SHA365ecc5ded559937c62da23d3343f92bd8ee2be4f0bf0bc086c73f34585ca237。
+
+
+## 第39轮：仅冷UI，卡恢复但详情控件失效
+
+main68bfac72/source5a81779d/binary24a5d390，仅原38完整HOME副本，633账本SHA不变，无M3/交通规划。原保存1230275B/5片及6块source逐字不变；S4831推荐卡实际恢复，click进入view_route且父viewed_route_id=route_2_7。trace16 route_detail rendered=false，detail_text not found in tree；随后show_block/set_visible及diagnostics出现旧WidgetUID不在当前树，详情仍列表，地图只loading未见像素，不能通过。27seq连续、0toolcalls/results、0modelrequests，唯一52230已停。原件cold-restore-round39，cards.png/detail-after.png已实际查看；live原38仍独立05130a81，本轮restore-only68bf不是新在线或同原版本整体通过。
+
+
+## 第40轮：仅恢复修复，原38业务冷UI通过
+
+main460d58d1/source634d0b7c/binaryce1710d8，克隆actual38 HOME，原1230275B/5parts/六块source及业务facts逐字未变。Android412×892历史S4831卡→动态详情（07:15→08:18，约258分钟，小计57/全程未知）→真实高德接驳地图像素→返回→再次打开实际完成，截图均已查看。43事件连续、0模型请求、0路线/询价工具，633calls37544171tokens ledger SHA365ecc5ded559937c62da23d3343f92bd8ee2be4f0bf0bc086c73f34585ca237完全不变。唯一56382停止/ps空。保留trace16首次detail_text不在树中诊断，不影响后续实际详情与地图，但不冒称零警告。完整报告与原件cold-restore-round40/result-safe.json、original-blocks-safe.json、trace-private.jsonl、native.log及cards/detail/map/return-confirmed/reopen-confirmed.png。接受scope明确为38真实在线＋40仅恢复修复；不称40新在线规划或同原38版本全面通过，不为此再付费规划。

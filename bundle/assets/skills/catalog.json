@@ -55,6 +55,16 @@
     ]
   },
   {
+    "name": "material-ui",
+    "description": "用真实原生控件呈现应用提供的数据，检查动态事实、可见性、交互和失败反馈；适用于Material启发的Splash样式与Agent自由布局。",
+    "files": [
+      "SKILL.md",
+      "manifest.json",
+      "references/primitives.splash",
+      "references/splash-entry.md"
+    ]
+  },
+  {
     "name": "mixed-routing",
     "description": "规划或改进出行时，主动识别公交/步行/打车瓶颈，形成可验证的首段、末段和中段接驳假设；用于决定值得查询的替代，而非只比较整程导航方案。",
     "files": [
@@ -64,7 +74,7 @@
   },
   {
     "name": "native-ui",
-    "description": "Navigation的render_ui嵌入环境、共享事实、区块交互、字体和地图接口，用于将Makepad/Splash源码交给当前宿主执行。",
+    "description": "Navigation的render_ui嵌入环境、手机候选比较、共享事实、当前facts绑定、区块尺寸、滚动、交互、字体和地图接口，用于将Makepad/Splash源码交给当前宿主执行。",
     "files": [
       "SKILL.md",
       "references/host-interface.md"
@@ -73,6 +83,13 @@
   {
     "name": "navigation-data",
     "description": "Navigation工具事实契约：真实地点与Route身份、分段站点关系、完整供应商计价、时效和独立约束判断；用于理解工具结果。",
+    "files": [
+      "SKILL.md"
+    ]
+  },
+  {
+    "name": "rail-routing",
+    "description": "铁路与城际接驳探索：12306真实站身份、固定班次与逐席别价格/余票，以及铁路前后接驳和地图入口未知项。",
     "files": [
       "SKILL.md"
     ]

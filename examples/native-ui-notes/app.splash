@@ -1,0 +1,48 @@
+// Public synthetic records: this app never connects to a Notes service.
+if mod["notes_review"] == nil {
+    mod.notes_review = {selected:nil revision:1 updated:false records:[
+        {id:"fixture-a" title:"公开合成笔记：一段很长的中文标题用于确认窄屏卡片自然换行而不裁掉尾部内容" body:"这是公开合成正文，不来自个人Notes。长中文应随卡片自然增长，用户可以滚动阅读完整内容。界面里的更新时间和来源来自这一份明确fixture，而不是模型推断。" updated_at:"合成时间 2026-10-12 09:00"}
+        {id:"fixture-b" title:"第二条合成笔记" body:"这是另一个独立记录。详情与列表必须保持同一记录身份，返回不应丢失当前事实版本。" updated_at:"合成时间 2026-10-12 09:05"}
+    ]}
+}
+fn review_open(record){mod.notes_review.selected=record ui.review_screen.render()}
+fn review_back(){mod.notes_review.selected=nil ui.review_screen.render()}
+fn review_update(){
+    let state=mod.notes_review state.revision+=1 state.updated=true
+    state.records[0].body="合成事实已更新，版本"+state.revision+"。列表与详情读取当前同一份记录，没有个人数据或外部调用。"
+    state.records[0].updated_at="合成时间 2026-10-12 09:10（更新fixture）"
+    ui.review_screen.render()
+}
+fn review_content(){
+    let state=mod.notes_review
+    let note=if state.selected==nil {state.records[0]} else {state.selected}
+    View{width:Fill height:Fit flow:Down spacing:12
+        View{width:Fill height:Fit flow:Down spacing:12 visible:state.selected==nil
+            MaterialMeta{text:"合成结果"+state.records.len()+"条 · 事实版本"+state.revision}
+            for record in state.records {
+                MaterialCard{
+                    MaterialTitle{text:record.title}
+                    MaterialMeta{text:record.updated_at}
+                    MaterialBody{text:record.body}
+                    MaterialAction{text:"查看详情" on_click:||review_open(record)}
+                }
+            }
+        }
+        MaterialSurface{visible:state.selected!=nil
+            review_back_button := MaterialSecondaryAction{text:"返回合成结果" on_click:||review_back()}
+            review_detail_title := MaterialTitle{text:note.title}
+            review_detail_meta := MaterialMeta{text:note.updated_at+" · 事实版本"+state.revision}
+            review_detail_body := MaterialBody{text:note.body}
+        }
+    }
+}
+MaterialSurface{width:Fill height:Fill flow:Down padding:16 spacing:12
+    draw_bg +:{color:mod.theme.color_bg_app border_radius:0}
+    MaterialTitle{text:"Notes审阅（公开合成）"}
+    MaterialMeta{text:"不连接个人Notes；只读展示 · 可注入合成事实更新"}
+    review_update_button := MaterialSecondaryAction{text:"注入合成事实更新" on_click:||review_update()}
+    review_screen := ScrollYView{width:Fill height:Fill flow:Down spacing:12
+        review_content()
+        on_render:||review_content()
+    }
+}

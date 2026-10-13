@@ -1,0 +1,1265 @@
+diff --git a/platform/script/src/string.rs b/platform/script/src/string.rs
+index f3368e0d..951cae66 100644
+--- a/platform/script/src/string.rs
++++ b/platform/script/src/string.rs
+@@ -217,6 +217,58 @@ pub fn add_type_methods(native: &mut ScriptNative, heap: &mut ScriptHeap) {
+             },
+         );
+ 
++        // Copy only the requested piece so timer-based writers need not retain an array of all chunks.
++        native.add_type_method(
++            heap, ScriptValueType::REDUX_STRING, id!(utf8_chunk),
++            script_args_def!(offset = NIL, max_bytes = NIL),
++            |vm, args| {
++                let sself = script_value!(vm, args.self);
++                let offset = script_value!(vm, args.offset).as_number().and_then(|v| {
++                    (v.is_finite() && v >= 0.0 && v.fract() == 0.0 && v < usize::MAX as f64).then_some(v as usize)
++                });
++                let size = script_value!(vm, args.max_bytes).as_number().and_then(utf8_chunk_size);
++                let (Some(offset), Some(size)) = (offset, size) else {
++                    return script_err_invalid_args!(vm.trap(), "utf8_chunk needs an integer byte offset >= 0 and max_bytes >= 4");
++                };
++                let result = vm.bx.heap.string_mut_self_with(sself, |heap, text| {
++                    if offset > text.len() || !text.is_char_boundary(offset) { return None; }
++                    let end = utf8_chunk_end(text, offset, size);
++                    Some(heap.new_string_from_str(&text[offset..end]))
++                });
++                if let Some(Some(piece)) = result { return piece; }
++                script_err_invalid_args!(vm.trap(), "utf8_chunk offset must be a UTF8 boundary within the string")
++            },
++        );
++
++        // Storage callers can split UTF-8 without per-character script calls or byte truncation.
++        native.add_type_method(
++            heap,
++            ScriptValueType::REDUX_STRING,
++            id!(utf8_chunks),
++            script_args_def!(max_bytes = NIL),
++            |vm, args| {
++                let sself = script_value!(vm, args.self);
++                let size = script_value!(vm, args.max_bytes).as_number().and_then(utf8_chunk_size);
++                let Some(size) = size else {
++                    return script_err_invalid_args!(vm.trap(), "max_bytes must be a finite integer >= 4 within the native size range");
++                };
++                if let Some(array) = vm.bx.heap.string_mut_self_with(sself, |heap, text| {
++                    let array = heap.new_array();
++                    let mut start = 0;
++                    while start < text.len() && !heap.allocation_exceeded() {
++                        let end = utf8_chunk_end(text, start, size);
++                        let value = heap.new_string_from_str(&text[start..end]);
++                        heap.array_push_unchecked(array, value);
++                        start = end;
++                    }
++                    array
++                }) {
++                    return array.into();
++                }
++                script_err_unexpected!(vm.trap(), "utf8_chunks: self must be a string")
++            },
++        );
++
+         native.add_type_method(
+             heap,
+             ScriptValueType::REDUX_STRING,
+@@ -953,3 +1005,72 @@ fn expand_replacement(
+         }
+     }
+ }
++
++fn utf8_chunk_size(value: f64) -> Option<usize> {
++    if !value.is_finite() || value < 4.0 || value.fract() != 0.0 || value >= usize::MAX as f64 {
++        return None;
++    }
++    Some(value as usize)
++}
++
++fn utf8_chunk_end(text: &str, start: usize, size: usize) -> usize {
++    let mut end = start.saturating_add(size).min(text.len());
++    while !text.is_char_boundary(end) {
++        end -= 1;
++    }
++    end
++}
++
++#[cfg(test)]
++mod utf8_chunks_tests {
++    use super::*;
++
++    #[test]
++    fn utf8_chunk_copies_one_piece_and_checks_byte_offsets() {
++        let mut host = ScriptVmHost::new((), ());
++        let mut vm = ScriptVm {host: &mut host, bx: Box::new(ScriptVmBase::new())};
++        let text = "a😀中🙂b";
++        let input = vm.bx.heap.new_string_from_str(text);
++        vm.set_injected_global(id!(chunk_input), input);
++        let mut offset = 0;
++        let mut restored = String::new();
++        while offset < text.len() {
++            let value = vm.eval(ScriptMod {file:"utf8-piece.splash".into(), code:format!("chunk_input.utf8_chunk({offset}, 5)\n;"), ..Default::default()});
++            vm.bx.heap.string_with(value, |_, piece| { assert!(!piece.is_empty() && piece.len() <= 5); offset += piece.len(); restored.push_str(piece); }).unwrap();
++        }
++        assert_eq!(restored, text);
++        let value = vm.eval(ScriptMod {file:"utf8-end.splash".into(), code:format!("chunk_input.utf8_chunk({}, 4)\n;", text.len()), ..Default::default()});
++        assert_eq!(vm.bx.heap.string_with(value, |_, s| s.len()), Some(0));
++        for call in ["utf8_chunk(2, 4)", "utf8_chunk(99, 4)", "utf8_chunk(-1, 4)", "utf8_chunk(0.5, 4)", "utf8_chunk(0, 3)"] {
++            assert!(vm.eval(ScriptMod {file:"utf8-invalid.splash".into(), code:format!("chunk_input.{call}\n;"), ..Default::default()}).is_err());
++        }
++    }
++
++    #[test]
++    fn utf8_chunks_preserve_text_and_byte_limit() {
++        let mut host = ScriptVmHost::new((), ());
++        let mut vm = ScriptVm {host: &mut host, bx: Box::new(ScriptVmBase::new())};
++        for (text, size) in [("abcdefg", 4), ("中文测试", 4), ("a😀中🙂b", 5), ("", 4)] {
++            let input = vm.bx.heap.new_string_from_str(text);
++            vm.set_injected_global(id!(chunk_input), input);
++            vm.set_injected_global(id!(chunk_size), (size as f64).into());
++            let result = vm.eval(ScriptMod {file:"utf8-chunks.octoscript".into(), code:format!("chunk_input.utf8_chunks({size})\n;"), ..Default::default()});
++            let array = result.as_array().unwrap();
++            let mut restored = String::new();
++            for index in 0..vm.bx.heap.array_len(array) {
++                let value = vm.bx.heap.array_index_unchecked(array, index);
++                vm.bx.heap.string_with(value, |_, piece| {
++                    assert!(!piece.is_empty() && piece.len() <= size);
++                    restored.push_str(piece);
++                });
++            }
++            assert_eq!(restored, text);
++            if text.is_empty() {assert_eq!(vm.bx.heap.array_len(array), 0);}
++        }
++        for invalid in [0.0, -1.0, 3.0, 4.5, f64::NAN, f64::INFINITY, usize::MAX as f64] {
++            assert!(utf8_chunk_size(invalid).is_none());
++        }
++        vm.set_injected_global(id!(chunk_size), NIL);
++        assert!(vm.eval(ScriptMod {file:"invalid-chunks.octoscript".into(), code:"\"text\".utf8_chunks(chunk_size)\n;".into(), ..Default::default()}).is_err());
++    }
++}
+diff --git a/platform/script/src/tokenizer.rs b/platform/script/src/tokenizer.rs
+index b111ecbd..9a936a07 100644
+--- a/platform/script/src/tokenizer.rs
++++ b/platform/script/src/tokenizer.rs
+@@ -272,6 +272,8 @@ enum State {
+ #[derive(Default)]
+ pub struct ScriptTokenizer {
+     pos: usize,
++    fragment_checks: bool,
++    fragment_escape_error: Option<usize>,
+     /// Set when a newline is consumed; stamped onto (and cleared by) the next
+     /// emitted token as `preceded_by_newline`.
+     newline_pending: bool,
+@@ -711,6 +713,62 @@ fn finish_string(&mut self, heap: &mut ScriptHeap) {
+         }
+     }
+ 
++    /// Checks one complete fragment's lexical ending and delimiter boundaries.
++    /// Does not parse bindings, execute code, or change streaming tokenization.
++    pub fn fragment_structure_diagnostic(source: &str, heap: &mut ScriptHeap) -> String {
++        let mut tokenizer = Self { fragment_checks: true, ..Self::default() };
++        tokenizer.tokenize(source, heap);
++        if let Some(position) = tokenizer.fragment_escape_error {
++            let prefix: String = source.chars().take(position).collect();
++            let line = prefix.chars().filter(|c| *c == '\n').count() + 1;
++            let col = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
++            return format!("fragment:{}:{}: unexpected escaped quote outside string", line, col);
++        }
++        // Finish identifiers/numbers/operators and line comments, without
++        // closing strings or block comments on behalf of the caller.
++        tokenizer.tokenize("\n", heap);
++        let mut delimiters: Vec<(char, u32)> = Vec::new();
++        for (index, token) in tokenizer.tokens.iter().enumerate() {
++            let opening = match token.token {
++                ScriptToken::OpenCurly => Some('{'),
++                ScriptToken::OpenRound => Some('('),
++                ScriptToken::OpenSquare => Some('['),
++                _ => None,
++            };
++            if let Some(opening) = opening { delimiters.push((opening, index as u32)); continue; }
++            let closing = match token.token {
++                ScriptToken::CloseCurly => Some(('}', '{')),
++                ScriptToken::CloseRound => Some((')', '(')),
++                ScriptToken::CloseSquare => Some((']', '[')),
++                _ => None,
++            };
++            if let Some((close, expected)) = closing {
++                if delimiters.last().map(|v| v.0) != Some(expected) {
++                    let (line, col) = tokenizer.token_index_to_row_col(index as u32).unwrap_or((0, 0));
++                    return format!("fragment:{}:{}: unexpected closing {}", line + 1, col + 1, close);
++                }
++                delimiters.pop();
++            }
++        }
++        if tokenizer.state != State::Whitespace {
++            let what = match tokenizer.state {
++                State::String(_) | State::EscapeInString(_) | State::UnicodeHexInString(_)
++                | State::UnicodeCurlyInString(_) | State::AsciiHexInString(_) => "unterminated string",
++                State::BlockComment(_) | State::MaybeEndBlock(_) | State::BlockCommentStart
++                | State::BlockDocStart | State::BlockDoc | State::BlockDocMaybeEnd => "unterminated block comment",
++                _ => "unfinished lexical token",
++            };
++            let line = source.chars().filter(|c| *c == '\n').count() + 1;
++            let col = source.rsplit('\n').next().unwrap_or("").chars().count() + 1;
++            return format!("fragment:{}:{}: {}", line, col, what);
++        }
++        if let Some((open, index)) = delimiters.last() {
++            let (line, col) = tokenizer.token_index_to_row_col(*index).unwrap_or((0, 0));
++            return format!("fragment:{}:{}: unclosed {}", line + 1, col + 1, open);
++        }
++        String::new()
++    }
++
+     pub fn tokenize(&mut self, new_chars: &str, heap: &mut ScriptHeap) -> &[ScriptTokenPos] {
+         if self.provisional {
+             self.provisional = false;
+@@ -765,6 +823,14 @@ fn is_block(c: char) -> Option<ScriptToken> {
+         while let Some(c) = iter.next() {
+             self.original.push(c);
+             self.pos += 1;
++            // Fragment validation alone observes this ignored code character.
++            // The ordinary streaming tokenizer keeps exactly its existing semantics.
++            if self.fragment_checks && self.fragment_escape_error.is_none()
++                && c == '\\' && iter.clone().next() == Some('"')
++                && matches!(self.state, State::Whitespace | State::Identifier | State::Operator | State::Number | State::Color)
++            {
++                self.fragment_escape_error = Some(self.pos - 1);
++            }
+             match self.state {
+                 State::Whitespace => {
+                     if c.is_numeric() {
+@@ -1246,6 +1312,39 @@ fn could_be_operator_prefix(s: &str) -> bool {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn fragment_reports_first_code_escaped_quote_without_rewriting_literals() {
++        let mut heap = ScriptHeap::default();
++        assert_eq!(ScriptTokenizer::fragment_structure_diagnostic("View{\n button.on_click: || {show_block(\\\"detail\\\")}\n}", &mut heap), "fragment:2:34: unexpected escaped quote outside string");
++        for source in [r#"Label{text: "escaped \" quote"}"#, r#"Label{text: 'C:\"folder'}"#, r#"Label{text: "C:\\folder"}"#, r#"Label{text: "regex \\s+"}"#, "// \" ignored\nView{}", "/* \" ignored */ View{}"] {
++            assert_eq!(ScriptTokenizer::fragment_structure_diagnostic(source, &mut heap), "", "{source}");
++        }
++    }
++
++    #[test]
++    fn complete_fragment_structure_uses_tokens_not_literal_braces() {
++        let mut heap = ScriptHeap::default();
++        for source in [
++            r#"View{Label{text: "} [ ( \""} /* } ] ) */}"#,
++            "// }\nView{value: [1, 2] callback: || {return (1)}}",
++            "View{draw_bg: +:{color: #fff}}",
++            "let a = 1\nView{}",
++            "View{} // no newline",
++        ] {
++            assert_eq!(ScriptTokenizer::fragment_structure_diagnostic(source, &mut heap), "", "{}", source);
++        }
++        for (source, expected) in [
++            ("View{}} View{}", "unexpected closing }"),
++            ("View{value: [1)}", "unexpected closing )"),
++            ("View{", "unclosed {"),
++            ("View{text: \"unfinished", "unterminated string"),
++            ("View{} /* unfinished", "unterminated block comment"),
++            ("View{} /** unfinished", "unterminated block comment"),
++        ] {
++            assert!(ScriptTokenizer::fragment_structure_diagnostic(source, &mut heap).contains(expected), "{}", source);
++        }
++    }
++
+     #[test]
+     fn unicode_identifier_does_not_underflow_its_token_position() {
+         let mut heap = ScriptHeap::default();
+diff --git a/platform/script/src/vm.rs b/platform/script/src/vm.rs
+index 14a217f5..0635ee09 100644
+--- a/platform/script/src/vm.rs
++++ b/platform/script/src/vm.rs
+@@ -965,7 +965,7 @@ pub fn drain_errors(&mut self) {
+                     if let Some(sink) = self.bx.captured_errors.as_mut() {
+                         sink.push(formatted);
+                     }
+-                    continue;
++                    if !self.bx.captured_errors_log { continue; }
+                 }
+                 if self.bx.silence_errors {
+                     continue;
+@@ -1856,9 +1856,12 @@ pub fn eval_with_append_source(
+             let prev_len = body.source_len;
+             // Check if the content has diverged (not just appended to).
+             // Compare the new code's prefix against what the tokenizer already has.
++            // A previous source byte length can fall inside a new UTF-8 character.
++            // Such a prefix cannot be unchanged; re-tokenize the complete source.
++            let new_prefix = code.get(..prev_len);
++            let old_prefix = body.tokenizer.original.get(..prev_len);
+             let content_changed = prev_len > 0
+-                && (code.len() < prev_len
+-                    || code[..prev_len] != body.tokenizer.original[..prev_len]);
++                && (new_prefix.is_none() || new_prefix != old_prefix);
+ 
+             if content_changed {
+                 // Content changed entirely — reset and re-tokenize from scratch
+@@ -1948,6 +1951,7 @@ pub struct ScriptVmBase {
+     /// eval/call, take after, to feed diagnostics back to a host (e.g. an AI
+     /// agent editing the script live).
+     pub captured_errors: Option<Vec<ScriptErrorRecord>>,
++    pub captured_errors_log: bool,
+     /// Uncaught errors, including those suppressed from logs.
+     pub uncaught_error_count: usize,
+     pub run_budget: Option<ScriptRunBudget>,
+@@ -1972,6 +1976,7 @@ pub fn empty() -> Self {
+             silence_errors: false,
+             allow_debug_output: true,
+             captured_errors: None,
++            captured_errors_log: false,
+             uncaught_error_count: 0,
+             run_budget: None,
+             last_limit_consumed: 0,
+@@ -2010,6 +2015,7 @@ pub fn new() -> Self {
+             silence_errors: false,
+             allow_debug_output: true,
+             captured_errors: None,
++            captured_errors_log: false,
+             uncaught_error_count: 0,
+             run_budget: None,
+             last_limit_consumed: 0,
+diff --git a/platform/src/script/timer.rs b/platform/src/script/timer.rs
+index 5e1df79d..f287f337 100644
+--- a/platform/src/script/timer.rs
++++ b/platform/src/script/timer.rs
+@@ -10,6 +10,8 @@ pub struct CxScriptTimer {
+     pub timer: Timer,
+     pub callback: ScriptFnRef,
+     pub host_prompts_allowed: bool,
++    pub on_error: Option<ScriptFnRef>,
++    pub failure: Option<ScriptObjectRef>,
+ }
+ 
+ /// A hook that can claim dispatch of a firing script timer, e.g. to run the callback
+@@ -63,12 +65,35 @@ pub(crate) fn handle_script_timer(&mut self, event: &TimerEvent) {
+             }
+             self.with_vm_and_async(|vm| {
+                 vm.bx.threads.cur().host_prompts_allowed &= timer.host_prompts_allowed;
+-                vm.call(timer.callback.as_object().into(), &[time]);
++                let argument = timer.failure.as_ref().map(|v| v.as_object().into()).unwrap_or(time);
++                let result = vm.call(timer.callback.as_object().into(), &[argument]);
++                queue_script_timer_error(vm, &timer, result);
+             })
+         }
+     }
+ }
+ 
++/// Deliver only this timer's actual execution failure in a separate script entry.
++/// The callback captures its business identity; ordinary timers never create one.
++pub fn queue_script_timer_error(vm: &mut ScriptVm, timer: &CxScriptTimer, result: ScriptValue) {
++    let Some(on_error) = timer.on_error.as_ref().filter(|_| result.is_err()) else { return };
++    let object = vm.bx.heap.new_object();
++    let kind = if result.value_type() == ScriptValueType::ERR_LIMIT { "execution_limit" } else { "execution_error" };
++    let kind = vm.bx.heap.new_string_from_str(kind);
++    let error = vm.bx.heap.new_string_from_str("脚本入口未完整执行");
++    let trap = vm.bx.threads.cur().trap.pass();
++    vm.bx.heap.set_value(object, id!(success).into(), false.into(), trap);
++    vm.bx.heap.set_value(object, id!(error_kind).into(), kind, trap);
++    vm.bx.heap.set_value(object, id!(error).into(), error, trap);
++    let failure = vm.bx.heap.new_object_ref(object);
++    let cx = vm.cx_mut();
++    let pending = cx.start_timeout(0.01);
++    cx.script_data.timers.timers.push(CxScriptTimer {
++        id: LiveId::unique(), repeat: false, timer: pending,
++        callback: on_error.clone(), host_prompts_allowed: timer.host_prompts_allowed, on_error: None, failure: Some(failure),
++    });
++}
++
+ /// Local-time UTC offset in seconds, applied by `std.local_time`. The platform has no
+ /// timezone database, so hosts that know the local offset (e.g. via chrono) set it here.
+ static SCRIPT_LOCAL_UTC_OFFSET_SECS: std::sync::atomic::AtomicI64 =
+@@ -222,6 +247,31 @@ fn ensure_seeded(cx: &mut Cx) {
+                 id,
+                 callback,
+                 host_prompts_allowed,
++                on_error: None,
++                failure: None,
++            });
++            id.escape()
++        },
++    );
++
++    vm.add_method(
++        std, id_lut!(start_timeout_checked),
++        script_args_def!(delay = NIL, callback = NIL, on_error = NIL),
++        |vm, args| {
++            let delay = script_value!(vm, args.delay);
++            let callback = script_value!(vm, args.callback);
++            let on_error = script_value!(vm, args.on_error);
++            if !delay.is_number() || !vm.bx.heap.is_fn(callback.into()) || !vm.bx.heap.is_fn(on_error.into()) {
++                return script_err_type_mismatch!(vm.trap(), "invalid checked timer arg type");
++            }
++            let callback = ScriptFnRef::script_from_value(vm, callback);
++            let on_error = ScriptFnRef::script_from_value(vm, on_error);
++            let host_prompts_allowed = vm.bx.threads.cur_ref().host_prompts_allowed;
++            let cx = vm.cx_mut();
++            let timer = cx.start_timeout(delay.as_number().unwrap_or(1.0));
++            let id = LiveId::unique();
++            cx.script_data.timers.timers.push(CxScriptTimer {
++                repeat: false, timer, id, callback, host_prompts_allowed, on_error: Some(on_error), failure: None,
+             });
+             id.escape()
+         },
+@@ -252,6 +302,8 @@ fn ensure_seeded(cx: &mut Cx) {
+                 id,
+                 callback,
+                 host_prompts_allowed,
++                on_error: None,
++                failure: None,
+             });
+             id.escape()
+         },
+diff --git a/widgets/src/image.rs b/widgets/src/image.rs
+index f359fced..ddf86765 100644
+--- a/widgets/src/image.rs
++++ b/widgets/src/image.rs
+@@ -3,9 +3,9 @@
+     image_cache::*,
+     makepad_derive_widget::*,
+     makepad_draw::*,
+-    makepad_script::ScriptArrayStorage,
++    makepad_script::{ScriptArrayStorage,ScriptFnRef},
+     widget::*,
+-    widget_async::ScriptAsyncResult,
++    widget_async::{ScriptAsyncResult,CxWidgetToScriptCallExt},
+ };
+ use std::path::{Path, PathBuf};
+ use std::sync::Arc;
+@@ -72,6 +72,20 @@
+         width: 100
+         height: 100
+     }
++    mod.widgets.AutoNaviMapView = mod.widgets.Image{
++        camera_enabled:true
++        fit:mod.widgets.ImageFit.Stretch
++        draw_bg +: {
++            get_color_scale_pan: fn(scale:vec2,pan:vec2) {
++                let uv=self.pos*scale+pan
++                if uv.x<0.0 || uv.x>1.0 || uv.y<0.0 || uv.y>1.0 {
++                    return vec4(0.95,0.95,0.95,1.0)
++                }
++                return self.image_texture.sample_as_bgra(uv)
++            }
++        }
++    }
++
+ }
+ 
+ #[derive(Script, ScriptHook)]
+@@ -127,8 +141,40 @@ pub enum ImageAnimation {
+     Natural,
+ }
+ 
++// Camera coordinates are GCJ-02, matching the public AutoNavi staticmap API.
++// This widget owns spatial interaction only; its script supplies image bytes.
++#[derive(Default)]
++struct RasterCamera {
++    center: Vec2d,
++    zoom: f64,
++    configured: bool,
++    request: u64,
++    dirty: bool,
++    size: Vec2d,
++    bounds: Option<(f64,f64,f64,f64)>,
++    drag: Option<(Vec2d,Vec2d)>,
++    loaded: Option<(Vec2d,f64,Vec2d)>,
++    pending: Option<(Vec2d,f64,Vec2d)>,
++}
++// Public staticmap scale=1 was measured against both endpoint marker tips:
++// its level uses 512 world pixels, not the common 256-pixel tile convention.
++const AUTO_NAVI_WORLD_PIXELS: f64 = 512.0;
++fn map_world(lon:f64,lat:f64)->Vec2d {
++    let lat=lat.clamp(-85.05112878,85.05112878).to_radians();
++    dvec2((lon+180.0)/360.0,(1.0-(lat.tan()+1.0/lat.cos()).ln()/std::f64::consts::PI)/2.0)
++}
++fn map_geo(p:Vec2d)->(f64,f64) {
++    (p.x*360.0-180.0, (std::f64::consts::PI*(1.0-2.0*p.y)).sinh().atan().to_degrees())
++}
++
+ #[derive(Script, ScriptHook, Widget, Animator)]
+ pub struct Image {
++    #[live]
++    camera_enabled: bool,
++    #[live]
++    on_camera_changed: ScriptFnRef,
++    #[rust]
++    camera: RasterCamera,
+     #[uid]
+     uid: WidgetUid,
+     #[source]
+@@ -378,6 +424,49 @@ fn script_call(
+             }
+             return ScriptAsyncResult::Return(NIL);
+         }
++        if self.camera_enabled && [live_id!(set_camera),live_id!(fit_bounds),live_id!(zoom_by),live_id!(load_map_image)].contains(&method) {
++            let values = args.as_object().map(|o| {
++                let trap=vm.bx.threads.cur().trap.pass();
++                (0..vm.bx.heap.vec_len(o)).map(|i| vm.bx.heap.vec_value(o,i,trap)).collect::<Vec<_>>()
++            }).unwrap_or_default();
++            let number=|i:usize| values.get(i).and_then(|v|v.as_number()).unwrap_or(0.0);
++            if method == live_id!(set_camera) {
++                self.camera.center=map_world(number(0),number(1));
++                self.camera.zoom=number(2).clamp(1.0,17.0);
++                self.camera.configured=true;
++                self.camera.bounds=None;
++                vm.with_cx_mut(|cx|self.camera_changed(cx));
++                return ScriptAsyncResult::Return(NIL);
++            }
++            if method == live_id!(fit_bounds) {
++                self.camera.bounds=Some((number(0),number(1),number(2),number(3)));
++                self.texture=None;
++                self.camera.loaded=None;
++                self.draw_bg.draw_vars.empty_texture(0);
++                vm.with_cx_mut(|cx|self.camera_changed(cx));
++                return ScriptAsyncResult::Return(NIL);
++            }
++            if method == live_id!(zoom_by) {
++                self.camera.zoom=(self.camera.zoom+number(0)).clamp(1.0,17.0);
++                vm.with_cx_mut(|cx|self.camera_changed(cx));
++                return ScriptAsyncResult::Return(NIL);
++            }
++            if method == live_id!(load_map_image) {
++                if number(1) as u64 != self.camera.request {
++                    return ScriptAsyncResult::Return(FALSE);
++                }
++                if let Some(array)=values.first().and_then(|v|v.as_array()) {
++                    if let ScriptArrayStorage::U8(data)=vm.bx.heap.array_storage(array) {
++                        let bytes=Arc::new(data.clone());
++                        let path=PathBuf::from(format!("map_image_data://{}",LiveId::unique().0));
++                        self.camera.pending=Some((self.camera.center,self.camera.zoom,dvec2(number(2),number(3))));
++                        vm.with_cx_mut(|cx| {let _=self.load_image_from_data_async(cx,&path,bytes);});
++                        return ScriptAsyncResult::Return(TRUE);
++                    }
++                }
++                return ScriptAsyncResult::Return(FALSE);
++            }
++        }
+         if method == live_id!(load_image_from_data_async) {
+             if let Some(args_obj) = args.as_object() {
+                 let trap = vm.bx.threads.cur().trap.pass();
+@@ -403,6 +492,34 @@ fn script_call(
+     }
+ 
+     fn handle_event(&mut self, cx: &mut Cx, event: &Event, _scope: &mut Scope) {
++        if self.camera_enabled && self.visible && self.camera.configured {
++            match event.hits(cx,self.draw_bg.area()) {
++                Hit::FingerDown(fe) => {
++                    self.camera.drag=Some((fe.abs,self.camera.center));
++                    if fe.tap_count==2 {
++                        self.camera.zoom=(self.camera.zoom+1.0).min(17.0);
++                        self.camera_changed(cx);
++                    }
++                }
++                Hit::FingerMove(fe) => {
++                    if let Some((start,center))=self.camera.drag {
++                        let scale=AUTO_NAVI_WORLD_PIXELS*2.0_f64.powf(self.camera.zoom);
++                        let source=self.map_request_size();
++                        let delta=fe.abs-start;
++                        self.camera.center=center-dvec2(delta.x*source.x/self.camera.size.x,delta.y*source.y/self.camera.size.y)/scale;
++                        self.redraw(cx);
++                    }
++                }
++                Hit::FingerUp(_) => {
++                    if self.camera.drag.take().is_some() {self.camera_changed(cx);}
++                }
++                Hit::FingerScroll(fe) => {
++                    self.camera.zoom=(self.camera.zoom-if fe.scroll.y>0.0 {1.0}else{-1.0}).clamp(1.0,17.0);
++                    self.camera_changed(cx);
++                }
++                _=>{}
++            }
++        }
+         if self.animator_handle_event(cx, event).must_redraw() {
+             self.draw_bg.redraw(cx);
+         }
+@@ -436,6 +553,7 @@ fn handle_event(&mut self, cx: &mut Cx, event: &Event, _scope: &mut Scope) {
+                         // Record which async load produced the texture, so a later
+                         // load for a different key knows it is stale.
+                         self.texture_async_source = Some(image_path.to_path_buf());
++                        if self.camera_enabled {self.camera.loaded=self.camera.pending.take();}
+                         // A decode with fewer pixels (for another image showing this one) can land
+                         // before ours does, so we show that one while we keep waiting for ours.
+                         let drawn_size = self.encoded_image.as_ref()
+@@ -765,6 +883,37 @@ pub fn draw_walk_image(&mut self, cx: &mut Cx2d, mut walk: Walk) -> DrawStep {
+         // we change either nothing, or width or height
+         let rect = cx.peek_walk_turtle(walk);
+         let dpi = cx.current_dpi_factor();
++        if self.camera_enabled && rect.size.x>0.0 && rect.size.y>0.0 {
++            let size=dvec2(rect.size.x.floor(),rect.size.y.floor());
++            let size_changed=self.camera.size!=size;
++            self.camera.size=size;
++            let source_size=self.map_request_size();
++            if let Some((west,south,east,north))=self.camera.bounds.take() {
++                let a=map_world(west,north);let b=map_world(east,south);
++                self.camera.center=(a+b)*0.5;
++                let delta=b-a;let span=dvec2(delta.x.abs(),delta.y.abs());
++                self.camera.zoom=((source_size.x/(AUTO_NAVI_WORLD_PIXELS*span.x.max(1e-10))).log2()
++                    .min((source_size.y/(AUTO_NAVI_WORLD_PIXELS*span.y.max(1e-10))).log2())-0.3).floor().clamp(1.0,17.0);
++                self.camera.configured=true;
++                self.camera_changed(cx);
++            }
++            if size_changed {if self.camera.configured {self.camera_changed(cx);}}
++            if self.camera.dirty {
++                self.camera.dirty=false;
++                let (lon,lat)=map_geo(self.camera.center);
++                cx.widget_to_script_call(self.uid,NIL,self.source.clone(),self.on_camera_changed.clone(),
++                    &[lon.into(),lat.into(),self.camera.zoom.into(),source_size.x.into(),source_size.y.into(),(self.camera.request as f64).into()]);
++            }
++            if let Some((center,zoom,source_size))=self.camera.loaded {
++                let ratio=2.0_f64.powf(zoom-self.camera.zoom);
++                let world_scale=AUTO_NAVI_WORLD_PIXELS*2.0_f64.powf(zoom);
++                let requested=self.map_request_size();
++                let scale=dvec2(requested.x/source_size.x,requested.y/source_size.y)*ratio;
++                let pan=dvec2(0.5,0.5)-scale*0.5+(self.camera.center-center)*world_scale/source_size;
++                self.draw_bg.image_scale=vec2(scale.x as f32,scale.y as f32);
++                self.draw_bg.image_pan=vec2(pan.x as f32,pan.y as f32);
++            }
++        }
+ 
+         // A decode that landed while this wasn't getting events (e.g., in a closed modal) is picked up now.
+         let missed_decode = self.async_image_path.as_deref().and_then(|image_path| {
+@@ -1021,6 +1170,23 @@ pub fn load_image_file_by_path_async(
+         Ok(())
+     }
+ 
++    fn map_request_size(&self)->Vec2d {
++        let size=self.camera.size;
++        let scale=(1024.0/size.x.max(size.y).max(1.0)).min(1.0);
++        dvec2((size.x*scale).floor().max(1.0),(size.y*scale).floor().max(1.0))
++    }
++
++    fn camera_changed(&mut self,cx:&mut Cx) {
++        self.camera.request+=1;
++        self.camera.dirty=true;
++        // Invalidates the old decode key before its Actions can install a texture.
++        // Keep the last installed image for spatial feedback while the new view loads.
++        self.async_image_path=None;
++        self.async_image_size=None;
++        self.camera.pending=None;
++        self.redraw(cx);
++    }
++
+     pub fn load_image_from_data_async<D>(
+         &mut self,
+         cx: &mut Cx,
+@@ -1108,7 +1274,7 @@ fn begin_async_load(&mut self, cx: &mut Cx, image_path: &Path, size: (usize, usi
+             .texture_async_source
+             .as_deref()
+             .is_some_and(|source| source != image_path);
+-        if texture_is_stale {
++        if texture_is_stale && !self.camera_enabled {
+             self.texture = None;
+             self.texture_async_source = None;
+         }
+@@ -1131,6 +1297,7 @@ fn finish_async_load(&mut self, cx: &mut Cx, image_path: &Path) {
+         // later load for a different key would wrongly keep it visible on a
+         // recycled widget while the new source decodes.
+         self.texture_async_source = Some(image_path.to_path_buf());
++        if self.camera_enabled {self.camera.loaded=self.camera.pending.take();}
+         self.animator_play(cx, ids!(async_load.off));
+         self.redraw(cx);
+     }
+diff --git a/widgets/src/splash.rs b/widgets/src/splash.rs
+index 5165a076..7b7107b7 100644
+--- a/widgets/src/splash.rs
++++ b/widgets/src/splash.rs
+@@ -4,7 +4,7 @@
+     view::View,
+     widget::*,
+     widget_async::{
+-        CxSplashVmExt, SplashVmId, MAIN_SPLASH_VM_ID, WIDGET_SCRIPT_INSTRUCTION_LIMIT,
++        CxSplashVmExt, SplashVmId, ScriptAsyncResult, MAIN_SPLASH_VM_ID, WIDGET_SCRIPT_INSTRUCTION_LIMIT,
+     },
+     widget_tree::CxWidgetExt,
+ };
+@@ -100,6 +100,11 @@ pub struct Splash {
+     /// script by hand.
+     #[rust]
+     debug_name: String,
++    /// Raw diagnostics from this instance's current body and its isolate callbacks.
++    #[rust]
++    execution_diagnostics: Vec<String>,
++    #[rust]
++    capture_execution_diagnostics: bool,
+     #[rust]
+     stylesheet: Option<crate::desktop_style::StyleSheet>,
+     #[rust]
+@@ -262,6 +267,7 @@ fn eval_styled_body_with_apply(&mut self, cx: &mut Cx, preserve: bool, apply: &A
+         };
+ 
+         let vm_id = self.vm_id;
++        let capture_diagnostics = self.capture_execution_diagnostics;
+         let sheet=self.stylesheet.clone();
+         self.style_pending=false;
+         // A style reapply runs the body's top-level statements again: only the
+@@ -319,8 +325,11 @@ fn eval_styled_body_with_apply(&mut self, cx: &mut Cx, preserve: bool, apply: &A
+                     vm.eval_with_append_source(script_mod, &code, NIL.into())
+                 }
+             });
+-            let evaluation_errors = vm.take_errors();
+-            vm.bx.captured_errors = previous_errors;
++            let evaluation_errors = vm.take_error_records();
++            vm.bx.captured_errors = if capture_diagnostics {
++                Some(evaluation_errors.clone())
++            } else { previous_errors };
++            vm.bx.captured_errors_log = capture_diagnostics;
+             if preserve {
+                 restore_modules(vm, saved);
+             }
+@@ -343,9 +352,7 @@ fn eval_styled_body_with_apply(&mut self, cx: &mut Cx, preserve: bool, apply: &A
+                 // its previous view — or nothing at all. Say so: a silent
+                 // blank widget is the hardest bug in this file to find.
+                 if value.is_err() {
+-                    for e in evaluation_errors {
+-                        log!("splash: {}", e);
+-                    }
++                    for e in evaluation_errors { log!("splash: {}", e); }
+                 } else {
+                     log!("splash: script body evaluated to nothing (no root view)");
+                 }
+@@ -626,8 +633,30 @@ fn drop(&mut self) {
+     }
+ }
+ 
++impl Splash {
++    fn collect_execution_diagnostics(&mut self, cx: &mut Cx) {
++        if !self.capture_execution_diagnostics || self.vm_id == MAIN_SPLASH_VM_ID { return; }
++        let errors = cx.with_script_vm_id(self.vm_id, |vm| {
++            vm.drain_errors();
++            let errors = vm.take_errors();
++            vm.bx.captured_errors = Some(Vec::new());
++            vm.bx.captured_errors_log = true;
++            errors
++        });
++        self.execution_diagnostics.extend(errors);
++    }
++}
++
+ impl Widget for Splash {
++    fn script_call(&mut self, vm: &mut ScriptVm, method: LiveId, _args: ScriptValue) -> ScriptAsyncResult {
++        if method != id!(diagnostics) { return ScriptAsyncResult::MethodNotFound; }
++        self.capture_execution_diagnostics = true;
++        vm.with_cx_mut(|cx| self.collect_execution_diagnostics(cx));
++        let text = self.execution_diagnostics.join("\n");
++        ScriptAsyncResult::Return(vm.bx.heap.new_string_from_str(&text))
++    }
+     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
++        self.collect_execution_diagnostics(cx);
+         if self.allow_net {
+             if let Event::NetworkResponses(responses) = event {
+                 crate::widget_async::handle_splash_network_responses(cx, self.vm_id, responses);
+@@ -688,6 +717,8 @@ fn text(&self) -> String {
+     }
+ 
+     fn set_text(&mut self, cx: &mut Cx, v: &str) {
++        self.collect_execution_diagnostics(cx);
++        self.execution_diagnostics.clear();
+         if self.body.as_ref() != v {
+             self.body.set(v);
+             // Empty body = tear down the app: reclaim its isolate (stopping its
+diff --git a/widgets/src/splash_host.rs b/widgets/src/splash_host.rs
+index 75362aa3..7470fc50 100644
+--- a/widgets/src/splash_host.rs
++++ b/widgets/src/splash_host.rs
+@@ -316,8 +316,11 @@ pub fn script_mod(vm: &mut ScriptVm) {
+             if full {
+                 return script_err_invalid_args!(vm.trap(), "too many host requests are pending");
+             }
+-            let Some(args_json) = vm.bx.heap.to_json_string_bounded(request_args, 1024 * 1024) else {
+-                return script_err_invalid_args!(vm.trap(), "host arguments must be acyclic JSON within 1 MiB");
++            // Chat preserves full conversation history; other services retain their existing ceiling.
++            let max_bytes = if service == "model.chat" { 2 * 1024 * 1024 } else { 1024 * 1024 };
++            let Some(args_json) = vm.bx.heap.to_json_string_bounded(request_args, max_bytes) else {
++                let message = if service == "model.chat" { "model.chat arguments must be acyclic JSON within 2 MiB" } else { "host arguments must be acyclic JSON within 1 MiB" };
++                return script_err_invalid_args!(vm.trap(), "{}", message);
+             };
+             let full = BRIDGE.with(|bridge| {
+                 let bridge = bridge.borrow();
+@@ -600,6 +603,32 @@ fn run() { inspect("test-call", {os_batch:{}}) }
+         gc_bridge(&[heap]);
+     }
+ 
++    #[test]
++    fn only_model_chat_accepts_json_above_one_mib() {
++        let mut host = ScriptVmHost::new((), ());
++        let mut vm = ScriptVm {host: &mut host, bx: Box::new(ScriptVmBase::new())};
++        vm.bx.captured_errors = Some(Vec::new());
++        script_mod(&mut vm);
++        let heap = vm.bx.heap.heap_key();
++        let text = "x".repeat(1107830);
++        let value = vm.bx.heap.new_string_from_str(&text);
++        vm.set_injected_global(id!(large_text), value);
++        for (service, admitted) in [("fixture.read", false), ("model.complete", false), ("model.chat", true)] {
++            let result = vm.eval(ScriptMod {file:"host-size.splash".into(), code:format!("use mod.host\nhost.request(\"{service}\", {{messages:[{{role:\"user\" content:large_text}}] tools:[] tool_choice:\"auto\"}}, nil)\n;"), ..Default::default()});
++            let requests = take_splash_host_requests_for(&[heap]);
++            assert_eq!(!result.is_err(), admitted);
++            assert_eq!(requests.len(), usize::from(admitted));
++            if admitted { assert!(requests[0].args_json.len() > 1024*1024); assert!(requests[0].args_json.len() < 2*1024*1024); }
++        }
++        let value = vm.bx.heap.new_string_from_str(&"x".repeat(2*1024*1024));
++        vm.set_injected_global(id!(large_text), value);
++        let result = vm.eval(ScriptMod {file:"chat-too-large.splash".into(), code:"use mod.host\nhost.request(\"model.chat\", {content:large_text}, nil)\n;".into(), ..Default::default()});
++        assert!(result.is_err());
++        assert!(take_splash_host_requests_for(&[heap]).is_empty());
++        assert!(vm.take_errors().iter().any(|e| e.contains("within 2 MiB")));
++        gc_bridge(&[heap]);
++    }
++
+     #[test]
+     fn oversized_or_cyclic_host_arguments_never_enter_the_request_queue() {
+         let mut host = ScriptVmHost::new((), ());
+diff --git a/widgets/src/splash_storage.rs b/widgets/src/splash_storage.rs
+index 8c3f2f95..b2574b9a 100644
+--- a/widgets/src/splash_storage.rs
++++ b/widgets/src/splash_storage.rs
+@@ -30,6 +30,9 @@
+ 
+ use std::collections::HashMap;
+ use std::path::{Path, PathBuf};
++use std::io::Read;
++use crate::makepad_draw::makepad_platform::{Cx, SignalToUI};
++use crate::widget_async::{CxSplashVmExt, WIDGET_SCRIPT_INSTRUCTION_LIMIT};
+ 
+ use crate::makepad_draw::makepad_platform::makepad_script;
+ use makepad_script::*;
+@@ -58,6 +61,8 @@
+     /// heap-key → total-bytes cap, for isolates the host has granted more
+     /// room than the default. Absent means [`MAX_TOTAL_BYTES`]. Kept host-side
+     /// beside the root so script can neither read nor raise its own quota.
++    static READ_CALLBACKS: std::cell::RefCell<HashMap<(usize, u64), (ScriptFnRef, bool)>> = Default::default();
++
+     static JAIL_QUOTAS: std::cell::RefCell<HashMap<usize, u64>> =
+         std::cell::RefCell::new(HashMap::new());
+ }
+@@ -102,6 +107,7 @@ pub(crate) fn set_root_for_heap(heap_key: usize, root: Option<PathBuf>) {
+ 
+ /// Drops roots for reclaimed isolates (called from the isolate GC).
+ pub(crate) fn gc_roots(dead_heaps: &[usize]) {
++    READ_CALLBACKS.with(|c| c.borrow_mut().retain(|(heap, _), _| !dead_heaps.contains(heap)));
+     SANDBOX_ROOTS.with(|r| {
+         let mut r = r.borrow_mut();
+         for heap in dead_heaps {
+@@ -428,10 +434,120 @@ fn target(vm: &mut ScriptVm, path_value: ScriptValue) -> Result<(PathBuf, PathBu
+     Ok((root, real))
+ }
+ 
++// Only owned Rust data crosses threads; rooted script callbacks stay on the UI thread.
++static READ_RESULTS: std::sync::Mutex<Vec<(usize, u64, Result<String, String>)>> =
++    std::sync::Mutex::new(Vec::new());
++static NEXT_READ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
++
++type ReadRequest = (usize, u64, Option<PathBuf>, Option<String>);
++static READ_WORKER: std::sync::OnceLock<std::sync::mpsc::Sender<ReadRequest>> = std::sync::OnceLock::new();
++
++fn read_worker() -> &'static std::sync::mpsc::Sender<ReadRequest> {
++    READ_WORKER.get_or_init(|| {
++        let (sender, receiver) = std::sync::mpsc::channel::<ReadRequest>();
++        std::thread::spawn(move || {
++            for (heap_key, id, root, path_text) in receiver {
++                let result = match (root, path_text) {
++                    (Some(root), Some(path)) => {
++                        // Debug-only deterministic slow storage for native lifecycle regression tests.
++                        #[cfg(debug_assertions)]
++                        if path.trim_start_matches('/').starts_with("skills/") {
++                            if let Some(ms) = std::env::var("MAKEPAD_TEST_ASYNC_READ_DELAY_MS").ok()
++                                .and_then(|s| s.parse::<u64>().ok()).filter(|ms| *ms <= 1000) {
++                                std::thread::sleep(std::time::Duration::from_millis(ms));
++                            }
++                        }
++                        read_jailed_text(&root, &path)
++                    }
++                    (None, _) => Err("storage not available in this context".to_string()),
++                    (_, None) => Err("path must be a string".to_string()),
++                };
++                READ_RESULTS.lock().unwrap().push((heap_key, id, result));
++                SignalToUI::set_ui_signal();
++            }
++        });
++        sender
++    })
++}
++
++fn read_jailed_text(root: &Path, path: &str) -> Result<String, String> {
++    let real = resolve_jailed(root, path)?;
++    verify_no_symlinks(root, &real)?;
++    let file = std::fs::File::open(real).map_err(|_| "file not found".to_string())?;
++    if !file.metadata().map_err(|_| "read failed")?.is_file() {
++        return Err("not a file".to_string());
++    }
++    let mut bytes = Vec::new();
++    file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes).map_err(|_| "read failed")?;
++    if bytes.len() as u64 > MAX_FILE_BYTES {
++        return Err("file too large".to_string());
++    }
++    String::from_utf8(bytes).map_err(|_| "invalid UTF-8".to_string())
++}
++
++pub(crate) fn pump_read_results(cx: &mut Cx) -> bool {
++    crate::widget_async::gc_dead_splash_isolates(cx);
++    let results = std::mem::take(&mut *READ_RESULTS.lock().unwrap());
++    let progressed = !results.is_empty();
++    for (heap_key, id, result) in results {
++        let callback = READ_CALLBACKS.with(|c| c.borrow_mut().remove(&(heap_key, id)));
++        let Some((callback, host_prompts_allowed)) = callback else { continue };
++        let Some(vm_id) = crate::widget_async::vm_for_heap(cx, heap_key) else { continue };
++        crate::widget_async::contain_isolate_panic("storage read callback", || {
++            let _scope = crate::splash_host::CallbackPromptScope::enter(heap_key, host_prompts_allowed);
++            cx.with_script_vm_id(vm_id, |vm| {
++                if vm.bx.heap.heap_key() != heap_key || !crate::splash_policy::may_run(heap_key) {
++                    return;
++                }
++                vm.bx.threads.cur().host_prompts_allowed &= host_prompts_allowed;
++                let (success, text, error) = match result {
++                    Ok(text) => (true, vm.bx.heap.new_string_from_str(&text), NIL),
++                    Err(error) => (false, NIL, vm.bx.heap.new_string_from_str(&error)),
++                };
++                let obj = vm.bx.heap.new_object();
++                let trap = vm.bx.threads.cur().trap.pass();
++                vm.bx.heap.set_value(obj, id!(success).into(), success.into(), trap);
++                vm.bx.heap.set_value(obj, id!(text).into(), text, trap);
++                vm.bx.heap.set_value(obj, id!(error).into(), error, trap);
++                vm.with_instruction_limit(WIDGET_SCRIPT_INSTRUCTION_LIMIT, |vm| {
++                    vm.call(callback.as_object().into(), &[obj.into()]);
++                });
++                crate::splash_policy::charge(heap_key, vm.last_limit_consumed() as u64);
++                for err in vm.take_errors() {
++                    crate::makepad_draw::error!("splash storage callback error: {err}");
++                }
++            });
++        });
++    }
++    progressed
++}
++
+ /// Registers the jailed `fs` module into an isolate VM.
+ pub fn script_mod(vm: &mut ScriptVm) {
+     let fs = vm.new_module(id!(fs));
+ 
++    // Every accepted read resolves once asynchronously, including path and I/O errors.
++    vm.add_method(fs, id_lut!(read_async), script_args_def!(path = NIL, on_result = NIL), |vm, args| {
++        let path = script_value!(vm, args.path);
++        let on_result = script_value!(vm, args.on_result);
++        let Some(obj) = on_result.as_object() else {
++            return script_err_invalid_args!(vm.trap(), "on_result must be a fn");
++        };
++        let mut path_text = None;
++        vm.string_with(path, |_vm, s| path_text = Some(s.to_string()));
++        let root = root_for_vm(vm);
++        let heap_key = vm.bx.heap.heap_key();
++        let id = NEXT_READ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++        let callback = vm.bx.heap.new_fn_ref(obj);
++        let host_prompts_allowed = vm.bx.threads.cur_ref().host_prompts_allowed;
++        READ_CALLBACKS.with(|c| c.borrow_mut().insert((heap_key, id), (callback, host_prompts_allowed)));
++        if read_worker().send((heap_key, id, root, path_text)).is_err() {
++            READ_RESULTS.lock().unwrap().push((heap_key, id, Err("read failed".to_string())));
++            SignalToUI::set_ui_signal();
++        }
++        NIL
++    });
++
+     vm.add_method(fs, id_lut!(read), script_args_def!(path = NIL), |vm, args| {
+         let path = script_value!(vm, args.path);
+         match target(vm, path) {
+@@ -594,6 +710,68 @@ pub fn script_mod(vm: &mut ScriptVm) {
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++    #[test]
++    fn async_read_callback_is_consumed_once_and_dead_vm_is_dropped() {
++        let mut cx = Cx::new(Box::new(|_, _| {}));
++        cx.with_vm(crate::script_mod);
++        let vm_id = cx.alloc_splash_vm();
++        let heap = cx.with_script_vm_id(vm_id, |vm| {
++            let probe = vm.new_module(id!(prompt_probe));
++            vm.add_method(probe, id_lut!(current), script_args_def!(), |vm, _| vm.bx.threads.cur_ref().host_prompts_allowed.into());
++            vm.eval(crate::makepad_script::script! {
++                mod.read_count = 0
++                mod.read_callback = fn(r) { mod.read_count += 1 mod.read_prompt = mod.prompt_probe.current() }
++            });
++            let value = vm.eval(crate::makepad_script::script! { mod.read_callback });
++            let callback = vm.bx.heap.new_fn_ref(value.as_object().unwrap());
++            let heap = vm.bx.heap.heap_key();
++            READ_CALLBACKS.with(|c| c.borrow_mut().insert((heap, 99), (callback, false)));
++            heap
++        });
++        READ_RESULTS.lock().unwrap().push((heap, 99, Ok("text".to_string())));
++        assert!(pump_read_results(&mut cx));
++        READ_RESULTS.lock().unwrap().push((heap, 99, Ok("duplicate".to_string())));
++        assert!(pump_read_results(&mut cx));
++        cx.with_script_vm_id(vm_id, |vm| {
++            assert_eq!(vm.eval(crate::makepad_script::script! { mod.read_count }).as_f64(), Some(1.0));
++            assert_eq!(vm.eval(crate::makepad_script::script! { mod.read_prompt }), false.into());
++            let value = vm.eval(crate::makepad_script::script! { mod.read_callback });
++            let callback = vm.bx.heap.new_fn_ref(value.as_object().unwrap());
++            READ_CALLBACKS.with(|c| c.borrow_mut().insert((heap, 100), (callback, false)));
++        });
++        crate::widget_async::mark_splash_isolate_dead(vm_id);
++        READ_RESULTS.lock().unwrap().push((heap, 100, Ok("late".to_string())));
++        assert!(pump_read_results(&mut cx));
++        assert!(crate::widget_async::vm_for_heap(&mut cx, heap).is_none());
++        assert!(READ_CALLBACKS.with(|c| !c.borrow().contains_key(&(heap, 100))));
++    }
++
++    #[test]
++    fn async_text_read_boundary() {
++        let dir = std::env::temp_dir().join(format!("mp_jail_async_read_{}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&dir);
++        std::fs::create_dir_all(dir.join("skills")).unwrap();
++        std::fs::write(dir.join("skills/a"), "中文技能").unwrap();
++        assert_eq!(read_jailed_text(&dir, "/skills/a").unwrap(), "中文技能");
++        assert_eq!(read_jailed_text(&dir, "missing").unwrap_err(), "file not found");
++        assert!(read_jailed_text(&dir, "../outside").is_err());
++        assert_eq!(read_jailed_text(&dir, "skills").unwrap_err(), "not a file");
++        std::fs::write(dir.join("skills/b"), [0xff]).unwrap();
++        assert_eq!(read_jailed_text(&dir, "skills/b").unwrap_err(), "invalid UTF-8");
++        std::fs::write(dir.join("skills/b"), vec![b'x'; MAX_FILE_BYTES as usize]).unwrap();
++        assert_eq!(read_jailed_text(&dir, "skills/b").unwrap().len(), MAX_FILE_BYTES as usize);
++        std::fs::write(dir.join("skills/b"), vec![b'x'; MAX_FILE_BYTES as usize + 1]).unwrap();
++        assert_eq!(read_jailed_text(&dir, "skills/b").unwrap_err(), "file too large");
++        #[cfg(unix)] {
++            std::os::unix::fs::symlink("a", dir.join("skills/link")).unwrap();
++            assert!(read_jailed_text(&dir, "skills/link").is_err());
++            std::os::unix::fs::symlink(&dir, dir.join("escape")).unwrap();
++            assert!(read_jailed_text(&dir, "escape/skills/a").is_err());
++        }
++        std::fs::remove_dir_all(dir).unwrap();
++    }
++
++
+ 
+     #[test]
+     fn existing_large_camera_files_remain_script_readable_but_not_exportable() {
+diff --git a/widgets/src/widget.rs b/widgets/src/widget.rs
+index 33e0168c..1fb36117 100644
+--- a/widgets/src/widget.rs
++++ b/widgets/src/widget.rs
+@@ -823,6 +823,20 @@ pub fn script_call(
+             vm.with_cx_mut(|cx| self.set_text(cx, &text));
+             return ScriptAsyncResult::Return(NIL);
+         }
++        // Geometry is read only and comes from this widget's painted, clipped area.
++        // A not-yet-drawn widget has no usable viewport: report nil, not a guessed size.
++        if method == live_id!(rect) {
++            let area = self.area();
++            let rect = vm.with_cx(|cx| area.is_valid(cx).then(|| area.clipped_rect(cx)));
++            let Some(rect) = rect else { return ScriptAsyncResult::Return(NIL); };
++            let object = vm.bx.heap.new_object();
++            let trap = vm.bx.threads.cur().trap.pass();
++            for (key, value) in [(id!(x), rect.pos.x), (id!(y), rect.pos.y),
++                                 (id!(width), rect.size.x), (id!(height), rect.size.y)] {
++                vm.bx.heap.set_value(object, key.into(), value.into(), trap);
++            }
++            return ScriptAsyncResult::Return(object.into());
++        }
+         if method == live_id!(text) {
+             let text = self.text();
+             return ScriptAsyncResult::Return(vm.bx.heap.new_string_from_str(&text));
+diff --git a/widgets/src/widget_async.rs b/widgets/src/widget_async.rs
+index dab21e67..dcaf1d3e 100644
+--- a/widgets/src/widget_async.rs
++++ b/widgets/src/widget_async.rs
+@@ -1,7 +1,7 @@
+ use {
+     crate::makepad_draw::*,
+     crate::makepad_draw::makepad_platform::script::std::ScriptStd,
+-    crate::makepad_draw::makepad_platform::script::timer::CxScriptTimer,
++    crate::makepad_draw::makepad_platform::script::timer::{CxScriptTimer, queue_script_timer_error},
+     crate::makepad_script::{script_err_not_found, ScriptFnRef, ScriptThreadId},
+     crate::widget::{WidgetRef, WidgetUid},
+     crate::widget_tree::CxWidgetExt,
+@@ -1306,20 +1306,8 @@ fn widget_to_script_call(
+     }
+ }
+ 
+-fn register_ui_handle(vm: &mut ScriptVm) {
+-    let vm_id = vm.cx_mut().global::<CxWidgetAsync>().current_vm_id;
+-    if vm
+-        .cx_mut()
+-        .global::<CxWidgetAsync>()
+-        .ui_handle_types
+-        .contains_key(&vm_id)
+-    {
+-        return;
+-    }
+-
+-    let ui_type = vm.new_handle_type(id_lut!(ui));
+-
+-    vm.set_handle_getter(ui_type, move |vm, pself, prop| {
++// Static and string-based lookup share the same isolate-root confinement.
++fn lookup_ui_handle(vm: &mut ScriptVm, pself: ScriptValue, prop: LiveId) -> ScriptValue {
+         if let Some(handle) = pself.as_handle() {
+             let Some(target_uid) = vm
+                 .downcast_handle_gc::<CxWidgetHandleGc>(handle)
+@@ -1393,19 +1381,48 @@ fn register_ui_handle(vm: &mut ScriptVm) {
+                 return script_err_not_found!(vm.trap(), "widget has no uid");
+             }
+ 
+-            let gc = CxWidgetHandleGc {
+-                handle: ScriptHandle::ZERO,
+-                uid: child_uid,
+-            };
+-            let child_handle = vm.bx.heap.new_handle(ui_type, Box::new(gc));
+-            return child_handle.into();
++            return vm.build_ui_handle_for_uid(child_uid);
+         }
+ 
+         script_err_not_found!(vm.trap(), "invalid ui handle")
+-    });
++}
++
++fn register_ui_handle(vm: &mut ScriptVm) {
++    let vm_id = vm.cx_mut().global::<CxWidgetAsync>().current_vm_id;
++    if vm
++        .cx_mut()
++        .global::<CxWidgetAsync>()
++        .ui_handle_types
++        .contains_key(&vm_id)
++    {
++        return;
++    }
++
++    let ui_type = vm.new_handle_type(id_lut!(ui));
++
++    vm.set_handle_getter(ui_type, lookup_ui_handle);
+ 
+     vm.set_handle_call(ui_type, move |vm, args, method| {
+         let pself = script_value!(vm, args.self);
++        if method == live_id!(validate_fragment) {
++            let trap = vm.bx.threads.cur().trap.pass();
++            let value = vm.bx.heap.vec_value(args, 0, trap);
++            let Some(source) = vm.bx.heap.cast_to_owned_string(value, "checking fragment structure") else {
++                return script_err_not_found!(vm.trap(), "ui.validate_fragment expects a source string");
++            };
++            // Tokenized literal strings are temporary diagnostics data, not VM state.
++            let mut heap = crate::makepad_script::heap::ScriptHeap::default();
++            let diagnostic = crate::makepad_script::tokenizer::ScriptTokenizer::fragment_structure_diagnostic(&source, &mut heap);
++            return vm.bx.heap.new_string_from_str(&diagnostic);
++        }
++        if method == live_id!(find) {
++            let trap = vm.bx.threads.cur().trap.pass();
++            let value = vm.bx.heap.vec_value(args, 0, trap);
++            let Some(name) = vm.bx.heap.cast_to_owned_string(value, "finding a named widget") else {
++                return script_err_not_found!(vm.trap(), "ui.find expects a widget name string");
++            };
++            return lookup_ui_handle(vm, pself, LiveId::from_str(&name));
++        }
+         if let Some(handle) = pself.as_handle() {
+             let Some(uid) = vm
+                 .downcast_handle_gc::<CxWidgetHandleGc>(handle)
+@@ -1414,6 +1431,29 @@ fn register_ui_handle(vm: &mut ScriptVm) {
+                 return script_err_not_found!(vm.trap(), "invalid ui handle");
+             };
+ 
++            if method == live_id!(child) {
++                let trap = vm.bx.threads.cur().trap.pass();
++                let value = vm.bx.heap.vec_value(args, 0, trap);
++                let Some(index) = value.as_number().filter(|n| n.is_finite() && *n >= 0.0 && n.fract() == 0.0 && *n <= usize::MAX as f64) else {
++                    return script_err_not_found!(vm.trap(), "ui.child expects a non-negative integer index");
++                };
++                // Handles are minted by this VM's confined lookup. Descending its
++                // direct children cannot widen the current script-root boundary.
++                let child = vm.with_cx(|cx| {
++                    let parent = cx.widget_tree().widget(uid);
++                    let mut ordinal = 0usize;
++                    let mut child = WidgetRef::empty();
++                    parent.try_children(&mut |_, widget| {
++                        if ordinal == index as usize { child = widget.clone(); }
++                        ordinal += 1;
++                    });
++                    child
++                });
++                if child.is_empty() {
++                    return script_err_not_found!(vm.trap(), "widget child index is out of range or its instance is gone");
++                }
++                return vm.build_ui_handle_for_uid(child.widget_uid());
++            }
+             let ui_handle = vm.build_ui_handle_for_uid(uid);
+             force_set_map_value(&mut vm.bx.heap, args, id!(ui), ui_handle);
+ 
+@@ -1481,7 +1521,7 @@ fn on_widget_script_thread_completed(
+ fn pump_widget_async(cx: &mut Cx) -> bool {
+     crate::camera_preview::drain_dropped_cameras(cx);
+     crate::video::drain_dropped_videos(cx);
+-    let mut progressed = false;
++    let mut progressed = crate::splash_storage::pump_read_results(cx);
+ 
+     loop {
+         let req = cx
+@@ -1644,9 +1684,11 @@ fn script_timer_dispatch_hook(cx: &mut Cx, timer: &CxScriptTimer, time: ScriptVa
+                 let _scope = crate::splash_host::CallbackPromptScope::enter(heap_key, timer.host_prompts_allowed);
+                 cx.with_script_vm_id(vm_id, |vm| {
+                     vm.bx.threads.cur().host_prompts_allowed &= timer.host_prompts_allowed;
+-                    vm.with_instruction_limit(WIDGET_SCRIPT_INSTRUCTION_LIMIT, |vm| {
+-                        vm.call(timer.callback.as_object().into(), &[time]);
++                    let argument = timer.failure.as_ref().map(|v| v.as_object().into()).unwrap_or(time);
++                    let result = vm.with_instruction_limit(WIDGET_SCRIPT_INSTRUCTION_LIMIT, |vm| {
++                        vm.call(timer.callback.as_object().into(), &[argument])
+                     });
++                    queue_script_timer_error(vm, timer, result);
+                 });
+             });
+             true
+@@ -2019,6 +2061,64 @@ fn native_reentry_from_a_paused_background_thread_cannot_promote_a_new_thread()
+ 
+     use std::panic::{catch_unwind, AssertUnwindSafe};
+ 
++    #[test]
++    fn checked_timer_hard_budget_reports_once_in_fresh_entry() {
++        let mut cx = Cx::new(Box::new(|_, _| {}));
++        cx.with_vm(crate::script_mod);
++        let vm_id = cx.alloc_splash_vm();
++        cx.with_script_vm_id(vm_id, |vm| {
++            let module = vm.new_module(id!(probe));
++            vm.add_method(module, id_lut!(block), script_args_def!(), |_vm, _args| {
++                std::thread::sleep(std::time::Duration::from_millis(80));
++                NIL
++            });
++            vm.bx.threads.cur().host_prompts_allowed = false;
++            vm.eval(crate::makepad_script::script! {
++                mod.probe.errors = 0
++                mod.probe.finished = false
++                mod.probe.work = fn() { mod.probe.block() loop {} }
++                mod.probe.failed = fn(result) { mod.probe.errors += 1 mod.probe.kind = result.error_kind }
++                mod.std.start_timeout_checked(0.01, mod.probe.work, mod.probe.failed)
++            });
++        });
++        let timer = cx.script_data.timers.timers.remove(0);
++        assert!(!timer.host_prompts_allowed);
++        assert!(script_timer_dispatch_hook(&mut cx, &timer, NIL));
++        assert_eq!(cx.script_data.timers.timers.len(), 1);
++        let failed = cx.script_data.timers.timers.remove(0);
++        assert!(failed.on_error.is_none());
++        assert!(!failed.host_prompts_allowed);
++        assert!(script_timer_dispatch_hook(&mut cx, &failed, NIL));
++        assert!(cx.script_data.timers.timers.is_empty());
++        cx.with_script_vm_id(vm_id, |vm| {
++            assert!(vm.bx.run_budget.is_some()); // only this test's current entry
++            assert_eq!(vm.eval(crate::makepad_script::script! {mod.probe.errors}).as_number(), Some(1.0));
++            assert_eq!(vm.eval(crate::makepad_script::script! {mod.probe.kind == "execution_limit"}), true.into());
++            assert!(vm.bx.threads.cur_ref().trap.on_is_none());
++            assert!(vm.bx.threads.cur_ref().trap.err_is_empty());
++        });
++        let isolated = cx.global::<CxWidgetAsync>().isolated_vms.vms.get(&vm_id).unwrap();
++        assert!(isolated.vm.as_ref().unwrap().run_budget.is_none());
++    }
++
++    #[test]
++    fn checked_timer_normal_work_has_no_failure_callback() {
++        let mut cx = Cx::new(Box::new(|_, _| {}));
++        cx.with_vm(crate::script_mod);
++        let vm_id = cx.alloc_splash_vm();
++        cx.with_script_vm_id(vm_id, |vm| {vm.eval(crate::makepad_script::script! {
++            mod.probe = {finished:false errors:0}
++            mod.std.start_timeout_checked(0.01, fn(){mod.probe.finished=true}, fn(result){mod.probe.errors+=1})
++        });});
++        let timer = cx.script_data.timers.timers.remove(0);
++        assert!(script_timer_dispatch_hook(&mut cx, &timer, NIL));
++        assert!(cx.script_data.timers.timers.is_empty());
++        cx.with_script_vm_id(vm_id, |vm| {
++            assert_eq!(vm.eval(crate::makepad_script::script! {mod.probe.finished}), true.into());
++            assert_eq!(vm.eval(crate::makepad_script::script! {mod.probe.errors}).as_number(), Some(0.0));
++        });
++    }
++
+     /// A guest panics while its isolate is installed — through
+     /// `with_isolate` (a tile's dispatch) and through
+     /// `with_script_vm_id_trusted` (a host's own entry): the main VM is

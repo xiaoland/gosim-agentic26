@@ -1,21 +1,33 @@
 {
+  "agent": {
+    "profile": "read-only",
+    "tools": [
+      "notes.search",
+      "notes.read"
+    ]
+  },
   "capabilities": [
     "storage",
     "net",
     "location",
-    "model"
+    "model",
+    "device_calendar"
   ],
   "id": "agentic26-navigation",
   "integrity": {
-    "bundle_blake3": "626558db932948a9bcad38352618a874658a7a161b6938fa3a3a33df538bc299"
+    "bundle_blake3": "875d407f266c2031abf369fcc85977437320e2ba8102c1e4630efde42f38b9f8"
   },
   "name": "Agentic26 Navigation",
   "network": {
     "hosts": [
       "restapi.amap.com",
-      "mcp.didichuxing.com"
+      "mcp.didichuxing.com",
+      "kyfw.12306.cn"
     ]
   },
+  "requires": [
+    "host-api-v1"
+  ],
   "schema": 1,
   "version": "0.16.0"
 }

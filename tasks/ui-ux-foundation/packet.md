@@ -1,6 +1,6 @@
 # 基础界面与交互优化
 
-状态：2026-10-11，基于 a57ab66（0.16.0）完成固定外壳优化，未改业务或存储schema。
+状态：2026-10-12，固定外壳优化与七种通用样式已实现，7 项原生手机交互通过。第38轮真实 M3 生成整卡候选，实际查看 S4831 详情和接驳地图、保存均通过；第40轮仅恢复修复版本读取同一快照，卡片→详情→地图→返回／重开通过，0新增模型或规划调用。root已查看实际详情、地图与重开截图，账本及原生成源码未变；完整版本边界与保留诊断见[铁路任务](../rail-integration/packet.md)。以下旧版本证据只证明各自记录范围，不表示完整 Material 合规或 Android 真机验证。
 
 ## 目标与授权
 
@@ -38,3 +38,33 @@ root整合设计判断、文档和提交；guardian_design给出层级/状态建
 实际检查发现并修复动态on_render条件的空栈、历史文字缺失、列表metadata裁切、输入收起后按钮残留、费用表单被键盘遮挡，以及运行/停止状态文字残留。采用常驻控件显式同步与现有布局处理，不增加宿主覆盖。
 
 验收为macOS arm64宿主Android样式，未做Android真机、读屏或全部主题/桌面尺寸适配。本轮改进固定外壳，已有Agent生成内容的样式保留；没有重新进行路线优化算法或容量压力验证，也未制作新视频。
+
+## 下一轮：可组合的候选卡片与事实绑定（提议）
+
+用户在继续铁路闭环时提出候选应采用 rich 卡片并带地图缩略图，可考虑 minimal Material 2/3；没有要求立即建设完整组件库。guardian_design 本轮只读调查，未改 main、bundle 或启动实例。铁路地图与日志修复继续由 rail_model 负责，宿主升级、真实日历笔记由各自 owner 推进。
+
+已查看 round30 的实际列表截图（build/research/rail-integration/e2e/round30/round30-return-list.png）：候选目前由较长正文和单独详情按钮组成，阅读时难快速比较时间与费用。源码中父外壳有 NavPrimary/NavSecondary/NavMeta，但 generated_context 仅给子VM提供字体与通用 Label/Button/TextInput 默认值，尚未共享一组卡片样式。现有 snapshot 已有 Route 格式化价格、耗时、到达时间、分段与不确定性；native-ui 已要求按同一 Route ID 读取，故时刻误写不是缺少 Material 外观能解决的问题。
+
+建议先采用 Material 3 的颜色角色、文字层级与 surface 思路，在当前 Splash 上提供应用局部的少量可覆盖样式：surface/card 容器、title/body/meta 文本、主次操作与间距/圆角常量。卡片只承载任意子内容，不读取 Route、不排序候选、不自动开详情。首轮不加入全套 M2/M3 双版本、动态配色算法、导航框架、阴影等级、弹簧/共享元素动效或主题切换系统；现有按下/焦点/禁用反馈保留。建议初始视觉尺度为标题20–22、正文14–16、辅助12–13，间距4/8/12/16/24，卡片圆角12–16；这是待原生手机截图检验的应用提案，不声称Makepad逻辑像素等于Android dp/sp。
+
+事实绑定优先于新增外观：Agent仍决定构图、解释、比较与交互，但卡片内班次、发到日期时间、门到门总耗时、费用小计/完整性和未知项应直接取同一 Route 的确定性展示字段，并在 on_facts_changed 中按该ID更新；铁路区间时长与含候车的门到门耗时必须分开。缺少便捷展示字段时，在现有 snapshot 投影补齐格式化值，不让模型抄工具文本或自行换算；不新增预制 RouteCard 或另一份可写路线状态。历史恢复使用当时事实，不能用当前时间重算静态标签。仅增加技能文字不能保证生成稿遵守；必要验收要对实际生成控件文本与绑定Route做核对。
+
+缩略图可优先复用已存在 Image + map事件（interactive:false），target 与文字绑定相同 Route ID；不由模型传坐标/绘制想象线路。列表缩略图不接管滚动/缩放，点击仍由Agent自己的动作打开详情。每图最多4条 paths 是实际供应商限制；超出时可明确选取局部概览并标出范围，完整详情继续覆盖全部可用几何，铁路缺几何不能补直线假装实测。图片大小、摆位与候选数量不固定成模板，也不新增自动截前四条或虚构缩略图。此次未运行新缩略图组合，现成接口可复用与组合后体验已验收须分开。
+
+官方依据：[Android Material 3](https://developer.android.com/develop/ui/compose/designsystems/material3)将颜色、字体与形状作为主题，并说明产品无需使用全部15种字体；[Card](https://developer.android.com/develop/ui/compose/components/card)以单个主题内容容器和可组合子内容区分卡片与整个页面。M3主站页面本次只返回JavaScript提示，因此使用Google官方Android实现说明核实原则。[Makepad官方仓库](https://github.com/makepad/makepad)确认其Rust运行时、Splash及widgets体系；当前锁定源码可见View、ButtonFlat、Image、主题模块，未找到可直接导入的官方Material组件包。Compose API不能直接当作Splash API；本次建议是局部样式与现有控件组合，不引入Compose依赖，也不宣称完整Material合规。
+
+接续只需先做一个真实铁路候选与一个非铁路候选的Agent自由布局，检查手机宽度下的文字层级、长站名、未知费用、静态地图滚动、详情返回及同Route事实更新/历史恢复。用round30真实记录核对班次与门到门耗时，不因视觉更好而降低事实要求。确认这组原语可改善实际稿件后再判断是否值得命名成库；本轮未实现或新增验证。
+
+滚动合同待实际对照后决定：round30 的显式height使父body Fill，自然Fit详情的长正文可能挤掉地图；全局改body Fit又会破坏既有内部ScrollYView Fill稿件。建议一个显式内容尺寸选项，区分 natural（外视口限高、body Fit、外层滚动）与 viewport（body Fill、Agent管理内部布局/滚动），未指定时保留旧稿规则。新长详情示例选择natural；不按DSL文本猜模式、不静默重解释历史源码。这是两种原生布局能力的合同，不是路线模板或新增导航框架。rail_model正在隔离复用原事实/原DSL对照；本建议没有宣称该对照已通过。
+
+## 通用视觉原语实施与原生验收（2026-10-12）
+
+用户本轮授权最小 Material 3 方向的通用视觉原语和 rich 候选展示，输入之外仍由 Agent 自主组织 DSL，不预制 RouteCard、固定候选模板或保底稿。main 与 native-ui 契约由 rail_model 整合；本地原语和展示合同检查由 material_primitives 负责，真实铁路闭环仍归 rail_e2e。宿主 RC6 迁移期间不并行改共享 stage 或启动原生实例。
+
+现有 generated_context 是子 VM 的统一定义入口，没有已维护的外部源码模块机制。选择在那里一次内联 NavSurface、NavCard、NavTitle、NavBody、NavMeta、NavAction 与 NavSecondaryAction；不为七种样式新增加载框架或未消费的 bundle asset。两个容器明确 Fill/Fit 并允许任意子内容；字体复用应用局部 NavRegular，标题／正文／辅助文字为 22／16／13 逻辑像素，主要操作高 48 逻辑像素，保留按下、焦点、禁用状态。没有路线读取、排序或选择逻辑，不宣称完整 Material 合规。
+
+原语已由 rail_model 内联 generated_context，当前生产 main SHA256 为 5e61ab4f3291ad656700c51ea394c5fdc160d673d130f02b8fbd0ebca61d4f49；忽略目录的 material.splash 只是源稿，不是运行加载入口。正式 RC6 binary SHA256 为 733cbcb0104599b6244b6da01ff7f1c977b9a4117800cef5ced1628ec9826e1a。运行 `python3 tools/smoke.py --material-primitives`，7 项实际检查通过：自然高度与长中文换行、手机宽度与 48 逻辑像素操作、主操作点击、禁用动作不执行、布局与子内容可覆盖、卡片标题坐标点击、卡片内边距坐标点击。最终证据为 build/smoke/navigation-harness-tzw7zru2/report.json，已查看 material-phone.png、material-card-pressed.png 与 material-actions.png，文字与浅色背景对比清楚，按下背景变色可辨。模型和交通供应商调用均为零，无原生错误；所有本组实例已停止。
+
+实际拒绝了未经验证的 Overlay 组合：自然 Fit 卡内的 Fill 按钮零高度，不能充当整卡点击区。可运行组合使用 NavCard 的 on_item_tap、手形光标、已有次操作背景和两个简短 hover/down 动画；一个 Fill/Fit 子 View 承载全部自由内容与内边距，因此文字和留白均可触控。此组合为可选通用用法，未增加新组件或路线模板，短说明交 native-ui owner 整合。早期失败实例保留于 build/smoke，没有把其截图算作最终通过证据。
+
+合成展示不证明模型自由生成、真实 Route 标签绑定或地图缩略图，这些仍需真实候选验收。验收条件为 macOS arm64 宿主 Android 样式，不是 Android 真机；未检查键盘操作、读屏、深色主题或完整 Material 合规。

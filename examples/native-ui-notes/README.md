@@ -1,0 +1,18 @@
+# 独立合成Notes审阅consumer
+
+这个应用只消费agentic-native-ui源码包；记录、选择与更新状态都定义在本目录，没有Navigation业务或生成壳。它不访问真实Notes、日历、模型或网络。更新按钮只替换公开合成fixture，正文不是可编辑个人笔记。
+
+构建：`python3 tools/native_ui_package.py examples/native-ui-notes build/research/native-ui-notes/bundle`。生成manifest、main.splash、AGENT.md和通用skill；digest记录在输出目录旁的native-ui-package.json。应用包盖摘要与宿主运行另由正式native owner在barrier后执行。
+
+初次挂载直接调用review_content()生成列表；review_screen的on_render调用同一个函数更新内容。选择记录与事实版本保存在mod.notes_review，点击回调通过当前ui.review_screen请求重建，不保存旧WidgetRef，也不使用延时猜测挂载时机。列表和详情通过容器visible切换，选中记录仍引用同一份合成事实；外层MaterialSurface覆盖为当前宿主背景色，避免暗色文字层落在默认白色宿主背景上。
+
+2026-10-12锁定App Hub／Makepad的隔离card-host已验证412×892手机视口的长中文列表与滚动、详情、返回、合成事实更新，以及Android light→dark→light样式重新应用后的继续点击，原生日志无错误。实际截图已查看，页面背景与标题文字的像素匹配各样式的当前theme值；event回执不代表新帧已提交，验证在像素到达条件后采集截图。首屏与更新共用内容路径，最终源码包摘要为617b1d414cd4a7a50168b2be1f0881f9cb736071d371f589057c901f9175df49。证据在忽略目录build/research/native-ui-notes/report.json；旧运行器失败保留report-old-runner.json，当前运行器修复前失败保留report-current-runner-before-fix.json。
+
+上述手写示例证据只证明独立消费和交互，不是个人Notes读取、Android真机或Agent自主生成证据。
+
+
+另一次真实MiniMax-M3生成实验复用本应用的公开记录和review_open／review_back／review_update合同，不给模型本文件的旧布局，也不复制Navigation主程序。初始只提供技能metadata；模型真实按需读取material-ui正文，以及新增的primitives.splash和splash-entry.md，全文进入后续请求。source实际位于SDK及helpers之后的standalone implicit View顶层；具名review_screen必须是实际承接on_render的节点，应用helpers向这个当前实例请求render。实验curl模型传输与read_skill/render_ui适配工具不属于官方card-host模型服务。
+
+第21版模型原稿保留在本地忽略目录build/research/native-ui-notes-model/source-21.splash，未被人工改写。最终检查包括可读按钮、两个记录可访问、第二记录详情身份、第一记录详情、真实合成更新、返回列表的更新时间及重新打开详情的版本2正文；截图已查看，无原生错误，所有实例已停。生成布局使用标题／正文／时间的层级和可读英文动作标签，两条记录当前均可直接点击，不需要滚动；这不替代上面手写样例的滚动及主题重应用证据。
+
+完整消息、原始provider响应、call ID、每版源码与失败诊断归build/research/native-ui-notes-model/report.json；最终必要原稿复验归final-source21-recheck/report.json。一次120秒超时后共接续原上下文4次，保留20次修订和验证器误判勘误，不能称首稿成功或可靠性提升。最终SDK摘要为3975fe7fb724ac20ad0c68dab4ef0bc4869bce0ad3cfb038877b630dbb736382；新增的是按需API资料，prelude样式字节仍与已验证主题版一致。生成验收仍只有公开合成Notes，不证明个人服务、Android真机或广泛任务成功率。

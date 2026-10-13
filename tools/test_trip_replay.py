@@ -1,5 +1,6 @@
 """复用私有真实生成记录，检查侧栏切换与冷启动，不调用模型。"""
 import hashlib
+from test_trip_snapshot import read_record
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,7 @@ def source(original):
 def prepare(jail, root=None):
     root = Path(root or os.environ.get('NAV_TRIP_REPLAY_STATE', 'build/research/journey-guardian/online/private-state/home/apps/os.agentic26-navigation'))
     assert (root / 'navigation-trips.json').exists(), '先提供真实保存记录：NAV_TRIP_REPLAY_STATE'
-    for pattern in ('navigation-trips*.json', 'navigation-trip-trip-*.json', 'guardian-goal*.json'):
+    for pattern in ('navigation-trips*.json', 'navigation-trip-trip-*.json', 'navigation-trip-trip-*-part-*.text', 'guardian-goal*.json'):
         for path in root.glob(pattern):
             shutil.copyfile(path, jail / path.name)
 
@@ -61,7 +62,7 @@ def run(work, jail, request, stop, launch, original, injected):
 
     def disk():
         index = json.loads((jail / 'navigation-trips.json').read_text())['data']
-        return index, {e['id']: json.loads((jail / e['file']).read_text())['data'] for e in index['trips']}
+        return index, {e['id']: read_record(jail,e['file']) for e in index['trips']}
 
     index, records = disk()
     real = next(r for r in records.values() if r.get('snapshot') and len(r['snapshot']['blocks']) >= 3)
