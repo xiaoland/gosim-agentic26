@@ -958,9 +958,16 @@ fn accept_map_slot(slot, bytes, token, request, target_id, detail){
 
 
 fn view_route(id){
- let candidate=ui_route(id) if candidate==nil {show_status("路线已不在本次查询中") return}
+ let candidate=ui_route(id)
+ if candidate==nil {
+  viewed_route_id="" ui_facts_revision+=1
+  for block in ui_blocks {if route_get(block,"route_detail")==true {block.visible=false block.detail_open_pending=false set_block_visibility(block)}}
+  render_content() show_status("该内容不是本次可查看的路线；报价需要先关联到路线") return
+ }
  // 选定事实不依赖可失败的地图目录；合法Route仍可先查看文本与真实步骤。
- let token=run_id viewed_route_id=id ui_facts_revision+=1 render_content() guardian_refresh()
+ id=candidate.id let token=run_id viewed_route_id=id ui_facts_revision+=1
+ for block in ui_blocks {if route_get(block,"route_detail")==true && route_get(block,"detail_open_pending")==true {block.visible=true block.detail_open_pending=false set_block_visibility(block)}}
+ render_content() guardian_refresh()
  ensure_map_catalog(candidate,fn(result){
   if token!=run_id || viewed_route_id!=id {return}
   ui_facts_revision+=1
@@ -2287,7 +2294,7 @@ fn quote_didi(p,token){
             let quote={ref:ref product_name:route_get(item,"productName") product_category:route_get(item,"productCategory") price_text:display price_cents:route_cents(display) base_price_text:base base_price_cents:route_cents(base) discounted_price_text:discounted currency:"CNY" source:"didi-taxi_estimate" quoted_at:at from:from to:to provider_from:route_get(structured,"from") provider_to:route_get(structured,"to") distance_km:route_get(structured,"distanceKm") eta:route_get(structured,"eta") basis:(if discounted!=nil {"平台当前可用优惠后估价；原价仅供对照"} else {"平台当前普通估价"})+"；不保证未来接驳上车价格或落地实付；未下单"}
             didi_quotes[ref]=quote quotes.push(quote)
         }}
-        agent_tool_result({success:true quotes:quotes route_attachment:"可attach_quote以明确地点语义对应作为费用估计；不同供应商上下车连接仍未知，不能改写高德几何"})
+        agent_tool_result({success:true quotes:quotes route_attachment:"quote.ref是报价引用，不是Route id，不能用于view_route/get_route/地图。attach_quote成功返回的新Route id才可用于查看；不同供应商上下车连接仍未知，不能改写高德几何"})
     })
 }
 
@@ -2903,7 +2910,7 @@ fn trip_load(done){
 }
 fn trip_capture(){
  let routes=[] for candidate in candidates {let saved=guardian_materialize(candidate) saved.history_geometry_ref=route_get(candidate,"geometry_ref") routes.push(saved)}
- let blocks=[] for block in ui_blocks {if block.installed && block.error=="" && route_get(block,"raw_source").is_string() {blocks.push({id:block.id source:block.raw_source overlay:block.overlay height:block.height visible:block.visible content_sizing:route_get(block,"content_sizing") render_status:if block.complete {"rendered"} else {"installed_pending_render"} document:block.document})}}
+ let blocks=[] for block in ui_blocks {if block.installed && block.error=="" && route_get(block,"raw_source").is_string() {blocks.push({id:block.id source:block.raw_source overlay:block.overlay height:block.height visible:block.visible content_sizing:route_get(block,"content_sizing") render_status:if block.complete {"rendered"} else {"installed_pending_render"} document:block.document route_detail:route_get(block,"route_detail")})}}
  let facts={} for key value in interface_facts() {facts[key]=value} if facts.guardian!=nil {let guardian={} for key value in facts.guardian {guardian[key]=value} guardian.proposal=nil facts.guardian=guardian}
  return {captured_at:time_now() answer:answer_text facts:facts route_data:routes blocks:blocks}
 }
@@ -2968,7 +2975,7 @@ fn trip_restore(){
  if !viewed_route_id.is_string() {viewed_route_id=""}
  ui_facts_revision+=1
  let params={blocks:[] legacy_content_sizing:true} let document=nil
- for block in trip_history.blocks {if block.document {document={source:block.source content_sizing:route_get(block,"content_sizing") legacy_content_sizing:true}} else {params.blocks.push({id:block.id source:block.source overlay:block.overlay height:block.height visible:false content_sizing:route_get(block,"content_sizing")})}}
+ for block in trip_history.blocks {if block.document {document={source:block.source content_sizing:route_get(block,"content_sizing") legacy_content_sizing:true}} else {params.blocks.push({id:block.id source:block.source overlay:block.overlay height:block.height visible:false content_sizing:route_get(block,"content_sizing") route_detail:if route_get(block,"route_detail")!=nil {block.route_detail} else {block.id=="route_detail"}})}}
  if native_ui_available && (params.blocks.len()>0 || document!=nil) {
   let revision=interface_revision let changed=[] let failed=false
   // 单文档安装会替换整稿；其后追加的命名块必须按相同顺序恢复，不能同传source和blocks。
@@ -3456,6 +3463,7 @@ fn render_tool_params(name,p){
  if name=="render_ui" {return p}
  let id=route_get(p,"id") if id==nil {id=name.strip_prefix("render_")}
  let block={id:id source:p.source}
+ if name=="render_route_detail" {block.route_detail=true}
  let existing=block_by_id(id)
  if route_get(p,"overlay")!=nil {block.overlay=p.overlay} elif existing==nil {block.overlay=name=="render_route_detail"}
  if existing==nil && name=="render_route_detail" {block.visible=false}
@@ -3480,7 +3488,7 @@ fn agent_tools(){
  tool("extend_route_with_rail","将选中真实service_ref和席别接入本轮Route，保留固定班次时刻并累计费用；前序最早到站已晚于发车则拒绝。真实POI关联不证明站台、安检/停止检票或已购票，这些保持未知。",{route_id:{type:"string"} service_ref:{type:"string"} seat_code:{type:"string"} from_ref:{type:"string" description:"班次实际上车站的本轮地图node_ref，前序已查目标须为此车站POI；路网端点差距保留为未知站内接入，不证明赶上检票"} to_ref:{type:"string" description:"班次实际下车站的本轮地图node_ref"} place_basis:{type:"string" description:"铁路实际站名与两个地图POI对应的依据；同城不同站不可混用"}},["route_id" "service_ref" "seat_code" "from_ref" "to_ref" "place_basis"])
  tool("search_didi_places","搜索滴滴供应商真实地点，city完整城市名；报价坐标只用本工具ref。",{query:{type:"string"} city:{type:"string"}},["query" "city"])
  tool("attach_quote","将本轮quote_ref替换route_id指定taxi leg估价，返回新Route；原Route不变。place_basis说明两端地点对应依据，不认证连接。",{route_id:{type:"string"} leg_id:{type:"string"} quote_ref:{type:"string"} place_basis:{type:"string"}},["route_id" "leg_id" "quote_ref" "place_basis"])
- tool("quote_didi","使用本轮滴滴地点ref询价，返回多车型当前CNY估价及报价ref；不下单。",{from_ref:{type:"string"} to_ref:{type:"string"}},["from_ref" "to_ref"])
+ tool("quote_didi","使用本轮滴滴地点ref询价，返回多车型当前CNY估价及报价ref；报价ref不是Route id，attach_quote成功返回的新Route才能查看；不下单。",{from_ref:{type:"string"} to_ref:{type:"string"}},["from_ref" "to_ref"])
  tool("compare_routes","按当前时刻重算已查Route费用、截止与assessment，返回全部候选身份、范围与比较摘要；legs、详细segments、source与map_metadata用get_route(id)按需读取，不自动选定方案。",{},[])
  tool("get_route","读取本轮Route事实详情，无论覆盖全程或局部，以legs与详细segments呈现分段、按线路分开的有序stop refs和map_paths目录；不查询供应商。saved_goal_route仅为已确认历史快照。",{id:{type:"string"}},["id"])
  tool("get_route_graph","默认返回本轮全部节点与Route精简索引、有序线路关系；完整Route用get_route。node_refs仅返回指定节点完整事实与全部线路归属，并明确missing_refs；不查询供应商、不截候选。",{node_refs:{type:"array" items:{type:"string"} description:"可选本轮节点ref数组，按需读取完整坐标/来源/入口事实与全部多线路归属；省略取得全图索引。"}},[])
@@ -4390,6 +4398,7 @@ fn mount_ui_blocks(params,token,revision){
    let kept={} for key slot in map_slots {if route_get(slot,"block_id")!=block.id {kept[key]=slot}} map_slots=kept
   }
   block.revision+=1 block.notified=false block.complete=false block.error="" block.mailbox_seen="" block.mailbox_lines=0 block.installed=false
+  if route_get(input,"route_detail")!=nil {block.route_detail=input.route_detail}
   block.raw_source=input.source
   block.source=block_source(block,input.source) block.source_revision=ui_facts_revision changed.push(block)
  }
@@ -4464,8 +4473,12 @@ fn ui_dispatch_action(action){
  elif name=="map" {register_map_block(action.widget,action.target,route_get(action,"status_widget"),route_get(action,"interactive"),route_get(action,"path_indices"),block_id)}
  elif name=="map_camera" {action.widget=block_map_key(block_id,action.widget) map_camera_changed(action)}
  elif name=="map_fit" {let slot=map_slots[block_map_key(block_id,action.widget)] if slot!=nil && slot.interactive {let route=map_candidate(slot.target) if route!=nil {fit_map_slot(slot,route)}}}
- elif name=="show_block" {let target=block_by_id(action.block) if target!=nil {target.visible=action.visible!=false set_block_visibility(target) render_content()} else {block_error(block,"show_block目标区块不存在："+action.block)}}
- elif name=="view_route" {let route=ui_route(id) if route!=nil {view_route(route.id)} else {show_status("路线已不在本次查询中")}}
+ elif name=="show_block" {let target=block_by_id(action.block) if target!=nil {let opening=action.visible!=false
+  // 本地事件支持先打开再选路线；无有效选择时不能露出上一详情。
+ if route_get(target,"route_detail")==true {target.detail_open_pending=opening && ui_route("viewed")==nil target.visible=opening && !target.detail_open_pending}
+  else {target.visible=opening}
+  set_block_visibility(target) render_content()} else {block_error(block,"show_block目标区块不存在："+action.block)}}
+ elif name=="view_route" {view_route(id)}
  elif name=="runtime_error" {block_error(block,route_get(action,"message"))}
  else {show_status("本地动作未实现："+name)}
  return true
