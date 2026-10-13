@@ -30,6 +30,9 @@ View{width:Fill height:Fit flow:Down spacing:12 padding:8
   material_secondary := MaterialSecondaryAction{width:176 text:"次操作 Aa123"}
   nav_secondary := NavSecondaryAction{width:176 text:"次操作 Aa123"}
  }
+ default_body := Label{text:"正文 汉字 Aa123"}
+ explicit_body := Label{text:"正文 汉字 Aa123" draw_text +:{text_style:NavRegular{font_size:16}}}
+ explicit_small := Label{text:"正文 汉字 Aa123" draw_text +:{text_style:NavRegular{font_size:12}}}
 }
 '''
 FIXTURE=r'''
@@ -67,6 +70,8 @@ def run(work,jail,original,injected):
     check('生产generated_context直接Material五类真实通知完成',result['reply']['success'] and result['reply']['notified'] and all(r['r'][2]>0 and r['r'][3]>0 for r in widgets.values()))
     check('同内容Material与Nav同字号实际排版高度一致',all(widgets['material_'+n]['t']==widgets['nav_'+n]['t'] and abs(widgets['material_'+n]['r'][3]-widgets['nav_'+n]['r'][3])<.1 for n in names))
     check('实际Phone412x892五类在同一屏可见',size==(412,892) and all(0<=r['r'][1]<892 and r['r'][1]+r['r'][3]<=892 for r in widgets.values()))
-    context=(jail/'font-probe-generated-context.txt').read_text();check('五局部继承只覆盖22/16/13/16/14字体样式',all(('let Material'+n+' = Material'+n+'{draw_text +:{text_style:NavRegular{font_size:'+str(v)+'}}}') in context for n,v in [('Title',22),('Body',16),('Meta',13),('Action',16),('SecondaryAction',14)]))
+    defaults={name:next(r for r in rows if r.get('i')==name) for name in ['default_body','explicit_body','explicit_small']}
+    check('裸Label正文默认实际等于显式16且合法12覆盖保留',abs(defaults['default_body']['r'][3]-defaults['explicit_body']['r'][3])<.1 and defaults['default_body']['r'][3]>defaults['explicit_small']['r'][3]>0)
+    context=(jail/'font-probe-generated-context.txt').read_text();check('五局部继承只覆盖22/16/14/16/14字体样式',all(('let Material'+n+' = Material'+n+'{draw_text +:{text_style:NavRegular{font_size:'+str(v)+'}}}') in context for n,v in [('Title',22),('Body',16),('Meta',14),('Action',16),('SecondaryAction',14)]))
     report={'checks':checks,'source_sha256':hashlib.sha256(original.encode()).hexdigest(),'widgets':widgets,'reply':result['reply'],'font_resource_sha256':hashlib.sha256((ROOT/'bundle/assets/fonts/NavigationSans-Regular.otf').read_bytes()).hexdigest(),'font_binding':'实际generated_context中NavRegular FontFamily latin绑定本地NavigationSans-Regular.otf；5个Material派生继承canonical仅覆盖text_style。','snapshot_font_binding_available':False,'screenshot_viewed':False,'native_errors':[l for l in (work/'native.log').read_text().splitlines() if '[E]' in l],'model_requested':False,'provider_requested':False,'boundary':'一屏合成内容的实际Material/Nav生产子DSL消费；snapshot只给widget/text/rect，不暴露字体内部family；须结合查看截图字形与source绑定，不能从截图单独断言内部family名称。不测其它app/主题/点击/规划。'}
-    (work/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));assert all(c['passed'] for c in checks),str(work/'report.json')
+    (work/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));assert all(c['passed'] for c in checks) and not report['native_errors'],str(work/'report.json')

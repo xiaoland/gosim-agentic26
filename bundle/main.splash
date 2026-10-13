@@ -338,7 +338,7 @@ fn route_candidates(transitData, drivingData, queryTs, deadlineTs, budgetCents, 
                 queryTs, nowTs, route_terminal(segments), route_get(transitRoute, "destination"), true, segments)
             if kind == "mixed" { candidate.warnings = "供应商含等车总估计；出租车等待未单独核实，不保证实际费用或准时抵达。" }
             candidate.distance_m = route_seconds(route_get(option,"distance"))
-            candidate.price_basis = "amap-option.cost.transit_fee；供应商本次option字段报价；当前投影未提供各交通分段票价分摊或包含关系，未拆分不表示未包含；请求全程覆盖以cost.coverage为准"
+            candidate.price_basis = "amap-option.cost.transit_fee；供应商本次查询区间报价；各交通分段票价及包含关系未知，无法据此确认是否包含城际车票；请求全程覆盖以cost.coverage为准"
             candidate.reason = route_reason(candidate, nowTs, deadlineTs, budgetCents)
             candidate.feasible = candidate.reason == "估计满足约束"
             candidates.push(candidate)
@@ -475,14 +475,14 @@ fn guardian_valid_goal(goal){
 }
 
 // 模型只解释意图并决定下一步；地点、费用与可行性来自工具和确定性检查。
-let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource("{{assets}}/assets/fonts/NavigationSans-Regular.otf") asc: 0.0 desc: 0.0}}}
+let NavRegular = theme.font_regular{font_size:16 font_family: FontFamily{latin := FontMember{res: http_resource("{{assets}}/assets/fonts/NavigationSans-Regular.otf") asc: 0.0 desc: 0.0}}}
 let NavBold = theme.font_bold{font_family: FontFamily{latin := FontMember{res: http_resource("{{assets}}/assets/fonts/NavigationSans-Regular.otf") asc: 0.0 desc: 0.0}}}
 let ink = #x162e35
 let muted = #x5e747b
 let teal = #x06796f
 let NavPrimary = ButtonFlat{height:44 margin:0 draw_text +:{text_style:NavRegular{font_size:16} color:#xffffff color_hover:#xffffff color_down:#xffffff color_focus:#xffffff} draw_bg +:{color:#x28786f color_hover:#x216b63 color_down:#x195d56 color_focus:#x28786f border_size:0 border_radius:8}}
 let NavSecondary = ButtonFlat{height:44 margin:0 draw_text +:{text_style:NavRegular{font_size:14} color:ink color_hover:ink color_down:ink color_focus:ink} draw_bg +:{color:#xf0f4f3 color_hover:#xe6efec color_down:#xdde8e4 border_size:0 border_radius:8}}
-let NavMeta = Label{width:Fill height:Fit flow:Flow.Right{wrap:true} draw_text +:{text_style:NavRegular{font_size:13} color:muted}}
+let NavMeta = Label{width:Fill height:Fit flow:Flow.Right{wrap:true} draw_text +:{text_style:NavRegular{font_size:14} color:muted}}
 // 已核对的扩展宿主提供此类型；官方原版不具备本应用的区块、布局和地图接口。
 let native_ui_available = route_get(mod.widgets, "AutoNaviMapView") != nil
 let missing_runtime_message = "当前宿主缺少 Navigation 所需的原生扩展，查询暂不可用。\n需要区块寻址、布局测量、渲染诊断和交互地图接口；请使用 README 中注明的配套宿主。官方原版首屏仅展示兼容说明。"
@@ -1435,34 +1435,45 @@ fn explicit_limits(text){
         if time_parts.len() != 1 { return nil }
         time_parts = hours time_multiplier = 60
     }
-    let budget_parts = compact.split("预算")
-    if time_parts.len() != 2 || budget_parts.len() != 2 { return nil }
+    if time_parts.len() != 2 { return nil }
     let minute_text = ""
     for ch in time_parts[0].split("") {
         if ch != "" { if regex("^[0-9.]$", "").test(ch) { minute_text += ch } else { minute_text = "" } }
     }
-    let amount_text = "" let ended = false
-    let budget_text = budget_parts[1].strip_prefix("人民币").strip_prefix("CNY").strip_prefix("RMB").strip_prefix("¥").strip_prefix("￥")
-    for ch in budget_text.split("") {
-        if ch != "" && !ended { if regex("^[0-9.]$", "").test(ch) { amount_text += ch } else { ended = true } }
-    }
     let minutes = route_seconds(minute_text)
     if minutes != nil { minutes *= time_multiplier }
-    let cents = route_cents(amount_text)
-    if minutes == nil || cents == nil || minutes < 1 || minutes > 9007199254740991 / 60 { return nil }
-    let currency = "unspecified"
-    let tail = budget_text.strip_prefix(amount_text)
-    let suffix = "" let suffix_ended = false
-    for ch in tail.split("") {
-        if ch == "，" || ch == "," || ch == "。" || ch == "；" || ch == ";" || ch == "!" || ch == "?" || ch == "！" || ch == "？" { suffix_ended = true }
-        if !suffix_ended { suffix += ch }
+    if minutes == nil || minutes < 1 || minutes > 9007199254740991 / 60 { return nil }
+    let cents=nil let currency="unspecified" let currency_marker=nil
+    for index statement in compact.split("预算") {
+        if index==0 {continue}
+        let amount_text="" let ended=false
+        let budget_text=statement.strip_prefix("人民币").strip_prefix("CNY").strip_prefix("RMB").strip_prefix("¥").strip_prefix("￥")
+        for ch in budget_text.split("") {
+            if ch!="" && !ended {if regex("^[0-9.]$", "").test(ch) {amount_text+=ch} else {ended=true}}
+        }
+        // “守护预算”等非数字提及不构成第二声明；无法识别的数字声明不能被跳过。
+        if amount_text=="" {if regex("^[^，,。；;!?！？]*[0-9]", "").test(statement) {return nil} continue}
+        let amount=route_cents(amount_text) if amount==nil || (cents!=nil && cents!=amount) {return nil}
+        let incoming_currency="unspecified"
+        let tail = budget_text.strip_prefix(amount_text)
+        let suffix = "" let suffix_ended = false
+        for ch in tail.split("") {
+            if ch == "，" || ch == "," || ch == "。" || ch == "；" || ch == ";" || ch == "!" || ch == "?" || ch == "！" || ch == "？" { suffix_ended = true }
+            if !suffix_ended { suffix += ch }
+        }
+        if suffix != "" && suffix != "元" && suffix != "块" && suffix != "块钱" && suffix != "以内" && suffix != "以下" && suffix != "元以内" && suffix != "元以下" { incoming_currency = "unsupported" }
+        if statement.search("人民币") == 0 || statement.search("CNY") == 0 || statement.search("RMB") == 0 || suffix == "人民币" || suffix == "元人民币" || suffix == "CNY" || suffix == "RMB" { incoming_currency = "CNY" }
+        if incoming_currency == "CNY" && suffix != "" && suffix != "元" && suffix != "人民币" && suffix != "元人民币" && suffix != "CNY" && suffix != "RMB" && suffix != "以内" && suffix != "以下" && suffix != "元以内" && suffix != "元以下" { incoming_currency = "unsupported" }
+
+        let marker=if incoming_currency=="unspecified" {nil} elif incoming_currency=="CNY" {"CNY"} else {suffix}
+        if marker!=nil && currency_marker!=nil && marker!=currency_marker {return nil}
+        if marker!=nil {currency_marker=marker currency=incoming_currency}
+        cents=amount
     }
-    if suffix != "" && suffix != "元" && suffix != "块" && suffix != "块钱" && suffix != "以内" && suffix != "以下" && suffix != "元以内" && suffix != "元以下" { currency = "unsupported" }
-    if budget_parts[1].search("人民币") == 0 || budget_parts[1].search("CNY") == 0 || budget_parts[1].search("RMB") == 0 || suffix == "人民币" || suffix == "元人民币" || suffix == "CNY" || suffix == "RMB" { currency = "CNY" }
-    if currency == "CNY" && suffix != "" && suffix != "元" && suffix != "人民币" && suffix != "元人民币" && suffix != "CNY" && suffix != "RMB" && suffix != "以内" && suffix != "以下" && suffix != "元以内" && suffix != "元以下" { currency = "unsupported" }
-    let declaration = declared_currency(text)
-    if declaration != "unspecified" { currency = declaration }
-    return {minutes: minutes budget_cents: cents currency: currency}
+    if cents==nil {return nil}
+    let declaration=declared_currency(text)
+    if declaration!="unspecified" {if currency!="unspecified" && currency!=declaration {return nil} currency=declaration}
+    return {minutes:minutes budget_cents:cents currency:currency}
 }
 fn reject_constraints(reason){ constraint_error = reason + "；尚未查询路线" return false }
 fn set_constraints(p){
@@ -1960,7 +1971,7 @@ fn extension_leg(route,option,index,option_count,mode,from,to,at,departure,seque
         elif mode=="taxi" && option_count==1 {price=route_cents(route_get(route,"taxi_cost")) basis="amap-route.taxi_cost；一次完整出租车行程估算，非滴滴实时报价"}
         elif mode=="transit" {
             let has_taxi=false for segment in segments {if route_get(segment,"taxi").is_object(){has_taxi=true}}
-            if !has_taxi {price=route_cents(route_get(cost,"transit_fee")) basis="amap-option.cost.transit_fee；供应商本次leg字段报价；当前投影未提供各交通分段票价分摊或包含关系，未拆分不表示未包含；请求全程覆盖以cost.coverage为准"}
+            if !has_taxi {price=route_cents(route_get(cost,"transit_fee")) basis="amap-option.cost.transit_fee；供应商本次查询区间报价；各交通分段票价及包含关系未知，无法据此确认是否包含城际车票；请求全程覆盖以cost.coverage为准"}
         }
         let actual_origin=route_leg_endpoint(segments,true) let actual_end=route_leg_endpoint(segments,false)
         let start_gap=route_endpoint_gap(actual_origin,coord_text(from)) let end_gap=route_endpoint_gap(actual_end,coord_text(to))
@@ -2020,7 +2031,7 @@ fn accept_extension_option(state){
     read_route_summaries(state.candidates,state.token,fn(routes){
         let call_id=if active_tool!=nil {active_tool.id} else {nil}
         start_timeout(0.01,||trace_emit_run("route_extension",{from_ref:state.from.ref to_ref:state.to.ref mode:state.mode requested_departure:state.departure prefixes:state.added rejected:state.rejected completed:state.completed},call_id,state.token))
-        agent_tool_result({success:true routes:routes completed_candidate_ids:state.completed rejected:state.rejected new_nodes:tool_new_nodes() combination_status:if routes.len()==0 {"no_registered_connection"} else {"registered_routes_only"} combination_basis:"只引用成功注册Route的累计费用与时间；rejected路段未接入，不能手算为完整行程。未知连接仍为已查段小计和最早时间下界。"})
+        agent_tool_result({success:true routes:if active_tool!=nil && active_tool.function.name=="query_route" {query_route_result_summaries(routes)} else {routes} completed_candidate_ids:state.completed rejected:state.rejected new_nodes:if active_tool!=nil && active_tool.function.name=="query_route" {model_node_references(tool_new_nodes())} else {tool_new_nodes()} combination_status:if routes.len()==0 {"no_registered_connection"} else {"registered_routes_only"} combination_basis:"只引用成功注册Route的累计费用与时间；rejected路段未接入，不能手算为完整行程。未知连接仍为已查段小计和最早时间下界。"})
     })
 }
 fn extend_route(p,token){
@@ -2271,8 +2282,9 @@ fn quote_didi(p,token){
     didi_request("taxi_estimate",{from_lng:""+from.longitude from_lat:""+from.latitude from_name:from.name to_lng:""+to.longitude to_lat:""+to.latitude to_name:to.name},token,fn(result){
         let structured=route_get(result,"structuredContent") let items=route_get(structured,"items") let quotes=[]
         if items.is_array(){for item in items {
-            didi_record_count+=1 let ref="didi-quote:"+didi_record_count let display=route_get(item,"priceText")
-            let quote={ref:ref product_name:route_get(item,"productName") product_category:route_get(item,"productCategory") price_text:display price_cents:route_cents(display) discounted_price_text:route_get(item,"priceDiscounted") currency:"CNY" source:"didi-taxi_estimate" quoted_at:at from:from to:to provider_from:route_get(structured,"from") provider_to:route_get(structured,"to") distance_km:route_get(structured,"distanceKm") eta:route_get(structured,"eta") basis:"当前时点估价；不保证未来接驳上车价格；优惠价不默认适用；未下单"}
+            didi_record_count+=1 let ref="didi-quote:"+didi_record_count let base=route_get(item,"priceText") let discounted=route_get(item,"priceDiscounted")
+            let display=if discounted!=nil {discounted} else {base}
+            let quote={ref:ref product_name:route_get(item,"productName") product_category:route_get(item,"productCategory") price_text:display price_cents:route_cents(display) base_price_text:base base_price_cents:route_cents(base) discounted_price_text:discounted currency:"CNY" source:"didi-taxi_estimate" quoted_at:at from:from to:to provider_from:route_get(structured,"from") provider_to:route_get(structured,"to") distance_km:route_get(structured,"distanceKm") eta:route_get(structured,"eta") basis:(if discounted!=nil {"平台当前可用优惠后估价；原价仅供对照"} else {"平台当前普通估价"})+"；不保证未来接驳上车价格或落地实付；未下单"}
             didi_quotes[ref]=quote quotes.push(quote)
         }}
         agent_tool_result({success:true quotes:quotes route_attachment:"可attach_quote以明确地点语义对应作为费用估计；不同供应商上下车连接仍未知，不能改写高德几何"})
@@ -3245,6 +3257,12 @@ fn start_task_with(text,recheck){
     render_probe=nil
     agent_tool_schema=nil
     if text == "" { show_status("请用一句话说明行程、时限与预算") return }
+    if !recheck {
+      let limits=explicit_limits(text)
+      if limits==nil {let reason="本次指令无法唯一确定数字时限和预算，请明确分钟或小时及一致的预算金额与币种；尚未开始规划" composer_open=true ui.composer_help.set_text(reason) show_status(reason) return}
+      if limits.currency!="CNY" && limits.currency!="unspecified" {let reason="本次报价为人民币，不能直接与其它币种预算比较；尚未开始规划" composer_open=true ui.composer_help.set_text(reason) show_status(reason) return}
+    }
+    ui.composer_help.set_text("提交会新建一条出行，原记录保留。")
     clear_model_resume()
     reset_private_config()
     if recheck {start_task_ready(text,recheck)} else {trip_begin(text,fn(committed){
@@ -3453,18 +3471,18 @@ fn agent_tools(){
  tool("report_goal_check","以本轮新route_id计算并记录原计划valid/invalid/unknown；省略id检查已过期、已超支或缺证据。返回核验与替代差额，不替换路线。",{route_id:{type:"string"}},[])
  tool("read_skill","读取技能目录中的技能。省略path读取SKILL.md；path可读取该技能返回的files中的引用资料。",{name:{type:"string"} path:{type:"string"}},["name"])
  tool("read_location",if mode=="demo" {"读取显式模拟出发位置并核实城市。"} else {"读取当前设备定位并核实城市。"},{},[])
- tool("search_places","搜索高德真实地点，返回POI、城市与可extend的node_ref；不采用目的地。",{query:{type:"string"}},["query"])
- tool("adopt_destination","采用已有poi_id为本任务目标。basis说明来自用户选择或明确推断；不伪造航站楼。",{poi_id:{type:"string"} basis:{type:"string"}},["poi_id" "basis"])
- tool("query_route","从当前起点查询，返回新增Route、分段事实和new_nodes；成功Route.id可供extend_route继续累计。transit公交策略默认0；taxi为完整驾车路程估价，候车未知。已采用航站楼的披露入口为路由点，内部通达仍未知。",{to_ref:{type:"string" description:"可选真实中转节点node_ref，省略则到destination。指定时只查origin到该节点，作为新的完整前缀；非滴滴询价地点ref。"} mode:{type:"string" enum:["transit" "taxi"]} strategy:{type:"number" description:"transit:0推荐/1经济/2少换乘/3少步行/4舒适/5无地铁/7地铁优先/8快；默认0"}},["mode"])
- tool("extend_route","查询完整新段并返回累计的新Route，原Route不变；成功返回的Route.id可作下一次route_id。费用/时间只引用成功注册Route/get_route的累计结果，完整公交票价不可拆摊；routes[]表示未组合，不能手算拒绝接驳为完整行程。",{route_id:{type:"string" description:"要保留并累计的本轮完整前缀Route.id，从其实际终点继续。origin是零路段起点；从起点重组或替换首段用origin。完整公交Route.id会保留其全部耗时费用，不会裁到内部站点。"} to_ref:{type:"string" description:"下一节点的真实node_ref；已采用航站楼的canonical POI/ref或其入口ref使用披露的destination入口绑定，其它节点不变。非滴滴询价地点ref。"} mode:{type:"string" enum:["walk" "taxi" "transit"]} strategy:{type:"number" description:"公交策略，含义同query_route；默认0，仅transit使用"}},["route_id" "to_ref" "mode"])
+ tool("search_places","搜索高德真实地点，返回全部POI身份、名称、地址、类型、城市、来源与可extend的node_ref；不采用目的地。完整入口资料用get_route_graph(node_refs)按需读取。",{query:{type:"string"}},["query"])
+ tool("adopt_destination","采用已有poi_id为本任务目标，返回已采用目的地、披露入口范围、constraints和原绝对期限。basis说明来自用户选择或明确推断；不伪造航站楼。",{poi_id:{type:"string"} basis:{type:"string"}},["poi_id" "basis"])
+ tool("query_route","从当前起点查询，返回新增Route摘要和new_nodes，保留金额、时间范围、assessment及来源；完整legs/segments由get_route(id)按需读取，new_nodes保节点引用；坐标用get_route_graph(node_refs)读取。success仅表示查询完成，不保证目标可行；Route.id可供extend_route继续累计。transit公交策略默认0；taxi为本次供应商到所选路由点的驾车区间估价，候车未知。已采用航站楼的披露入口为路由点，内部通达仍未知。",{to_ref:{type:"string" description:"可选真实中转节点node_ref，省略则到destination。指定时只查origin到该节点，作为新的完整前缀；非滴滴询价地点ref。"} mode:{type:"string" enum:["transit" "taxi"]} strategy:{type:"number" description:"transit:0推荐/1经济/2少换乘/3少步行/4舒适/5无地铁/7地铁优先/8快；默认0"}},["mode"])
+ tool("extend_route","查询本次供应商区间并返回累计的新Route，原Route不变；成功返回的Route.id可作下一次route_id。费用/时间只引用成功注册Route/get_route的累计结果，完整公交票价不可拆摊；routes[]表示未组合，不能手算拒绝接驳为完整行程。",{route_id:{type:"string" description:"要保留并累计的本轮完整前缀Route.id，从其实际终点继续。origin是零路段起点；从起点重组或替换首段用origin。公交Route.id保留其已查供应商区间的全部耗时费用，不会裁到内部站点。"} to_ref:{type:"string" description:"下一节点的真实node_ref；已采用航站楼的canonical POI/ref或其入口ref使用披露的destination入口绑定，其它节点不变。非滴滴询价地点ref。"} mode:{type:"string" enum:["walk" "taxi" "transit"]} strategy:{type:"number" description:"公交策略，含义同query_route；默认0，仅transit使用"}},["route_id" "to_ref" "mode"])
  tool("search_rail_stations","按关键词查询12306公开车站表，返回真实铁路站ref/name/code；不包含地图坐标，使用search_places核对应POI。",{query:{type:"string"}},["query"])
  tool("search_rail_services","查询12306匿名网页实际铁路班次；主services严格匹配实际上下车站码与请求站对，默认今日北京时间。同城其它站对仅返回可重新查询的发现refs，不套用当前前缀到原站时刻。精确空仅说明该实际站对与时间窗为空；最终目的地POI不必是铁路下车站，可发现其它主干再核前后接驳。时间下界采用当前时刻或route_id最早到站，上界为本次到达期限；返回service_ref、实际上下车站、固定发到时刻和逐席别价格/余票。余票不是已购票，网页访问失败可继续高德城际探索。",{from_station:{type:"string" description:"search_rail_stations返回的ref或精确站名，不是地图POI ID"} to_station:{type:"string"} date:{type:"string" description:"可选YYYY-MM-DD乘车日期，默认今日；不是列车始发日"} route_id:{type:"string" description:"可选本轮Route ID，工具据其最早到站筛选班次"}},["from_station" "to_station"])
  tool("extend_route_with_rail","将选中真实service_ref和席别接入本轮Route，保留固定班次时刻并累计费用；前序最早到站已晚于发车则拒绝。真实POI关联不证明站台、安检/停止检票或已购票，这些保持未知。",{route_id:{type:"string"} service_ref:{type:"string"} seat_code:{type:"string"} from_ref:{type:"string" description:"班次实际上车站的本轮地图node_ref，前序已查目标须为此车站POI；路网端点差距保留为未知站内接入，不证明赶上检票"} to_ref:{type:"string" description:"班次实际下车站的本轮地图node_ref"} place_basis:{type:"string" description:"铁路实际站名与两个地图POI对应的依据；同城不同站不可混用"}},["route_id" "service_ref" "seat_code" "from_ref" "to_ref" "place_basis"])
  tool("search_didi_places","搜索滴滴供应商真实地点，city完整城市名；报价坐标只用本工具ref。",{query:{type:"string"} city:{type:"string"}},["query" "city"])
  tool("attach_quote","将本轮quote_ref替换route_id指定taxi leg估价，返回新Route；原Route不变。place_basis说明两端地点对应依据，不认证连接。",{route_id:{type:"string"} leg_id:{type:"string"} quote_ref:{type:"string"} place_basis:{type:"string"}},["route_id" "leg_id" "quote_ref" "place_basis"])
  tool("quote_didi","使用本轮滴滴地点ref询价，返回多车型当前CNY估价及报价ref；不下单。",{from_ref:{type:"string"} to_ref:{type:"string"}},["from_ref" "to_ref"])
- tool("compare_routes","按当前时刻重算已查Route费用、截止与assessment，返回全部候选身份、范围与比较摘要；完整legs/steps/source/map_metadata用get_route(id)按需读取，不自动选定方案。",{},[])
- tool("get_route","读取本轮完整/未完成Route详情、按线路分开的有序stop refs和map_paths目录；不查询供应商。saved_goal_route仅为已确认历史快照。",{id:{type:"string"}},["id"])
+ tool("compare_routes","按当前时刻重算已查Route费用、截止与assessment，返回全部候选身份、范围与比较摘要；legs、详细segments、source与map_metadata用get_route(id)按需读取，不自动选定方案。",{},[])
+ tool("get_route","读取本轮Route事实详情，无论覆盖全程或局部，以legs与详细segments呈现分段、按线路分开的有序stop refs和map_paths目录；不查询供应商。saved_goal_route仅为已确认历史快照。",{id:{type:"string"}},["id"])
  tool("get_route_graph","默认返回本轮全部节点与Route精简索引、有序线路关系；完整Route用get_route。node_refs仅返回指定节点完整事实与全部线路归属，并明确missing_refs；不查询供应商、不截候选。",{node_refs:{type:"array" items:{type:"string"} description:"可选本轮节点ref数组，按需读取完整坐标/来源/入口事实与全部多线路归属；省略取得全图索引。"}},[])
  render_block_tool("render_summary","呈现本次总结论")
  render_block_tool("render_explanation","呈现结论的简要解释")
@@ -3797,6 +3815,25 @@ fn model_task_context(){
  if config!=nil {let key=route_get(config.parse_json(),"didi_mcp_key") configured=key.is_string() && key!=""}
  return {presentation_task:navigation_presentation_task() guardian:guardian_snapshot() guardian_recheck:guardian_mode limits:user_limits received_at:received_at received_at_label:guardian_deadline(received_at) arrive_by:arrive_by arrive_by_label:if arrive_by!=nil {guardian_deadline(arrive_by)} else {nil} timezone:"Asia/Shanghai" viewport:facts.viewport rendering_environment:facts.rendering_environment providers:{didi:{configured:configured availability:"配置不等于服务可用；未调用或调用失败不能推断未配置"}} origin:position_record destination:destination_record source_label:source_label()}
 }
+// 模型回执删去可按引用恢复的重复表示；内部事实与UI使用原对象。
+fn model_fields_without(value,omitted){
+ let result={}
+ for key field in value {
+  // 原生枚举键是标识符，JSON回读键是字符串。
+  let name=""+key let keep=true
+  for excluded in omitted {if name==excluded {keep=false}}
+  if keep {result[key]=field}
+ }
+ return result
+}
+fn model_place_results(places){let result=[] for poi in places {result.push(model_fields_without(poi,["entrance" "returned_at"]))} return result}
+fn model_node_references(nodes){let result=[] for node in nodes {result.push(model_fields_without(node,["longitude" "latitude" "coordinate_system"]))} return result}
+fn model_route_detail(fact){
+ let segments=route_get(fact,"segments")
+ if segments.is_array() && segments.len()>0 {return model_fields_without(fact,["steps"])}
+ return fact
+}
+fn query_route_result_summaries(routes){let result=[] for route in routes {result.push(model_fields_without(route,["legs" "steps"]))} return result}
 fn finish_tool_from_state(token){
  if !current_task(token) || active_tool==nil {return}
  let name=active_tool.function.name
@@ -3806,8 +3843,11 @@ fn finish_tool_from_state(token){
  elif name=="read_notes" {agent_tool_result({success:true records:note_records})}
  elif name=="query_route" || name=="query_transit" || name=="query_driving" {
     let added=[] for index candidate in candidates {if index>=tool_candidate_start {added.push(candidate)}}
-    read_route_summaries(added,token,fn(routes){agent_tool_result({success:true routes:routes new_nodes:tool_new_nodes()})})
- } else {agent_tool_result({success:true origin:position_record destination:destination_record constraints:constraints limits:user_limits arrive_by:arrive_by new_nodes:tool_new_nodes()})}
+    read_route_summaries(added,token,fn(routes){
+     agent_tool_result({success:true routes:if name=="query_route" {query_route_result_summaries(routes)} else {routes} new_nodes:if name=="query_route" {model_node_references(tool_new_nodes())} else {tool_new_nodes()}})
+    })
+ } elif name=="adopt_destination" {agent_tool_result({success:true destination:model_fields_without(destination_record,["entrance" "routing_point"]) constraints:constraints arrive_by:arrive_by})}
+ else {agent_tool_result({success:true origin:position_record destination:destination_record constraints:constraints limits:user_limits arrive_by:arrive_by new_nodes:tool_new_nodes()})}
 }
 fn agent_execute_next(token){
  let render_entry_at=time_now()
@@ -3846,7 +3886,7 @@ fn agent_execute_next(token){
   elif name=="set_constraints" {if set_constraints(p){finish_tool_from_state(token)} else {agent_tool_result({success:false error:constraint_error})}}
   elif name=="search_places" {
     let at=time_now() let city="" if position_record!=nil {city="&city="+position_record.citycode.url_encode()}
-    amap_request("/v3/place/text","&citylimit=false&extensions=all&children=1"+city+"&keywords="+p.query.url_encode(),token,fn(data){poi_records=parse_pois(data,at,false) register_route_pois(poi_records) picker_pois=poi_records observe("search_places",poi_records) agent_tool_result({success:true places:poi_records})})
+    amap_request("/v3/place/text","&citylimit=false&extensions=all&children=1"+city+"&keywords="+p.query.url_encode(),token,fn(data){poi_records=parse_pois(data,at,false) register_route_pois(poi_records) picker_pois=poi_records observe("search_places",poi_records) agent_tool_result({success:true places:model_place_results(poi_records)})})
   }
   elif name=="adopt_destination" {
     let poi=route_poi(p.poi_id)
@@ -3864,11 +3904,11 @@ fn agent_execute_next(token){
   elif name=="attach_quote" {attach_quote(p,token)}
   elif name=="compare_routes" {present_results("")}
   elif name=="get_route" {
-    if p.id=="saved_goal_route" && guardian_goal!=nil {ensure_map_catalog(guardian_goal.selected_route,||agent_tool_result({success:true route:guardian_saved_route_facts()}))}
+    if p.id=="saved_goal_route" && guardian_goal!=nil {ensure_map_catalog(guardian_goal.selected_route,||agent_tool_result({success:true route:model_route_detail(guardian_saved_route_facts())}))}
     else {let candidate=ui_route(p.id) if candidate==nil {agent_tool_result({success:false error:"路线ID不在本轮候选中"})} else {ensure_map_catalog(candidate,||{
      if trip_replay {let saved=nil for item in trip_history.facts.routes {if item.id==candidate.id {saved=item}}
-      if saved==nil {agent_tool_result({success:false error:"历史路线缺少保存的公开事实；未重算旧时价"})} else {agent_tool_result({success:true route:history_route_public_facts(saved,candidate)})}
-     } else {agent_tool_result({success:true route:interface_route_facts(candidate,route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents")))})}
+      if saved==nil {agent_tool_result({success:false error:"历史路线缺少保存的公开事实；未重算旧时价"})} else {agent_tool_result({success:true route:model_route_detail(history_route_public_facts(saved,candidate))})}
+     } else {agent_tool_result({success:true route:model_route_detail(interface_route_facts(candidate,route_recheck(candidate,time_now(),arrive_by,route_get(constraints,"budget_cents"))))})}
     })}}
   }
   elif name=="get_route_graph" {read_model_route_graph(p,token,fn(graph){if route_get(graph,"error")!=nil {agent_tool_result({success:false error:graph.error})} else {agent_tool_result({success:true graph:graph})}})}
@@ -3932,6 +3972,7 @@ fn resume_model_request(){
  return true
 }
 fn model_input_changed(){
+ ui.composer_help.set_text("提交会新建一条出行，原记录保留。")
  if ui.sentence.text().trim()!=request_form_input {clear_model_resume() if model_request_owner!=nil {model_request_owner.resume_input_changed=true}}
  ui.control.render()
 }
@@ -4056,11 +4097,13 @@ fn route_duration_facts(candidate){
 }
 // 已查路段的报价齐全，不等于到请求目的地的全程费用齐全。
 fn route_cost_label(cost){
- if cost.full_journey_amount_cents!=nil {return money_text(cost.full_journey_amount_cents)}
+ if cost.full_journey_amount_cents!=nil {return "全程 "+money_text(cost.full_journey_amount_cents)}
  let queried=route_get(cost,"queried_legs_amount_cents") let queried_scope=route_get(cost,"queried_legs_scope")
  let text="已知小计 "+money_text(cost.known_subtotal_cents)
- if queried!=nil && (queried_scope=="requested_routing_entry" || queried_scope=="requested_routing_point") {let target=route_get(cost,"queried_target_label") if target==nil {target="请求路由点"} let count=route_get(cost,"queried_leg_count") text="到"+target+"的已查"+(if count!=nil {count+"段"} else {"路段"})+"估价合计 "+money_text(queried)}
- let reasons=route_get(cost,"unknown_reasons") if reasons.is_array() && reasons.len()>0 {text+="；"+text_join(reasons,"；")}
+ if queried!=nil {
+  let coverage=if queried_scope=="requested_routing_entry" {"已查至官方入口"} elif queried_scope=="requested_routing_point" {"已查至请求路由点"} else {"已查区间"}
+  text=coverage+" "+money_text(queried)
+ }
  return text+"；全程费用未知"
 }
 fn saved_route_cost_facts(saved){
@@ -4191,12 +4234,12 @@ fn interface_facts_batch(state){
  ui_facts_object=value ui_facts_object_run=state.token ui_facts_object_revision=state.revision ui_facts_json=encoded ui_facts_cached_revision=state.revision ui_facts_job=nil
  for done in state.waiters {done(value)}
 }
-// BEGIN agentic-native-ui 0.1.0 sha256:3975fe7fb724ac20ad0c68dab4ef0bc4869bce0ad3cfb038877b630dbb736382
-fn native_ui_style_source(){return "// Material-inspired visual primitives; copied into each app at build time.\n// Read the current theme at each template evaluation; retained scalar aliases keep an old appearance.\nlet MaterialSurface = RoundedView{width:Fill height:Fit flow:Down spacing:12 padding:16\n    draw_bg +:{color:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) border_radius:16}}\nlet MaterialCard = RoundedView{width:Fill height:Fit flow:Down spacing:8 padding:16\n    draw_bg +:{color:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) border_radius:12}}\nlet MaterialTitle = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}\n    draw_text +:{text_style:mod.theme.font_bold{font_size:22} color:mod.theme.color_text}}\nlet MaterialBody = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}\n    draw_text +:{text_style:mod.theme.font_regular{font_size:16} color:mod.theme.color_text}}\nlet MaterialMeta = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}\n    draw_text +:{text_style:mod.theme.font_regular{font_size:13} color:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}}\nlet MaterialAction = ButtonFlat{height:48 margin:0 padding:Inset{left:16 right:16}\n    draw_text +:{text_style:mod.theme.font_regular{font_size:16} color:#xffffff color_hover:#xffffff color_down:#xffffff color_focus:#xffffff color_disabled:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}\n    draw_bg +:{color:#x285cd6 color_hover:#x3468df color_down:#x204cb8 color_focus:#x204cb8 color_disabled:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) border_size:0 border_radius:12}}\nlet MaterialSecondaryAction = ButtonFlat{height:48 margin:0 padding:Inset{left:16 right:16}\n    draw_text +:{text_style:mod.theme.font_regular{font_size:14} color:mod.theme.color_text color_hover:mod.theme.color_text color_down:mod.theme.color_text color_focus:mod.theme.color_text color_disabled:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}\n    draw_bg +:{color:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) color_hover:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) color_down:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) color_focus:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) color_disabled:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) border_size:0 border_radius:12}}\n"}
+// BEGIN agentic-native-ui 0.1.1 sha256:e146c2bcc5c6f2d0395d7eadbd511c107e5449e80cc8341308f60e251d02dc13
+fn native_ui_style_source(){return "// Material-inspired visual primitives; copied into each app at build time.\n// Read the current theme at each template evaluation; retained scalar aliases keep an old appearance.\nlet MaterialSurface = RoundedView{width:Fill height:Fit flow:Down spacing:12 padding:16\n    draw_bg +:{color:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) border_radius:16}}\nlet MaterialCard = RoundedView{width:Fill height:Fit flow:Down spacing:8 padding:16\n    draw_bg +:{color:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) border_radius:12}}\nlet MaterialTitle = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}\n    draw_text +:{text_style:mod.theme.font_bold{font_size:22} color:mod.theme.color_text}}\nlet MaterialBody = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}\n    draw_text +:{text_style:mod.theme.font_regular{font_size:16} color:mod.theme.color_text}}\nlet MaterialMeta = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}\n    draw_text +:{text_style:mod.theme.font_regular{font_size:14} color:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}}\nlet MaterialAction = ButtonFlat{height:48 margin:0 padding:Inset{left:16 right:16}\n    draw_text +:{text_style:mod.theme.font_regular{font_size:16} color:#xffffff color_hover:#xffffff color_down:#xffffff color_focus:#xffffff color_disabled:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}\n    draw_bg +:{color:#x285cd6 color_hover:#x3468df color_down:#x204cb8 color_focus:#x204cb8 color_disabled:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) border_size:0 border_radius:12}}\nlet MaterialSecondaryAction = ButtonFlat{height:48 margin:0 padding:Inset{left:16 right:16}\n    draw_text +:{text_style:mod.theme.font_regular{font_size:14} color:mod.theme.color_text color_hover:mod.theme.color_text color_down:mod.theme.color_text color_focus:mod.theme.color_text color_disabled:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}\n    draw_bg +:{color:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) color_hover:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) color_down:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) color_focus:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.06) color_disabled:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) border_size:0 border_radius:12}}\n"}
 // END agentic-native-ui
 
 fn generated_context(){
-    return native_ui_style_source()+"let NavRegular = theme.font_regular{font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\n// Navigation局部字体适配；canonical SDK与其它应用主题保持原样。\nlet MaterialTitle = MaterialTitle{draw_text +:{text_style:NavRegular{font_size:22}}}\nlet MaterialBody = MaterialBody{draw_text +:{text_style:NavRegular{font_size:16}}}\nlet MaterialMeta = MaterialMeta{draw_text +:{text_style:NavRegular{font_size:13}}}\nlet MaterialAction = MaterialAction{draw_text +:{text_style:NavRegular{font_size:16}}}\nlet MaterialSecondaryAction = MaterialSecondaryAction{draw_text +:{text_style:NavRegular{font_size:14}}}\n// 通用内容样式；不读取、排序或选择业务路线。\nlet NavSurface = MaterialSurface{draw_bg +:{color:#xf8fbfa border_radius:16}}\nlet NavCard = MaterialCard{draw_bg +:{color:#xf0f5f3 border_radius:12}}\nlet NavTitle = MaterialTitle{draw_text +:{text_style:NavRegular{font_size:22} color:#x162e35}}\nlet NavBody = MaterialBody{draw_text +:{text_style:NavRegular{font_size:16} color:#x162e35}}\nlet NavMeta = MaterialMeta{draw_text +:{text_style:NavRegular{font_size:13} color:#x50666c}}\nlet NavAction = MaterialAction{draw_text +:{text_style:NavRegular{font_size:16} color:#xffffff color_hover:#xffffff color_down:#xffffff color_focus:#xffffff color_disabled:#x52615d} draw_bg +:{color:#x28786f color_hover:#x216b63 color_down:#x195d56 color_focus:#x195d56 color_disabled:#xdbe4e0 border_size:0 border_radius:12}}\nlet NavSecondaryAction = MaterialSecondaryAction{draw_text +:{text_style:NavRegular{font_size:14} color:#x162e35 color_hover:#x162e35 color_down:#x162e35 color_focus:#x162e35 color_disabled:#x52615d} draw_bg +:{color:#xe4eeea color_hover:#xd7e6df color_down:#xc5dbd1 color_focus:#xc5dbd1 color_disabled:#xdbe4e0 border_size:0 border_radius:12}}\n\nlet Label = Label{width: Fill height: Fit flow: Flow.Right{wrap:true} draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nlet mailbox_buffer = \"\"\nfn emit(event){event.block_id=source_block_id event.block_revision=source_block_revision mailbox_buffer += event.to_json() + \"\\n\" ui.mailbox.set_text(mailbox_buffer)}\nfn show_block(target_id){emit({action:\"show_block\" block:target_id visible:true})}\nfn hide_self(){emit({action:\"show_block\" block:source_block_id visible:false})}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(initial){let value = ui.fact_revision.text() if initial || value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} if initial {emit({action:\"rendered\"})} start_timeout(0.1, || refresh(false))}\nstart_timeout(0.02, || {ui.body.render() start_timeout(0.01, || refresh(true))})\n"
+    return native_ui_style_source()+"let NavRegular = theme.font_regular{font_size:16 font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\n// Navigation局部字体适配；canonical SDK与其它应用主题保持原样。\nlet MaterialTitle = MaterialTitle{draw_text +:{text_style:NavRegular{font_size:22}}}\nlet MaterialBody = MaterialBody{draw_text +:{text_style:NavRegular{font_size:16}}}\nlet MaterialMeta = MaterialMeta{draw_text +:{text_style:NavRegular{font_size:14}}}\nlet MaterialAction = MaterialAction{draw_text +:{text_style:NavRegular{font_size:16}}}\nlet MaterialSecondaryAction = MaterialSecondaryAction{draw_text +:{text_style:NavRegular{font_size:14}}}\n// 通用内容样式；不读取、排序或选择业务路线。\nlet NavSurface = MaterialSurface{draw_bg +:{color:#xf8fbfa border_radius:16}}\nlet NavCard = MaterialCard{draw_bg +:{color:#xf0f5f3 border_radius:12}}\nlet NavTitle = MaterialTitle{draw_text +:{text_style:NavRegular{font_size:22} color:#x162e35}}\nlet NavBody = MaterialBody{draw_text +:{text_style:NavRegular{font_size:16} color:#x162e35}}\nlet NavMeta = MaterialMeta{draw_text +:{text_style:NavRegular{font_size:14} color:#x50666c}}\nlet NavAction = MaterialAction{draw_text +:{text_style:NavRegular{font_size:16} color:#xffffff color_hover:#xffffff color_down:#xffffff color_focus:#xffffff color_disabled:#x52615d} draw_bg +:{color:#x28786f color_hover:#x216b63 color_down:#x195d56 color_focus:#x195d56 color_disabled:#xdbe4e0 border_size:0 border_radius:12}}\nlet NavSecondaryAction = MaterialSecondaryAction{draw_text +:{text_style:NavRegular{font_size:14} color:#x162e35 color_hover:#x162e35 color_down:#x162e35 color_focus:#x162e35 color_disabled:#x52615d} draw_bg +:{color:#xe4eeea color_hover:#xd7e6df color_down:#xc5dbd1 color_focus:#xc5dbd1 color_disabled:#xdbe4e0 border_size:0 border_radius:12}}\n\nlet Label = Label{width: Fill height: Fit flow: Flow.Right{wrap:true} draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nlet mailbox_buffer = \"\"\nfn emit(event){event.block_id=source_block_id event.block_revision=source_block_revision mailbox_buffer += event.to_json() + \"\\n\" ui.mailbox.set_text(mailbox_buffer)}\nfn show_block(target_id){emit({action:\"show_block\" block:target_id visible:true})}\nfn hide_self(){emit({action:\"show_block\" block:source_block_id visible:false})}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(initial){let value = ui.fact_revision.text() if initial || value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} if initial {emit({action:\"rendered\"})} start_timeout(0.1, || refresh(false))}\nstart_timeout(0.02, || {ui.body.render() start_timeout(0.01, || refresh(true))})\n"
 }
 fn facts_json(){
  if ui_facts_cached_revision!=ui_facts_revision {let value=interface_facts() render_probe_mark("serialize_entered") ui_facts_json=value.to_json() render_probe_mark("serialize_returned") ui_facts_cached_revision=ui_facts_revision}
@@ -4466,9 +4509,9 @@ fn update_map_widget(slot){
 trace_initialize()
 View{width:Fill height:Fill flow:Overlay
 index_page := SolidView{width:Fill height:Fill flow:Down padding:Inset{left:16 right:16 top:8 bottom:12} spacing:8 draw_bg.color:#xf7f9f8
-    trip_header := View{width:Fill height:56 flow:Right spacing:12 align:Align{y:0.5} on_render:||{
+    trip_header := View{width:Fill height:Fit padding:Inset{top:6 bottom:6} flow:Right spacing:12 align:Align{y:0.5} on_render:||{
       trip_menu := NavSecondary{text:"☰" width:44 on_click:||{trip_sidebar_open=!trip_sidebar_open trip_refresh_shell()}}
-      trip_title := Label{width:Fill height:Fit max_lines:1 text:shell_title() draw_text +:{text_style:NavBold{font_size:20} color:ink}}
+      trip_title := Label{width:Fill height:Fit max_lines:2 text:shell_title() draw_text +:{text_style:NavBold{font_size:18} color:ink}}
     }}
     trip_context := View{width:Fill height:Fit flow:Down spacing:4 on_render:||{
       View{width:Fill height:Fit flow:Right spacing:8
@@ -4483,7 +4526,7 @@ index_page := SolidView{width:Fill height:Fill flow:Down padding:Inset{left:16 r
       Label{width:Fill height:Fit text:"出行要求" draw_text +:{text_style:NavRegular{font_size:16} color:ink}}
       sentence := TextInput{width:Fill height:80 is_multiline:true text:"40 分钟内到机场，预算 50，尽量便宜。" empty_text:"目的地、到达时间与预算" on_change:||model_input_changed() on_return:||{if !shell_busy() {shell_action()} return true}
         draw_text +:{text_style:NavRegular{font_size:16} color:ink color_hover:ink color_focus:ink color_empty:muted} draw_bg +:{border_radius:8}}
-      NavMeta{text:"提交会新建一条出行，原记录保留。"}
+      composer_help := NavMeta{text:"提交会新建一条出行，原记录保留。"}
     }
     control := View{width:Fill height:Fit on_render:||{
       if shell_control_visible() {

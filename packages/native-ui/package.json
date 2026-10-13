@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "agentic-native-ui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "Apache-2.0",
   "format": "buildtime-splash-prelude",
   "prelude": "material.splash",

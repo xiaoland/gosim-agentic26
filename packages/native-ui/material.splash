@@ -9,7 +9,7 @@ let MaterialTitle = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}
 let MaterialBody = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}
     draw_text +:{text_style:mod.theme.font_regular{font_size:16} color:mod.theme.color_text}}
 let MaterialMeta = Label{width:Fill height:Fit flow:Flow.Right{wrap:true}
-    draw_text +:{text_style:mod.theme.font_regular{font_size:13} color:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}}
+    draw_text +:{text_style:mod.theme.font_regular{font_size:14} color:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}}
 let MaterialAction = ButtonFlat{height:48 margin:0 padding:Inset{left:16 right:16}
     draw_text +:{text_style:mod.theme.font_regular{font_size:16} color:#xffffff color_hover:#xffffff color_down:#xffffff color_focus:#xffffff color_disabled:mix(mod.theme.color_text, mod.theme.color_bg_app, 0.28)}
     draw_bg +:{color:#x285cd6 color_hover:#x3468df color_down:#x204cb8 color_focus:#x204cb8 color_disabled:mix(mod.theme.color_bg_app, mod.theme.color_text, 0.10) border_size:0 border_radius:12}}

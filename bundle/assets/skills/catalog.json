@@ -26,7 +26,7 @@
   },
   {
     "name": "makepad-2-0-splash",
-    "description": "Makepad 2.0 Splash语法：表达式、变量、函数、脚本状态和运行时求值，用于编写或修正原生界面源码。",
+    "description": "Makepad 2.0 Splash语法：draw_bg类型属性覆盖、字符串与控件闭合、if/else表达式、错误传播后缀及运行时求值，用于编写或修正原生界面源码。",
     "files": [
       "SKILL.md",
       "UPSTREAM.md",
@@ -77,12 +77,14 @@
     "description": "Navigation的render_ui嵌入环境、手机候选比较、共享事实、当前facts绑定、区块尺寸、滚动、交互、字体和地图接口，用于将Makepad/Splash源码交给当前宿主执行。",
     "files": [
       "SKILL.md",
-      "references/host-interface.md"
+      "references/host-interface.md",
+      "references/map-interface.md",
+      "references/route-detail-example.md"
     ]
   },
   {
     "name": "navigation-data",
-    "description": "Navigation工具事实契约：真实地点与Route身份、分段站点关系、完整供应商计价、时效和独立约束判断；用于理解工具结果。",
+    "description": "Navigation工具事实契约：真实地点与Route身份、分段站点关系、供应商报价范围、费用覆盖与未知、时效和独立约束判断；用于理解工具结果。",
     "files": [
       "SKILL.md"
     ]

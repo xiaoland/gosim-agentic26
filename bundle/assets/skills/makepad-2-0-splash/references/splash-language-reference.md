@@ -117,14 +117,26 @@ draw_bg +: { color: #f00 }
 
 ### Merge Operator
 
-The `+:` operator extends/merges with the parent definition instead of replacing it entirely:
+`+:`保留父定义的对象类型并覆盖指定属性。`draw_bg`是绘制对象（例如DrawQuad），`draw_bg:{...}`会用普通对象替换它，不能用于这类类型属性。点路径或继承覆盖保留绘制对象及其它已有属性：
 
+```splash
+RoundedView{width:Fill height:Fit draw_bg.color:#xf0f5f3
+    Label{text:"点路径覆盖颜色"}
+}
+RoundedView{width:Fill height:Fit draw_bg +:{color:#xf0f5f3}
+    Label{text:"继承覆盖颜色"}
+}
 ```
-// Replaces entire draw_bg:
-draw_bg: { color: #fff }
 
-// Merges -- only overrides color, keeps other draw_bg properties:
-draw_bg +: { color: #fff }
+### Strings and Widget Boundaries
+
+字符串使用双引号；其中的引用文字可直接用中文引号，ASCII双引号则在Splash源码中写作`\"`。通过JSON提交source时，JSON编码还会再次转义该反斜杠；以解码后的Splash源码为准。每个控件表达式有自己的闭合`}`，外层容器也单独闭合：
+
+```splash
+View{width:Fill height:Fit flow:Down
+    Label{text:"按“价格优先”比较"}
+    Label{text:"按\"价格优先\"比较"}
+}
 ```
 
 ### Named Children (`:=` Operator)
@@ -228,6 +240,8 @@ flow: Flow.Right{wrap: true}  // wrapping horizontal
 flow: Flow.Down{wrap: true}   // wrapping vertical
 ```
 
+wrap是Flow.Right的配置；控件写作`View{flow:Flow.Right{wrap:true}}`，不是View自身的属性。
+
 ### Spacing, Padding, Margin
 
 ```
@@ -277,6 +291,8 @@ else for i, todo in todos {
     TodoItem{label.text: todo.text}
 }
 ```
+
+条件表达式同样使用`if/else`，例如`let count = if items == nil {0} else {items.len()}`。`?`是返回错误的后缀运算符：表达式结果为错误时向调用者返回该错误，否则保留原结果；它不表示C式`condition ? a : b`的条件选择。
 
 ### For Loops
 

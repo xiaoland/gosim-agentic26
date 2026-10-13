@@ -18,7 +18,7 @@ license: Apache-2.0
 
 MaterialSurface／MaterialCard继承RoundedView，是标准子控件容器，不提供title、body、meta、action_text或on_action属性。标题／正文／辅助文字分别作为MaterialTitle／MaterialBody／MaterialMeta子控件，使用Label的text；按钮是MaterialAction／MaterialSecondaryAction，使用ButtonFlat的text与on_click。例如一个自由组合是`MaterialCard{MaterialTitle{text:"标题"} MaterialBody{text:"正文"} MaterialAction{text:"查看" on_click:||open_detail()}}`，其中open_detail必须是当前应用真实提供的回调，示例不定义业务流程。
 
-仅有四个主题token：mod.theme.color_text、mod.theme.color_bg_app、mod.theme.font_regular、mod.theme.font_bold；不存在本包的theme.bg／theme.fg。样式覆盖沿标准继承和draw_text／draw_bg字段进行，布局仍由应用选择。render工具如何接收完整根表达式或嵌入片段以它的实际schema为准，不能假定能通过`ui.some_view = ...`安装新树。
+仅有四个主题token：mod.theme.color_text、mod.theme.color_bg_app、mod.theme.font_regular、mod.theme.font_bold；不存在本包的theme.bg／theme.fg。默认标题22、正文16、辅助信息14；动作字号16、次动作14。主要决策信息和关键未知项使用正文层级，来源与附注用辅助层级。字号在TextStyle中覆盖，例如`draw_text +:{text_style:mod.theme.font_regular{font_size:16}}`；样式覆盖沿标准继承和draw_text／draw_bg字段进行，布局仍由应用选择。render工具如何接收完整根表达式或嵌入片段以它的实际schema为准，不能假定能通过`ui.some_view = ...`安装新树。
 
 MaterialSurface、MaterialCard、MaterialTitle、MaterialBody、MaterialMeta、MaterialAction、MaterialSecondaryAction是七种通用样式，布局由你决定。它们只规定基础层级、尺寸与状态，不是完整Material组件库，也不是业务卡片模板。Action两类都是按钮，不能承载任意子控件；需要整卡点击时仅使用当前宿主已支持的卡片事件。
 

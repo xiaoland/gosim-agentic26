@@ -80,7 +80,8 @@ def run(work,jail,original,injected):
     check('cold selected_legs保公共交通铁路步行类别',projected[0]['cold_kind']=='公共交通＋铁路＋步行' and controls['guardian']['selected_route']['kind_label']=='公共交通＋铁路＋步行')
     check('守护公开整程价nil且已查小计57保持',controls['guardian']['selected_route']['price_cents'] is None and controls['guardian']['selected_route']['cost']['queried_legs_amount_cents']==5700)
     check('历史interface采用重投影且保存raw金额时刻未改',controls['raw_unchanged'] and [r['cost'] for r in history['routes']]==[p['history']['cost'] for p in projected] and all(p['cost']['queried_legs_amount_cents']==o['raw']['price_cents'] and p['arrival']['queried_endpoint_arrival_ts']==o['public']['estimated_arrival_ts'] for p,o in zip(projected,originals)))
+    check('费用标签短且完整unknown原因basis与原金额仍保留',all(len(p['history']['price_label'])<45 and p['summary']['price_label']==p['interface']['price_label']==p['history']['price_label'] and p['history']['cost']['unknown_reasons']==p['cost']['unknown_reasons'] and p['history']['cost']['basis']==p['cost']['basis'] for p in projected))
     check('编码后覆写字段各一次无重复键',not duplicates)
     report={'checks':checks,'product_source_sha256':hashlib.sha256(original.encode()).hexdigest(),'model_requested':False,'provider_requested':False,'native_errors':[l for l in (work/'native.log').read_text().splitlines() if '[E]' in l],'fixture_boundary':'round32四条实际public事实与保存route_data；summary克隆只补cold必需可选metadata；完整费用控制为明确测试控制，不声称原路线完整。'}
     (work/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
-    assert all(c['passed'] for c in checks),str(work/'report.json')
+    assert all(c['passed'] for c in checks) and not report['native_errors'],str(work/'report.json')

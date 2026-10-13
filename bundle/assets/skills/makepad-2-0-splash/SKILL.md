@@ -1,6 +1,6 @@
 ---
 name: makepad-2-0-splash
-description: "Makepad 2.0 Splash语法：表达式、变量、函数、脚本状态和运行时求值，用于编写或修正原生界面源码。"
+description: "Makepad 2.0 Splash语法：draw_bg类型属性覆盖、字符串与控件闭合、if/else表达式、错误传播后缀及运行时求值，用于编写或修正原生界面源码。"
 license: MIT
 ---
 
@@ -10,7 +10,7 @@ license: MIT
 
 按问题读取下列资料；上游文中提及的完整宿主源码路径不随应用包提供，本目录的随包资源以下列链接为准。
 
+- [通用语言参考](references/splash-language-reference.md)：类型属性覆盖、字符串与控件表达式、条件和循环。
 - [上游技能正文](UPSTREAM.md)
-- [splash-language-reference.md](references/splash-language-reference.md)
 - [splash-scripting-patterns.md](references/splash-scripting-patterns.md)
 - [canvas-splash-patterns.md](references/canvas-splash-patterns.md)
