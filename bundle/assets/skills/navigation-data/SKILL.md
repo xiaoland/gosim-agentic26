@@ -6,7 +6,9 @@ license: Apache-2.0
 
 # 地点与路线事实
 
-read_location按配置读取明确模拟位置，或通过已授权前台location.sample取得设备位置并核实城市；工具不自动弹定位授权。真实read_calendar仅读用户已选日历，可选择Unix毫秒时间窗及1..200的limit，返回原始事件与truncated。真实read_notes(query)搜索官方Notes摘要，read_note(id)按真实搜索ID取得原文；未授权、应用未运行、空结果如实返回。日历与笔记是独立来源，不要求两者同时存在，不证明机票已购买。demo仍有独立模拟read_calendar/read_notes/set_constraints；后者保留记录ID和逐字citations合同。用户时间与预算不变，金额单位为整数分。search_places返回全部真实POI选择资料与node_ref，入口对象由get_route_graph(node_refs)按需读取；adopt_destination采用已有poi_id，返回目的地、披露入口范围、constraints和原绝对期限，保留明确选择或来源推断依据。
+read_location按配置读取明确模拟位置，或通过已授权前台location.sample取得设备位置并核实城市；工具不自动弹定位授权。真实read_calendar仅读用户已选日历，可选择Unix毫秒时间窗及1..200的limit，返回原始事件与truncated。真实read_notes(query)搜索官方Notes摘要，read_note(id)按真实搜索ID取得原文；未授权、应用未运行、空结果如实返回。日历与笔记是独立来源，不要求两者同时存在，不证明机票已购买。demo仍独立读取明确标注的模拟日历和笔记。search_places返回全部真实POI选择资料与node_ref，入口对象由get_route_graph(node_refs)按需读取；adopt_destination按已有poi_id与basis采用真实地点及披露入口，返回目的地、当前constraints和arrive_by；采用地点不设置或改写时间预算。
+
+set_constraints在demo/live共用，由Agent解释本次原句或来源中的到达约束、预算和币种，再提供budget_cents（非负整数分）、currency（当前CNY）与basis。相对期限用arrive_within_minutes（正整数分钟），代码从固定received_at起算；绝对期限用date（YYYY-MM-DD）和time（HH:MM，北京时间），日期依据received_at_label、timezone及原句解释。两种时间形式互斥，不手算Unix。basis保留用户原话、来源与地域推断的区别；地点采用与设置约束先后均可，不要求日历和笔记共同存在。新任务未设置期限、预算时保持nil；读取背景仍可进行，需要计算路线或准备提案时工具返回具体缺项。守护重核沿用已确认绝对期限与预算，不放宽。
 
 地点中心poi:<id>不等于入口。有效高德entr_location作为独立entrance:<id>返回并保留来源、设施身份与查询时间；不用exit_location替代入口。明确机场T编号航站楼被采用后，destination.routing_point披露默认路由入口，canonical POI中心不改；具体门、用户坐标、无入口设施不替换。query/extend与实际端点核验共用该绑定，destination_access说明仅到供应商标注入口，内部通达、楼层和安检未知；endpoint_complete仅证明到所绑定点，不认证进入大厅或赶上航班。费用仍为已查段小计，不填内部连接时间或费用。历史记录沿当时保存的点，不自动改成后来发现的入口。
 

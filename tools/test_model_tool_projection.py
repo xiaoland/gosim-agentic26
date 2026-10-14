@@ -47,7 +47,7 @@ fn mp_next(){
 }
 start_timeout(0.8,||fs.read_async("model-tool-projection-input.json",fn(reply){if !reply.success{return}
  mp_input=reply.text.parse_json() run_id+=1 agent_active=true trip_replay=false guardian_mode=false guardian_goal=nil constraints=nil candidates=[] route_nodes={} route_prefixes={}
- position_record=mp_input.adopt.origin user_limits=mp_input.adopt.limits received_at=mp_input.adopt.arrive_by-user_limits.minutes*60 arrive_by=mp_input.adopt.arrive_by source_records=[]
+ position_record=mp_input.adopt.origin constraints=mp_input.adopt.constraints user_limits=mp_input.adopt.limits received_at=mp_input.adopt.arrive_by-user_limits.minutes*60 arrive_by=mp_input.adopt.arrive_by source_records=[]
  mp_next()
 }))
 '''

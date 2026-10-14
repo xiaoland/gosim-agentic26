@@ -513,7 +513,7 @@ let guardian_reported_run=-1
 let run_id = 0
 let phase = "idle"
 let received_at = 0
-let arrive_by = 0
+let arrive_by = nil
 let loop_started_at = 0
 let automatic_seconds = 0
 let step_count = 0
@@ -1024,23 +1024,6 @@ fn user_place_request(params, token, request, done){
         } { settled.value = true  picker_status = "地点请求未能启动" render_content() }
     })
 }
-fn apply_user_poi(){
-    if pending_user_poi == nil || !position_current(position_record) { return false }
-    let poi = pending_user_poi
-    if time_now() - poi.queried_at > 300 || poi.city_metadata == nil || position_record.currency != "CNY" { fail_task("所选地点已过期或城市计价依据不足，请重新选择") return true }
-    if user_limits == nil { fail_task("本次缺少可识别的数字分钟数或小时数与预算") return true }
-    if user_limits.currency != "unspecified" && user_limits.currency != "CNY" { fail_task("用户预算币种尚未核实为人民币") return true }
-    poi.city = poi.city_metadata.city poi.citycode = poi.city_metadata.citycode poi.adcode = poi.city_metadata.adcode poi.currency = poi.city_metadata.currency
-    if !(user_limits.minutes >= 1 && user_limits.minutes <= (9007199254740991 - received_at) / 60 && user_limits.minutes % 1 == 0 && user_limits.budget_cents >= 0 && user_limits.budget_cents <= 9007199254740991 && user_limits.budget_cents % 1 == 0) { fail_task("用户时限或预算无法安全计算，未采用地点") return true }
-    arrive_by = received_at + user_limits.minutes * 60
-    constraints = {airport: poi.name terminal: "" minutes: user_limits.minutes budget_cents: user_limits.budget_cents currency: "CNY" destination_query: poi.name objective: "min_cost" departure_scene: "" inferred: false user_selected: true currency_basis: "起终点城市已核实，按高德人民币计价"}
-    destination_record = bind_destination_poi(poi)
-    source_records.push({id: "user-poi-" + poi.id kind: "user" source: "user-poi-selection" mock: false raw: poi.to_json() source_time: "" + poi.queried_at read_at: time_now()})
-    observe("user_destination", {destination: destination_record source: "explicit-user-poi" terminal_verified: false})
-    return true
-}
-
-
 // Maps取消未改变业务对象；新渲染事件使用当前标识，旧已排队事件仍被拒绝。
 
 
@@ -1049,9 +1032,7 @@ fn apply_user_poi(){
 
 fn destination_label(){
     if destination_record == nil { return "选择或纠正目的地" }
-    let basis = "根据来源核实"
-    if route_get(constraints, "user_selected") == true { basis = "你选择的地点；航站楼未核实" }
-    elif route_get(constraints, "inferred") == true { basis = "根据位置推断；航站楼未知" }
+    let basis = "按本轮地点资料采用；入口范围见详情"
     return destination_record.name + " · " + basis
 }
 
@@ -1367,198 +1348,34 @@ fn verify_position_city(record, token, done){
         done()
     })
 }
-fn validate_citations(items){
-    if !items.is_array() || items.len() < 2 { return reject_constraints("来源引用至少需要所选日历事件和关联机票笔记各一条") }
-    let calendar_cited = false let note_cited = false
-    for index citation in items {
-        if !citation.is_object() || !route_get(citation,"source_id").is_string() { return reject_constraints("来源引用第"+(index+1)+"项缺少source_id；使用读取结果的记录id") }
-        let id=citation.source_id
-        if !route_get(citation,"quote").is_string() || citation.quote.trim()=="" {return reject_constraints("来源引用 "+id+" 缺少非空quote；逐字引用该记录raw中的单行原文")}
-        if citation.quote.search("\n") >= 0 || citation.quote.search("\r") >= 0 || citation.quote.search("\\n") >= 0 || citation.quote.search("\\r") >= 0 {return reject_constraints("来源引用 "+id+" 的quote跨行；仅使用该记录raw中的单行原文")}
-        let found = false let matched = false
-        for source in source_records {
-            if source.id == id {
-                found=true
-                if source.raw.search(citation.quote) >= 0 {
-                    matched=true
-                    if source.kind == "calendar" {calendar_cited=true}
-                    if source.kind == "note" {note_cited=true}
-                }
-            }
-        }
-        if !found {return reject_constraints("来源引用source_id未知："+id+"；使用read_calendar/read_notes返回的记录id，本次用户原文ID为current-input")}
-        if !matched {return reject_constraints("来源引用 "+id+" 的quote不匹配该记录raw；不要将用户指令或其它记录的文字归到此ID")}
-    }
-    if !calendar_cited {return reject_constraints("来源引用缺少calendar日历记录；引用所选event_id对应raw的单行原文")}
-    if !note_cited {return reject_constraints("来源引用缺少note机票笔记；引用所选note_id对应raw的单行原文")}
-    return true
-}
-fn declared_currency(text){
-    let value = ""
-    let currency_at = text.search("币种") let money_at = text.search("货币")
-    let key = "币种"
-    if money_at >= 0 && (currency_at < 0 || money_at < currency_at) { key = "货币" }
-    let statements = text.split(key)
-    if statements.len() >= 2 {
-        let tail = statements[1]
-        if tail.search("是") == 0 { tail = tail.strip_prefix("是") }
-        elif tail.search("为") == 0 { tail = tail.strip_prefix("为") }
-        elif tail.search(":") == 0 { tail = tail.strip_prefix(":") }
-        elif tail.search("：") == 0 { tail = tail.strip_prefix("：") }
-        let ended = false
-        for ch in tail.split("") {
-            if ch == "，" || ch == "," || ch == "。" || ch == "；" || ch == ";" || ch == "!" || ch == "?" || ch == "！" || ch == "？" { ended = true }
-            if !ended { value += ch }
-        }
-        value = value.trim()
-    }
-    let settlements = text.split("结算")
-    if settlements.len() >= 2 {
-        let prefixes = settlements[0].split("用")
-        if prefixes.len() >= 2 {
-            let settlement = "" let valid = true
-            for ch in prefixes[prefixes.len() - 1].split("") {
-                if ch == "，" || ch == "," || ch == "。" || ch == "；" || ch == ";" || ch == "!" || ch == "?" || ch == "！" || ch == "？" { valid = false }
-                settlement += ch
-            }
-            if valid && settlement != "" { value = settlement.trim() }
-        }
-    }
-    let currency = "unspecified"
-    if value != "" {
-        currency = "unsupported"
-        if regex("^(人民币|CNY|RMB)$", "i").test(value) { currency = "CNY" }
-        if value == "元" || value == "¥" || value == "￥" { currency = "unspecified" }
-    }
-    return currency
-}
-// 明确数字分钟或小时转为整数分钟；混合单位与无法识别的硬约束仍返回缺失。
-fn explicit_limits(text){
-    let compact = text.replace(regex("[ \t]", "g"), "")
-    let time_parts = compact.split("分钟")
-    let time_multiplier = 1
-    let hours = compact.split("小时")
-    if hours.len() == 2 {
-        if time_parts.len() != 1 { return nil }
-        time_parts = hours time_multiplier = 60
-    }
-    if time_parts.len() != 2 { return nil }
-    let minute_text = ""
-    for ch in time_parts[0].split("") {
-        if ch != "" { if regex("^[0-9.]$", "").test(ch) { minute_text += ch } else { minute_text = "" } }
-    }
-    let minutes = route_seconds(minute_text)
-    if minutes != nil { minutes *= time_multiplier }
-    if minutes == nil || minutes < 1 || minutes > 9007199254740991 / 60 { return nil }
-    let cents=nil let currency="unspecified" let currency_marker=nil
-    for index statement in compact.split("预算") {
-        if index==0 {continue}
-        let amount_text="" let ended=false
-        let budget_text=statement.strip_prefix("人民币").strip_prefix("CNY").strip_prefix("RMB").strip_prefix("¥").strip_prefix("￥")
-        for ch in budget_text.split("") {
-            if ch!="" && !ended {if regex("^[0-9.]$", "").test(ch) {amount_text+=ch} else {ended=true}}
-        }
-        // “守护预算”等非数字提及不构成第二声明；无法识别的数字声明不能被跳过。
-        if amount_text=="" {if regex("^[^，,。；;!?！？]*[0-9]", "").test(statement) {return nil} continue}
-        let amount=route_cents(amount_text) if amount==nil || (cents!=nil && cents!=amount) {return nil}
-        let incoming_currency="unspecified"
-        let tail = budget_text.strip_prefix(amount_text)
-        let suffix = "" let suffix_ended = false
-        for ch in tail.split("") {
-            if ch == "，" || ch == "," || ch == "。" || ch == "；" || ch == ";" || ch == "!" || ch == "?" || ch == "！" || ch == "？" { suffix_ended = true }
-            if !suffix_ended { suffix += ch }
-        }
-        if suffix != "" && suffix != "元" && suffix != "块" && suffix != "块钱" && suffix != "以内" && suffix != "以下" && suffix != "元以内" && suffix != "元以下" { incoming_currency = "unsupported" }
-        if statement.search("人民币") == 0 || statement.search("CNY") == 0 || statement.search("RMB") == 0 || suffix == "人民币" || suffix == "元人民币" || suffix == "CNY" || suffix == "RMB" { incoming_currency = "CNY" }
-        if incoming_currency == "CNY" && suffix != "" && suffix != "元" && suffix != "人民币" && suffix != "元人民币" && suffix != "CNY" && suffix != "RMB" && suffix != "以内" && suffix != "以下" && suffix != "元以内" && suffix != "元以下" { incoming_currency = "unsupported" }
-
-        let marker=if incoming_currency=="unspecified" {nil} elif incoming_currency=="CNY" {"CNY"} else {suffix}
-        if marker!=nil && currency_marker!=nil && marker!=currency_marker {return nil}
-        if marker!=nil {currency_marker=marker currency=incoming_currency}
-        cents=amount
-    }
-    if cents==nil {return nil}
-    let declaration=declared_currency(text)
-    if declaration!="unspecified" {if currency!="unspecified" && currency!=declaration {return nil} currency=declaration}
-    return {minutes:minutes budget_cents:cents currency:currency}
-}
-fn reject_constraints(reason){ constraint_error = reason + "；尚未查询路线" return false }
+fn reject_constraints(reason){constraint_error=reason return false}
 fn set_constraints(p){
-    constraint_error = ""
-    if !p.is_object() { return reject_constraints("模型约束参数格式无效") }
-    if !p.event_id.is_string() || !p.note_id.is_string() { return reject_constraints("模型缺少日历事件或机票笔记引用") }
-    if !p.minutes.is_number() || !p.budget_cents.is_number() { return reject_constraints("模型的分钟数或预算格式无效，未改动用户原值") }
-    if calendar_events.len() == 0 || note_records.len() == 0 || position_record == nil { return reject_constraints("日历、机票笔记或位置来源缺失") }
-    if !position_current(position_record) { return reject_constraints("位置来源已过期或无效，请重新规划") }
-    if user_limits == nil {
-        return reject_constraints("本次缺少明确的数字分钟数与预算，例如：40分钟内到机场，预算50元。")
-    }
-    if user_limits.currency != "CNY" && user_limits.currency != "unspecified" { return reject_constraints("高德本次提供人民币估价，不能直接与其它币种预算比较。本次缺少明确的人民币预算和分钟数。") }
-    if p.minutes != user_limits.minutes || p.budget_cents != user_limits.budget_cents { return reject_constraints("模型的分钟数或预算与用户明确指令不符，未改动用户原值") }
-    if !(p.minutes >= 1 && p.minutes <= (9007199254740991 - received_at) / 60 && p.minutes % 1 == 0) { return reject_constraints("分钟数无法安全计算到达期限") }
-    if !(p.budget_cents >= 0 && p.budget_cents <= 9007199254740991 && p.budget_cents % 1 == 0) { return reject_constraints("预算必须为可精确表示的非负整数分") }
-    if position_record.currency != "CNY" { return reject_constraints("位置尚未核实人民币计价依据，无法确定预算币种。") }
-    if p.currency != "CNY" { return reject_constraints("模型预算币种不是人民币，无法与本次报价比较") }
-    if !p.destination_query.is_string() || p.destination_query.trim() == "" { return reject_constraints("模型缺少目的地查询文字") }
-    if !validate_citations(p.citations) { return false }
-    let event_cited = false
-    let note_cited = false
-    for citation in p.citations { if citation.source_id == p.event_id { event_cited = true } if citation.source_id == p.note_id { note_cited = true } }
-    if !event_cited { return reject_constraints("来源引用未覆盖所选日历event_id："+p.event_id) }
-    if !note_cited { return reject_constraints("来源引用未覆盖所选机票note_id："+p.note_id) }
-    let event_found = false
-    for event in calendar_events {
-        if event.id == p.event_id && event.starts_at_unix >= received_at { event_found = true }
-    }
-    if !event_found { return reject_constraints("所选日历事件不存在或出发时间已过") }
-    let associated = []
-    for note in note_records { if note.event_id == p.event_id && note.record_status == "current" { associated.push(note) } }
-    if associated.len() == 0 { return reject_constraints("所选日历事件没有有效的关联机票笔记") }
-    let selected_note = nil
-    for note in associated { if note.id == p.note_id { selected_note = note } }
-    if location_mode() != "demo" { return reject_constraints("模拟日历与机票笔记不能确定真实机场，请查询机场候选") }
-    if selected_note == nil || selected_note.airport == "" || selected_note.terminal == "" { return reject_constraints("所选有效机票笔记尚未明确机场及航站楼") }
-    if p.destination_query.search(selected_note.airport) < 0 || p.destination_query.search(selected_note.terminal) < 0 { return reject_constraints("模型目的地与已引用的机场或航站楼不符") }
-    let scene_conflict = false
-    let selected_scene = ""
-    if selected_note.raw.search("国内出发") >= 0 { selected_scene = "国内出发" }
-    if selected_note.raw.search("国际出发") >= 0 { selected_scene = "国际出发" }
-    for note in associated {
-        if (note.raw.search("国内出发") >= 0) != (selected_note.raw.search("国内出发") >= 0) || (note.raw.search("国际出发") >= 0) != (selected_note.raw.search("国际出发") >= 0) { scene_conflict = true }
-    }
-    let user_resolution = false
-    let resolved_scene = ""
-    for citation in p.citations {
-        for source in source_records {
-            if source.id == citation.source_id && source.kind == "user" && source.source == "explicit-current-input" && !source.mock && source.raw.search(citation.quote) >= 0 && source.raw.search(selected_note.airport) >= 0 && source.raw.search(selected_note.terminal) >= 0 {
-                let source_scene = ""
-                if source.raw.search("国内出发") >= 0 && source.raw.search("国际出发") < 0 { source_scene = "国内出发" }
-                if source.raw.search("国际出发") >= 0 && source.raw.search("国内出发") < 0 { source_scene = "国际出发" }
-                let selected_both = selected_note.raw.search("国内出发") >= 0 && selected_note.raw.search("国际出发") >= 0
-                if !scene_conflict || (source_scene != "" && source_scene == selected_scene) || (selected_both && source_scene != "") { user_resolution = true }
-                if source_scene != "" && (source_scene == selected_scene || selected_both) { resolved_scene = source_scene }
-            }
-        }
-    }
-    for note in associated {
-        if note.airport == "" || note.terminal == "" { return reject_constraints("关联机票笔记缺少机场或航站楼，尚不能确定目的地") }
-        if !user_resolution && (note.airport != selected_note.airport || note.terminal != selected_note.terminal || (note.raw.search("国内出发") >= 0) != (selected_note.raw.search("国内出发") >= 0) || (note.raw.search("国际出发") >= 0) != (selected_note.raw.search("国际出发") >= 0)) {
-            return reject_constraints("日历对应的有效机票笔记存在机场、航站楼或出发区域冲突，尚未确定本次出发地点。")
-        }
-    }
-    let departure_scene = ""
-    if selected_note.raw.search("国内出发") >= 0 { departure_scene = "国内出发" }
-    if selected_note.raw.search("国际出发") >= 0 { if departure_scene != "" { if resolved_scene == "" { return reject_constraints("机票笔记的国内与国际出发场景冲突，尚未确定出发区域。") } departure_scene = resolved_scene } else { departure_scene = "国际出发" } }
-    // 出发区域已由引用笔记核实，模型遗漏时由执行器构造完整查询。
-    if departure_scene != "国内出发" && p.destination_query.search("国内出发") >= 0 || departure_scene != "国际出发" && p.destination_query.search("国际出发") >= 0 { return reject_constraints("模型出发区域与有效机票来源矛盾") }
-    let destination_query = selected_note.airport + " " + selected_note.terminal
-    if departure_scene != "" { destination_query += " " + departure_scene }
-    let currency_basis = position_record.city + "已核实为大陆城市；高德人民币计价；未明确币种的预算按地域推断为CNY"
-    if user_limits.currency == "CNY" { currency_basis = "用户明确人民币预算；" + position_record.city + "已核实为大陆城市；按高德人民币计价比较" }
-    constraints = {airport: selected_note.airport terminal: selected_note.terminal note_id: p.note_id minutes: p.minutes budget_cents: p.budget_cents currency: "CNY" destination_query: destination_query event_id: p.event_id citations: p.citations objective: "min_cost" departure_scene: departure_scene currency_basis: currency_basis inferred: false}
-    arrive_by = received_at + p.minutes * 60
-    observe("set_constraints", {constraints: constraints received_at: received_at arrive_by: arrive_by})
-    return true
+ constraint_error=""
+ if guardian_mode || route_get(constraints,"guardian_locked")==true {return reject_constraints("已确认目标的绝对期限、预算和币种锁定")}
+ if !p.is_object() {return reject_constraints("约束参数必须为对象")}
+ let duration=route_get(p,"arrive_within_minutes") let date=route_get(p,"date") let clock=route_get(p,"time")
+ let budget=route_get(p,"budget_cents") let currency=route_get(p,"currency") let basis=route_get(p,"basis") let deadline=nil
+ if !budget.is_number() || !(budget>=0 && budget<=9007199254740991 && budget%1==0) {return reject_constraints("budget_cents须为可精确表示的非负整数分")}
+ if currency!="CNY" {return reject_constraints("本次交通报价仅支持人民币CNY预算比较；未转换其它币种")}
+ if !basis.is_string() || basis.trim()=="" {return reject_constraints("请说明约束和预算币种的解释依据")}
+ if duration!=nil {
+  if date!=nil || clock!=nil {return reject_constraints("相对到达时限与绝对日期时间只能选择一种")}
+  if !duration.is_number() || !(duration>=1 && duration%1==0 && duration<=(9007199254740991-received_at)/60) {return reject_constraints("arrive_within_minutes须为可安全换算期限的正整数分钟")}
+  deadline=received_at+duration*60
+ } else {
+  deadline=rail_time(date,clock)
+  if deadline==nil {return reject_constraints("请提供arrive_within_minutes，或有效的date(YYYY-MM-DD)与time(HH:MM，北京时间)")}
+ }
+ user_limits={minutes:(deadline-received_at)/60 budget_cents:budget currency:currency basis:basis}
+ constraints={minutes:user_limits.minutes arrive_within_minutes:duration date:date time:clock budget_cents:budget currency:currency basis:basis objective:"min_cost"}
+ arrive_by=deadline
+ observe("set_constraints",{constraints:constraints received_at:received_at arrive_by:arrive_by})
+ return true
+}
+fn planning_constraints_error(){
+ if arrive_by==nil {return "尚未设置到达期限，请用set_constraints设置本次约束"}
+ if constraints==nil || !route_get(constraints,"budget_cents").is_number() {return "尚未设置预算，请用set_constraints设置本次约束"}
+ return ""
 }
 fn amap_request(path, params, token, done){
     if path != "/v3/place/text" && path != "/v5/direction/transit/integrated" && path != "/v5/direction/driving" && path != "/v5/direction/walking" && path != "/v3/assistant/coordinate/convert" && path != "/v3/geocode/regeo" { fail_task("地图工具路径无效") return }
@@ -1615,50 +1432,20 @@ fn parse_pois(data, at, airports_only){
     return result
 }
 
-fn find_destination(token){
-    if constraints == nil { fail_task("目的地约束尚未形成") return }
-    if route_get(constraints, "inferred") == true { fail_task("推断机场应选择本次机场查询候选") return }
-    let at = time_now()
-    if position_record == nil || position_record.currency != "CNY" { fail_task("地点查询缺少已核实的出发城市与币种") return }
-    amap_request("/v3/place/text", "&city=" + position_record.citycode.url_encode() + "&citylimit=false&extensions=all&keywords=" + constraints.destination_query.url_encode(), token, fn(data){
-        poi_records = parse_pois(data, at, false) register_route_pois(poi_records)
-        if poi_records.len() == 0 { fail_task("地点服务未返回可选目的地") return }
-        observe("find_destination", poi_records)
-        finish_tool_from_state(token)
-    })
-}
-fn reject_destination(reason){ destination_error = reason return false }
-fn select_destination(p, reason){
-    destination_error = ""
-    if constraints == nil { return reject_destination("目的地约束尚未形成，不能选择机场") }
-    if destination_record != nil { return reject_destination("本次目的地已选定，输入修正信息后才能重新选择") }
-    if !p.is_object() || !route_get(p, "poi_id").is_string() { return reject_destination("目的地选择缺少有效POI标识") }
-    let poi=route_poi(p.poi_id)
-    if poi!=nil {
-        if poi.id == p.poi_id {
-            if route_get(constraints, "inferred") == true {
-                if route_get(poi, "typecode") != "150104" { return reject_destination("该地点不是机场类别，不能作为机场推断目标") }
-                if regex("暂停营业|停止营业|已关闭|停用", "").test(poi.name) { return reject_destination("该机场地点明确标注暂停营业或已关闭，不能作为本次规划目标") }
-                if !reason.is_string() || reason.trim() == "" { return reject_destination("机场推断缺少选择理由，不能说明目的地依据") }
-                if !position_current(position_record) { fail_task("机场选择时位置已过期，请重新查询") return true }
-                if !poi.queried_at.is_number() || time_now() - poi.queried_at > 300 { fail_task("机场查询结果已过期，请重新查询") return true }
-            } else {
-                if poi.name.search(constraints.airport) < 0 && (!poi.address.is_string() || poi.address.search(constraints.airport) < 0) { let address=if poi.address.is_string() {poi.address} else {"未提供"} return reject_destination("机票机场身份未匹配；来源note_id="+constraints.note_id+"，期望airport="+constraints.airport+"；POI id="+poi.id+"，name="+poi.name+"，address="+address+"。名称或地址须含完整机票机场名；本次目的地未采用") }
-                if regex("停车|酒店|宾馆|货运|到达", "").test(poi.name) { return reject_destination("所选地点是停车、住宿、货运或到达区域，不是所需出发地点") }
-                if poi.name.search(constraints.terminal) < 0 { return reject_destination("所选地点航站楼与机票来源不符") }
-                if constraints.departure_scene != "" && poi.name.search(constraints.departure_scene) < 0 { return reject_destination("所选地点的国内或国际出发区域与机票来源不符") }
-            }
-            if poi.city_metadata == nil { fail_task("目的地城市元数据缺失或不在当前高德大陆计价覆盖内，不能查询交通或确定币种") return true }
-            poi.city = poi.city_metadata.city poi.citycode = poi.city_metadata.citycode poi.adcode = poi.city_metadata.adcode poi.currency = poi.city_metadata.currency
-            constraints.currency_basis += "；终点" + poi.city + "已核实为大陆城市"
-            if route_get(constraints, "inferred") == true {
-                constraints.airport = poi.name constraints.destination_query = poi.name
-                constraints.inference = {kind: "location_and_airport_query" reason: reason location_source: position_record.id location_sampled_at: position_record.sampled_at_unix origin_city: position_record.city poi_id: poi.id poi_source: poi.source poi_queried_at: poi.queried_at terminal_verified: false}
-            }
-            destination_record = bind_destination_poi(poi) observe("select_destination", {destination: destination_record inferred: route_get(constraints, "inferred") inference: route_get(constraints, "inference")}) return true
-        }
-    }
-    return reject_destination("目的地ID不属于本次可选地点查询结果")
+fn reject_destination(reason){destination_error=reason return false}
+fn select_destination(p,reason){
+ destination_error=""
+ if guardian_mode || route_get(constraints,"guardian_locked")==true {return reject_destination("已确认目标的目的地锁定")}
+ if !p.is_object() || !route_get(p,"poi_id").is_string() {return reject_destination("目的地选择需要本轮POI标识")}
+ if !reason.is_string() || reason.trim()=="" {return reject_destination("请说明采用这个地点或入口的依据")}
+ let poi=route_poi(p.poi_id)
+ if poi==nil {return reject_destination("poi_id不在本次查询已核实地点中")}
+ if !poi.queried_at.is_number() || time_now()-poi.queried_at>300 {return reject_destination("地点查询结果已过期，请重新查询")}
+ if poi.city_metadata==nil {return reject_destination("目的地城市元数据缺失或不在当前高德大陆计价覆盖内")}
+ poi.city=poi.city_metadata.city poi.citycode=poi.city_metadata.citycode poi.adcode=poi.city_metadata.adcode poi.currency=poi.city_metadata.currency
+ destination_record=bind_destination_poi(poi) destination_record.selection_basis=reason
+ observe("select_destination",{destination:destination_record basis:reason})
+ return true
 }
 
 fn coord_text(position){ return "" + position.longitude + "," + position.latitude }
@@ -3148,6 +2935,7 @@ fn guardian_snapshot(){
  return {goal:guardian_public_goal(guardian_goal,true) proposal:proposal last_check:guardian_check current_check:guardian_current_check() remaining_budget_cents:remaining original_plan_reexecution:guardian_reexecution(guardian_goal,time_now(),position_record) error:guardian_error monitoring:"打开只展示历史；仅主动重新核验，不会后台监控。上次核验不代表当前仍成立。"}
 }
 fn guardian_propose(p){
+ let missing=planning_constraints_error() if missing!="" {return {success:false error:missing}}
  let route=ui_route(route_get(p,"route_id"))
  if trip_replay || route==nil || destination_record==nil || constraints==nil {return {success:false error:"提案必须引用本轮真实Route和目的地；历史详情不能提出新提案"}}
  if !p.preferences.is_string() || !p.risk_acceptance.is_string() || !p.basis.is_string() || p.basis.trim()=="" {return {success:false error:"请明确偏好、风险与选定依据供用户确认"}}
@@ -3274,11 +3062,6 @@ fn start_task_with(text,recheck){
     render_probe=nil
     agent_tool_schema=nil
     if text == "" { show_status("请用一句话说明行程、时限与预算") return }
-    if !recheck {
-      let limits=explicit_limits(text)
-      if limits==nil {let reason="本次指令无法唯一确定数字时限和预算，请明确分钟或小时及一致的预算金额与币种；尚未开始规划" composer_open=true ui.composer_help.set_text(reason) show_status(reason) return}
-      if limits.currency!="CNY" && limits.currency!="unspecified" {let reason="本次报价为人民币，不能直接与其它币种预算比较；尚未开始规划" composer_open=true ui.composer_help.set_text(reason) show_status(reason) return}
-    }
     ui.composer_help.set_text("提交会新建一条出行，原记录保留。")
     clear_model_resume()
     reset_private_config()
@@ -3303,17 +3086,16 @@ fn start_task_ready(text,recheck){
     run_id += 1 ui_facts_revision+=1
     if task_timer != nil { stop_timer(task_timer) }
     let token = run_id
-    received_at = time_now() arrive_by = 0 loop_started_at = received_at automatic_seconds = 0 step_count = 0 protocol_retry_count = 0
+    received_at = time_now() arrive_by = nil loop_started_at = received_at automatic_seconds = 0 step_count = 0 protocol_retry_count = 0
     map_geometry_jobs={} route_node_generation+=1 route_nodes={} route_prefixes={} route_extension_count=0 rail_services={} rail_service_sequence=0 rail_cookie="" didi_places={} didi_quotes={} didi_record_count=0
     pending_user_poi = nil condition_open = false invalidate_map() picker_request += 1 picker_open = false picker_pois = [] picker_preview_poi = nil picker_status = "" viewed_route_id = "" expanded_routes = false
-    request_text = text request_form_input = ui.sentence.text().trim() user_limits = explicit_limits(text) observations = [] model_requests = [] model_request_owner=nil model_response_diagnostic=nil decisions = [] source_snapshots = [] source_records = [] calendar_events = [] note_records = []
+    request_text = text request_form_input = ui.sentence.text().trim() user_limits = nil observations = [] model_requests = [] model_request_owner=nil model_response_diagnostic=nil decisions = [] source_snapshots = [] source_records = [] calendar_events = [] note_records = []
     position_record = nil constraints = nil destination_record = nil poi_records = [] candidates = [] candidate_sequence = 0 chosen = nil used_tools = []
     transit_count = 0 transit_completed = 0 driving_done = false driving_completed = false progress_text = "" answer_text = "" phase = "running"
-    if user_limits != nil {arrive_by=received_at+user_limits.minutes*60}
     if recheck {
       arrive_by=guardian_goal.deadline_ts
       user_limits={minutes:(arrive_by-received_at)/60 budget_cents:guardian_goal.total_budget_cents-guardian_goal.spent_cents currency:guardian_goal.currency}
-      constraints={budget_cents:user_limits.budget_cents currency:guardian_goal.currency objective:"min_cost" destination_query:guardian_goal.destination.name guardian_locked:true}
+      constraints={budget_cents:user_limits.budget_cents currency:guardian_goal.currency objective:"min_cost" guardian_locked:true}
       destination_record=guardian_goal.destination.to_json().parse_json()
       guardian_check=route_get(guardian_goal,"last_check")
     }
@@ -3490,8 +3272,9 @@ fn agent_tools(){
  tool("report_goal_check","以本轮新route_id计算并记录原计划valid/invalid/unknown；省略id检查已过期、已超支或缺证据。返回核验与替代差额，不替换路线。",{route_id:{type:"string"}},[])
  tool("read_skill","读取技能目录中的技能。省略path读取SKILL.md；path可读取该技能返回的files中的引用资料。",{name:{type:"string"} path:{type:"string"}},["name"])
  tool("read_location",if mode=="demo" {"读取显式模拟出发位置并核实城市。"} else {"读取当前设备定位并核实城市。"},{},[])
+ tool("set_constraints","设置模型从本次原句或来源解释的到达期限与预算；地点采用独立，先后均可。相对时限以固定received_at起算，查询和解释耗时计入；绝对日期时间按Asia/Shanghai换算。basis区分用户原话和来源或地域推断；已有守护目标约束锁定。",{arrive_within_minutes:{type:"integer" minimum:1 description:"从本次received_at起到达的时限，整数分钟；与date/time互斥"} date:{type:"string" description:"绝对到达日期YYYY-MM-DD；与time一起提供，北京时间"} time:{type:"string" description:"绝对到达时刻HH:MM，北京时间；日期由本次received_at_label和原句解释"} budget_cents:{type:"integer" minimum:0 maximum:9007199254740991 description:"预算整数分"} currency:{type:"string" enum:["CNY"]} basis:{type:"string" description:"到达约束和预算币种的解释依据；区分用户原话与来源或地域推断"}},["budget_cents" "currency" "basis"])
  tool("search_places","搜索高德真实地点，返回全部POI身份、名称、地址、类型、城市、来源与可extend的node_ref；不采用目的地。完整入口资料用get_route_graph(node_refs)按需读取。",{query:{type:"string"}},["query"])
- tool("adopt_destination","采用已有poi_id为本任务目标，返回已采用目的地、披露入口范围、constraints和原绝对期限。basis说明来自用户选择或明确推断；不伪造航站楼。",{poi_id:{type:"string"} basis:{type:"string"}},["poi_id" "basis"])
+ tool("adopt_destination","采用本轮真实poi_id及其披露入口为目的地，basis说明选择或推断依据；不设置到达期限或预算，与set_constraints先后均可。返回目的地、入口范围和当前约束。",{poi_id:{type:"string"} basis:{type:"string"}},["poi_id" "basis"])
  tool("query_route","从当前起点查询，返回新增Route摘要和new_nodes，保留金额、时间范围、assessment及来源；完整legs/segments由get_route(id)按需读取，new_nodes保节点引用；坐标用get_route_graph(node_refs)读取。success仅表示查询完成，不保证目标可行；Route.id可供extend_route继续累计。transit公交策略默认0；taxi为本次供应商到所选路由点的驾车区间估价，候车未知。已采用航站楼的披露入口为路由点，内部通达仍未知。",{to_ref:{type:"string" description:"可选真实中转节点node_ref，省略则到destination。指定时只查origin到该节点，作为新的完整前缀；非滴滴询价地点ref。"} mode:{type:"string" enum:["transit" "taxi"]} strategy:{type:"number" description:"transit:0推荐/1经济/2少换乘/3少步行/4舒适/5无地铁/7地铁优先/8快；默认0"}},["mode"])
  tool("extend_route","查询本次供应商区间并返回累计的新Route，原Route不变；成功返回的Route.id可作下一次route_id。费用/时间只引用成功注册Route/get_route的累计结果，完整公交票价不可拆摊；routes[]表示未组合，不能手算拒绝接驳为完整行程。",{route_id:{type:"string" description:"要保留并累计的本轮完整前缀Route.id，从其实际终点继续。origin是零路段起点；从起点重组或替换首段用origin。公交Route.id保留其已查供应商区间的全部耗时费用，不会裁到内部站点。"} to_ref:{type:"string" description:"下一节点的真实node_ref；已采用航站楼的canonical POI/ref或其入口ref使用披露的destination入口绑定，其它节点不变。非滴滴询价地点ref。"} mode:{type:"string" enum:["walk" "taxi" "transit"]} strategy:{type:"number" description:"公交策略，含义同query_route；默认0，仅transit使用"}},["route_id" "to_ref" "mode"])
  tool("search_rail_stations","按关键词查询12306公开车站表，返回真实铁路站ref/name/code；不包含地图坐标，使用search_places核对应POI。",{query:{type:"string"}},["query"])
@@ -3513,10 +3296,9 @@ fn agent_tools(){
  if mode=="demo" {
 tools.push(tool("read_calendar","读取本应用明确标注的模拟日历；返回记录和来源。",{},[]))
 tools.push(tool("read_notes","读取本应用模拟机票笔记；返回记录和来源。",{},[]))
-tools.push(tool("set_constraints","仅用于从已读取日历事件及关联机票笔记推断机场目的地，用户时限和预算不变。用户明确地点时不需要日历或机票，读取设备位置并用adopt_destination采纳核实POI。",{event_id:{type:"string" description:"read_calendar返回的所选记录id"} note_id:{type:"string" description:"read_notes返回、关联event_id的有效机票记录id"} minutes:{type:"number" description:"用户到达时限，整数分钟"} budget_cents:{type:"number" description:"用户总预算，整数分"} currency:{type:"string"} destination_query:{type:"string"} citations:{type:"array" minItems:2 description:"必须至少覆盖所选event_id及note_id各一条；引用各自raw中的单行原文" items:{type:"object" required:["source_id" "quote"] properties:{source_id:{type:"string" description:"读取结果record.id；本次用户原文可用current-input，不编造ID"} quote:{type:"string" description:"该source_id的raw中逐字单行子串；非摘要、不跨行、不混用用户或其它记录文字"}}}}},["event_id" "note_id" "minutes" "budget_cents" "currency" "destination_query" "citations"]))
  }
  if mode=="live" {
-  tools.push(tool("read_calendar","读取用户已授权并选择的系统日历；不会请求权限。可自主指定Unix毫秒时间窗和limit(1..200)，默认本次received_at至arrive_by、200条。返回原始事件、时区、来源与truncated；空/未授权/未选日历如实返回，不能视为机票或要求额外笔记。",{start_ms:{type:"number"} end_ms:{type:"number"} limit:{type:"integer" minimum:1 maximum:200}},[]))
+  tools.push(tool("read_calendar","读取用户已授权并选择的系统日历；不会请求权限。可自主指定Unix毫秒时间窗和limit(1..200)，默认本次received_at至arrive_by，未设期限时为此后24小时、200条。返回原始事件、时区、来源与truncated；空/未授权/未选日历如实返回，不能视为机票或要求额外笔记。",{start_ms:{type:"number"} end_ms:{type:"number"} limit:{type:"integer" minimum:1 maximum:200}},[]))
   tools.push(tool("read_notes","按非空关键词查询官方Notes摘要；保total/truncated/id。需要全文时read_note，应用未运行或未连接如实返回。",{query:{type:"string"}},["query"]))
   tools.push(tool("read_note","读取Notes实际搜索id的原文及edited_ms；原文可作为目的地推断来源，不构成已买票证明。",{id:{type:"string"}},["id"]))
  }
@@ -3883,6 +3665,7 @@ fn agent_execute_next(token){
   if name=="propose_goal" {agent_tool_result(guardian_propose(p))}
   elif name=="report_goal_check" {guardian_report(p,fn(result){if current_task(token) && active_tool==call {agent_tool_result(result)}})}
   elif guardian_mode && (name=="set_constraints" || name=="adopt_destination") {agent_tool_result({success:false error:"已确认目的地和绝对期限/总预算锁定，不得更换或放宽"})}
+  elif (name=="query_route" || name=="query_transit" || name=="query_driving" || name=="extend_route" || name=="search_rail_services" || name=="extend_route_with_rail" || name=="attach_quote" || name=="compare_routes") && planning_constraints_error()!="" {agent_tool_result({success:false error:planning_constraints_error()})}
   elif name=="read_skill" {read_agent_skill(p,token,fn(result){
     start_timeout(0.01,||{if current_task(token) && active_tool==call {agent_tool_result(result)}})
   })}
@@ -3907,12 +3690,7 @@ fn agent_execute_next(token){
     let at=time_now() let city="" if position_record!=nil {city="&city="+position_record.citycode.url_encode()}
     amap_request("/v3/place/text","&citylimit=false&extensions=all&children=1"+city+"&keywords="+p.query.url_encode(),token,fn(data){poi_records=parse_pois(data,at,false) register_route_pois(poi_records) picker_pois=poi_records observe("search_places",poi_records) agent_tool_result({success:true places:model_place_results(poi_records)})})
   }
-  elif name=="adopt_destination" {
-    let poi=route_poi(p.poi_id)
-    if poi==nil {agent_tool_result({success:false error:"poi_id不在本次查询已核实地点中"})}
-    elif constraints!=nil && route_get(constraints,"user_selected")!=true && route_get(constraints,"inferred")!=true {if select_destination({poi_id:p.poi_id},p.basis){finish_tool_from_state(token)} else {agent_tool_result({success:false error:destination_error})}}
-    else {pending_user_poi=poi if !position_current(position_record){agent_tool_result({success:false error:"请取得当前起点后再采用地点"})} elif apply_user_poi(){constraints.inferred=true constraints.user_selected=false constraints.inference={reason:p.basis origin_city:position_record.city poi_source:poi.source} finish_tool_from_state(token)} else {agent_tool_result({success:false error:"缺少可计算的用户时间/预算或真实城市"})}}
-  }
+  elif name=="adopt_destination" {if select_destination(p,route_get(p,"basis")){finish_tool_from_state(token)} else {agent_tool_result({success:false error:destination_error})}}
   elif name=="query_route" {query_route(p,token)}
   elif name=="extend_route" {extend_route(p,token)}
   elif name=="search_rail_stations" {search_rail_stations(p,token)}
@@ -3983,7 +3761,7 @@ fn resume_model_request(){
  let failed=model_request_owner let token=run_id let now=time_now()
  clear_model_resume()
  // 仅补本次执行时刻；原用户消息、已完成tool消息和绝对期限不变，资料未重新查询。
- agent_messages.push({role:"user" content:({runtime:{kind:"model_request_resume" current_at:now current_at_label:guardian_deadline(now) elapsed_seconds:now-received_at received_at:received_at arrive_by:arrive_by arrive_by_label:if arrive_by>0 {guardian_deadline(arrive_by)} else {"期限尚未确定"} prior_results_refreshed:false}}).to_json()})
+ agent_messages.push({role:"user" content:({runtime:{kind:"model_request_resume" current_at:now current_at_label:guardian_deadline(now) elapsed_seconds:now-received_at received_at:received_at arrive_by:arrive_by arrive_by_label:if arrive_by!=nil {guardian_deadline(arrive_by)} else {"期限尚未确定"} prior_results_refreshed:false}}).to_json()})
  agent_active=true phase="running" runtime_status="" ui_facts_revision+=1
  start_timeout(0.01,||trace_emit_run("query_resumed",{failed_step:failed.step occurred_at:now received_at:received_at arrive_by:arrive_by},nil,token))
  render_content() ui.trip_context.render()

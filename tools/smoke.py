@@ -35,7 +35,7 @@ fn smoke_report(){
  {name:"无tool_calls本次结束" passed:!agent_active && agent_messages[7].content.is_string()}
  {name:"旧结果文件未读取也未改写" passed:fs.read("trip.json")=="historical fixture ignored" && fs.read("agent-run.json")=="historical audit ignored"}
  ]
- if smoke_queries>=3 {checks.push({name:"停止后新输入重新起算和预算" passed:received_at>smoke_first_received && user_limits.minutes==30 && user_limits.budget_cents==8000 && arrive_by==received_at+1800}) checks.push({name:"停止旧响应不派发" passed:smoke_late_rejected})}
+ if smoke_queries>=3 {checks.push({name:"停止后新输入重新起算且不沿用旧约束" passed:received_at>smoke_first_received && user_limits==nil && constraints==nil && arrive_by==nil}) checks.push({name:"停止旧响应不派发" passed:smoke_late_rejected})}
  }
  fs.write("harness-smoke.json",{checks:checks queries:smoke_queries phase:phase received_at:received_at}.to_json())
  }
@@ -414,12 +414,9 @@ fn agent_pump(token){
  let short_bytes=short.to_json()
  let warm_detail=route_segment_facts(complete,true)
  let cached_quote=route_quote_variant(complete,{ref:"quote:cache" price_cents:900},final.legs[0].id,"合成缓存验证").candidate
- let hour_limits=explicit_limits("现在从广州珠江新城出发，4小时内到深圳宝安机场T3国内出发，预算200元，优先铁路或城际。")
- let minute_limits=explicit_limits("240分钟内到机场，预算200元。")
  fs.write("harness-smoke.json",{checks:[
  {name:"私有配置初读后同查询复用且新查询刷新" passed:mixed_private_cache_ok}
  {name:"大站图新增节点差集只返回本次新增且保留全部节点" passed:mixed_large_graph_ok}
- {name:"显式小时与分钟期限等价且拒绝混合单位" passed:hour_limits!=nil && minute_limits!=nil && hour_limits.minutes==240 && hour_limits.budget_cents==20000 && hour_limits.currency=="unspecified" && hour_limits.to_json()==minute_limits.to_json() && explicit_limits("4小时30分钟，预算200元")==nil}
  {name:"高德六位小数精确金额不丢价且亚分金额不截断" passed:route_cents("39.000000")==3900 && route_cents("28.010000")==2801 && route_cents("0.001")==nil && route_cents("39.999999")==nil && route_cents("-1")==nil}
  {name:"固定班次不能平移且接驳迟到明确错过" passed:route_timing({departure_ts:1000 duration_seconds:800 legs:[{duration_seconds:200} {rail_service:{trip:"G测试" departure_ts:1400 arrival_ts:1800}}]},1100).arrival_ts==1800 && route_timing({departure_ts:1000 duration_seconds:800 legs:[{duration_seconds:200} {rail_service:{trip:"G测试" departure_ts:1400 arrival_ts:1800}}]},1300).missed.len()==1 && route_timing({departure_ts:1000 duration_seconds:800 selected_legs:[{duration_seconds:200} {rail_service:{trip:"G测试" departure_ts:1400 arrival_ts:1800}}]},1300).arrival_ts==1800}
  {name:"query中转前缀只含起点到站且回执保routes和new_nodes" passed:mixed_first_response.success && mixed_first_response.routes.len()==1 && mixed_first_response.new_nodes.is_array() && first.legs.len()==1 && first.legs[0].from_ref=="origin" && first.legs[0].requested_to_ref=="stop:a" && first.price_cents==1200 && first.legs[0].duration_seconds==300 && second.legs.len()==2 && second.legs[1].duration_seconds==900 && second.legs[1].from_ref=="stop:a" && second.legs[1].requested_to_ref=="stop:b" && second.price_cents==1800 && second.duration_seconds>=1200}
@@ -832,6 +829,9 @@ def main():
  if '--rail-routing' in sys.argv:
   import test_rail_route as rail
   source=rail.source(original)
+ if '--constraints' in sys.argv:
+  import test_explicit_limits as constraints_test
+  source=constraints_test.source(original)
  if '--source-contract' in sys.argv:
   import test_source_contract as sources
   source=sources.source(original)
@@ -962,6 +962,8 @@ def main():
    rail.run_egress(w,jail,original,source);return
   if '--rail-routing' in sys.argv:
    rail.run(w,jail,original,source);return
+  if '--constraints' in sys.argv:
+   constraints_test.run(w,jail,original,source);return
   if '--source-contract' in sys.argv:
    sources.run(w,jail,original,source)
    return

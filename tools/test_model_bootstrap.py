@@ -21,7 +21,7 @@ fn mb_host_request(service,body,done){mb_dispatches+=1 let user=body.messages[1]
 fn mb_heartbeat(){if mb_done{return} if model_request_owner!=nil && route_get(model_request_owner,"processing_stage")=="private_config_load" && !private_config_cached {mb_pending_heartbeats+=1} start_timeout(0.02,||mb_heartbeat())}
 fn mb_case_done(){let dispatched=mb_dispatches-mb_before_dispatches let failed=mb_failures-mb_before_failures let record=if model_requests.len()>0 {model_requests[0]} else {nil}
  if mb_case==0 {
-  let valid=mb_host_observation!=nil && mb_host_observation.service=="model.chat" && mb_host_observation.message_count==2 && mb_host_observation.request_matches && mb_host_observation.limits.minutes==840 && mb_host_observation.limits.budget_cents==20000 && mb_host_observation.arrive_by-mb_host_observation.received_at==840*60
+  let valid=mb_host_observation!=nil && mb_host_observation.service=="model.chat" && mb_host_observation.message_count==2 && mb_host_observation.request_matches && mb_host_observation.limits==nil && mb_host_observation.arrive_by==nil && mb_host_observation.arrive_by_label==nil
   mb_check("原14h首次context在200ms worker queued latency仍响应且派发一次",dispatched==1 && failed==0 && valid && private_config_cached && mb_pending_heartbeats>=2 && mb_queue_returned-mb_queue_started>=0.19)
  } elif mb_case==1 {mb_check("旧run的迟到首配置回调不写cache或派发",dispatched==0 && failed==0 && !private_config_cached && private_config_text==nil && agent_active)}
  elif mb_case==2 {mb_check("无效配置JSON明确失败且零派发",dispatched==0 && failed==1 && !agent_active && phase=="failed" && record!=nil && record.state=="configuration_error")}
