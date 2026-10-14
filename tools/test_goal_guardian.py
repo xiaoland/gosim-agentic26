@@ -445,3 +445,134 @@ def run_proposal_fold(work,jail,original,injected):
     index=json.loads((jail/'navigation-trips.json').read_text())['data'];entry=next(e for e in index['trips'] if e['id']==index['selected_id']);goal=read_record(jail,entry['file'])['goal'];checks.append({'name':'确认经生产存储读回goal版本1','passed':goal['version']==1})
     report={'checks':checks,'main_sha256':hashlib.sha256(original.encode()).hexdigest(),'native_errors':[l for l in (work/'native.log').read_text().splitlines() if '[E]' in l],'model_requested':False,'provider_requested':False,'boundary':'复用existing synthetic Route/context，生产prepare/summary/full/真实toggle/reject/confirm/store与磁盘read；无模型DSL或交通。只覆盖新增折叠交互，不重跑旧guardian全矩阵。'}
     (work/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));assert all(c['passed'] for c in checks) and not report['native_errors'],str(work/'report.json')
+
+# 复用既有Route/context，仅覆盖生成页面准备动作与父确认边界。
+GENERATED_PROPOSAL_FIXTURE = r'''
+fn trace_initialize(){}
+fn trip_load(done){}
+fn amap_request(path,params,token,done){}
+fn minimax_request(system,messages,tools,done){gg_check("本地操作不请求模型",false)}
+fn ui_dispatch_action(action){let result=product_ui_dispatch_action(action) fs.write("generated-event.json",{event:action error:guardian_error pending:guardian_pending!=nil busy:shell_busy()}.to_json()) return result}
+let gg_stage=0 let gg_checks=[] let gg_first=nil let gg_pending=nil let gg_generation=0
+fn gg_check(name,value){gg_checks.push({name:name passed:value})}
+fn gg_write(name){fs.write(name,{checks:gg_checks error:guardian_error pending:if guardian_pending!=nil {guardian_pending.proposal_version} else {nil} generation:trip_generation}.to_json())}
+fn gg_poll(){
+ if trip_pending_commit!=nil || trip_capture_pending!=nil {start_timeout(0.05,||gg_poll()) return}
+ if gg_stage==0 && fs.exists("generated-go.json") {
+  gg_generation=trip_generation gg_stage=1 gg_write("generated-ready.json")
+ }
+ if gg_stage==1 && guardian_pending!=nil {
+  gg_check("真实生成按钮只准备v1不提交目标",guardian_goal==nil && guardian_pending.goal.version==1 && trip_generation==gg_generation && guardian_pending.goal.selected_route.id=="guardian-a")
+  gg_pending=guardian_pending gg_stage=2 gg_write("generated-pending.json")
+ }
+ if gg_stage==2 && fs.exists("generated-invalid-checked.json") {
+  gg_check("非法Route明确失败且不覆盖合法提案",guardian_pending==gg_pending && guardian_error!="")
+  guardian_error="" gg_stage=3 gg_write("generated-invalid.json")
+ }
+ if gg_stage==3 && fs.exists("generated-shape-checked.json") {
+  gg_check("缺参数可见失败且不覆盖合法提案",guardian_pending==gg_pending && guardian_error!="")
+  guardian_error="" agent_active=true gg_stage=4 gg_write("generated-busy-ready.json")
+ }
+ if gg_stage==4 && fs.exists("generated-busy-checked.json") {
+  gg_check("处理中可见失败且不覆盖合法提案",guardian_pending==gg_pending && guardian_error!="")
+  agent_active=false guardian_error="" trip_replay=true gg_stage=5 gg_write("generated-history-ready.json")
+ }
+ if gg_stage==5 && fs.exists("generated-history-checked.json") {
+  gg_check("历史页面可见拒绝准备且不覆盖合法提案",guardian_pending==gg_pending && guardian_error!="")
+  trip_replay=false guardian_error=""
+  let block=block_by_id("generated-proposals")
+  ui_dispatch_action({action:"propose_goal" block_id:block.id block_revision:block.revision-1 route_id:"guardian-b" preferences:"草案" risk_acceptance:"未确认" basis:"旧稿"})
+  gg_check("旧稿修订可见失败且不覆盖合法提案",guardian_pending==gg_pending && guardian_error!="")
+  guardian_error="" guardian_refresh() gg_stage=6 gg_write("generated-confirm-ready.json")
+ }
+ if gg_stage==6 && guardian_goal!=nil && guardian_pending==nil {
+  gg_check("父真实确认才保存v1",guardian_goal.version==1 && guardian_goal.selected_route.id=="guardian-a" && guardian_goal.confirmations.len()==1)
+  gg_first=guardian_goal.to_json() guardian_mode=true gg_generation=trip_generation
+  gg_stage=7 gg_write("generated-replace-ready.json")
+ }
+ if gg_stage==7 && guardian_pending!=nil {
+  let old=gg_first.parse_json()
+  gg_check("替代准备不写盘不改既有目标",guardian_goal.to_json()==gg_first && trip_generation==gg_generation && guardian_pending.goal.selected_route.id=="guardian-b")
+  gg_check("替代沿用期限预算与已确认偏好风险",guardian_pending.goal.deadline_ts==old.deadline_ts && guardian_pending.goal.total_budget_cents==old.total_budget_cents && guardian_pending.goal.preferences==old.preferences && guardian_pending.goal.risk_acceptance==old.risk_acceptance)
+  gg_stage=8 gg_write("generated-replacement-pending.json")
+ }
+ if gg_stage==8 && guardian_pending==nil && guardian_goal.version==2 {
+  let old=gg_first.parse_json()
+  gg_check("父真实确认替代保存v2且预算期限不变",guardian_goal.selected_route.id=="guardian-b" && guardian_goal.deadline_ts==old.deadline_ts && guardian_goal.total_budget_cents==old.total_budget_cents && guardian_goal.confirmations.len()==2)
+  gg_write("generated-result.json") return
+ }
+ start_timeout(0.05,||gg_poll())
+}
+start_timeout(0.7,||{run_id+=1 agent_active=false phase="waiting" trip_records=[{id:"trip-1" title:"生成页面提案边界" input:"合成原生验证" status:"planned" goal:nil snapshot:nil created_at:time_now() updated_at:time_now() _record_file:nil _dirty:true}] trip_selected_id="trip-1" trip_next_id=2 trip_generation=0 trip_replay=false trip_loading=false guardian_goal=nil guardian_mode=false composer_open=false
+ gt_context() destination_record.id="synthetic-destination"
+ ensure_interface_facts(run_id,fn(facts){mount_ui_blocks({blocks:[{id:"generated-proposals" source:"View{width:Fill height:Fit flow:Down Button{text:\"准备合成A\" on_click:||emit({action:\"propose_goal\" route_id:\"guardian-a\" preferences:\"尽量便宜\" risk_acceptance:\"待确认未知风险\" basis:\"合成原生交互，不保证到达\"})} Button{text:\"准备合成B\" on_click:||emit({action:\"propose_goal\" route_id:\"guardian-b\" preferences:\"不能覆盖旧偏好\" risk_acceptance:\"未确认新风险\" basis:\"合成替代提案\"})} Button{text:\"准备非法Route\" on_click:||emit({action:\"propose_goal\" route_id:\"missing-route\" preferences:\"\" risk_acceptance:\"\" basis:\"错误对照\"})} Button{text:\"准备缺参提案\" on_click:||emit({action:\"propose_goal\" route_id:\"guardian-a\"})}}"}]},run_id,interface_revision)
+ render_content() gg_poll()})})
+'''
+
+
+def generated_proposal_source(original):
+    for name in ['trace_initialize', 'trip_load', 'amap_request', 'minimax_request', 'ui_dispatch_action']:
+        original = original.replace('fn '+name+'(', 'fn product_'+name+'(', 1)
+    helpers = FIXTURE[FIXTURE.index('fn gt_route('):FIXTURE.index('fn gt_propose(')]
+    return original+'\n'+helpers+'\n'+GENERATED_PROPOSAL_FIXTURE
+
+
+def run_generated_proposal(work, jail, request, original, injected):
+    from test_trip_replay import controls
+    rows, capture, _, android = controls(work, request)
+    def wait(name):
+        until = time.monotonic()+25
+        while not (jail/name).exists() and time.monotonic()<until:
+            time.sleep(.05)
+        assert (jail/name).exists(), (name, work/'native.log')
+        return json.loads((jail/name).read_text())
+    def scroll(dy):
+        request('m', k='scroll', x=210, y=670, dy=dy, precise=1, wait=1)
+        time.sleep(.1)
+    def tap(text):
+        for _ in range(14):
+            found=[r for r in rows() if r.get('ty')=='Button' and r.get('t')==text and r['r'][3]>=20]
+            if found:
+                capture('before-'+text)
+                x,y,w,h=found[0]['r']
+                request('click',x=x+w/2,y=y+h/2,wait=1)
+                time.sleep(.25)
+                return
+            scroll(180)
+        raise AssertionError(('按钮未可见',text,work))
+    def top():
+        for _ in range(14): scroll(-220)
+    def goal():
+        path=jail/'navigation-trips.json'
+        if not path.exists(): return None
+        index=json.loads(path.read_text())['data']
+        entry=next(e for e in index['trips'] if e['id']==index['selected_id'])
+        return read_record(jail,entry['file'])['goal']
+    android()
+    time.sleep(.8)
+    (jail/'generated-go.json').write_text('{}')
+    wait('generated-ready.json')
+    tap('准备合成A')
+    wait('generated-pending.json');capture('generated-v1-pending')
+    assert goal() is None, '本地准备不得保存目标'
+    for button,signal,ready in [
+        ('准备非法Route','generated-invalid-checked.json','generated-invalid.json'),
+        ('准备缺参提案','generated-shape-checked.json','generated-busy-ready.json'),
+        ('准备合成B','generated-busy-checked.json','generated-history-ready.json'),
+        ('准备合成B','generated-history-checked.json','generated-confirm-ready.json')]:
+        top();tap(button);capture(signal.removesuffix('.json'))
+        (jail/signal).write_text('{}');wait(ready)
+    assert goal() is None
+    top();tap('查看提案');tap('确认此方案')
+    wait('generated-replace-ready.json');assert goal()['version']==1
+    top();tap('准备合成B');wait('generated-replacement-pending.json');capture('generated-v2-pending')
+    assert goal()['version']==1 and goal()['selected_route']['id']=='guardian-a'
+    top();tap('查看提案');tap('确认此方案')
+    report=wait('generated-result.json');capture('generated-v2-confirmed')
+    assert goal()['version']==2 and goal()['selected_route']['id']=='guardian-b'
+    report.update(main_sha256=hashlib.sha256(original.encode()).hexdigest(),model_requested=False,provider_requested=False,mode='macOS宿主Android样式',
+                  boundary='复用既有合成Route/context；实际生成Button→emit→mailbox→dispatcher→guardian_propose与父真实确认→生产磁盘读回。旧稿修订以dispatcher定点调用。未调用模型、供应商或下单。',
+                  native_errors=[l for l in (work/'native.log').read_text().splitlines() if '[E]' in l])
+    (work/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+    assert all(c['passed'] for c in report['checks']) and not report['native_errors'], work/'report.json'
+    print(f'PASS: {len(report["checks"])} 项生成提案原生检查；{work / "report.json"}')

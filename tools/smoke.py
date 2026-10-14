@@ -854,6 +854,9 @@ def main():
   legacy=legacy[legacy.index('fn interface_facts(){'):legacy.index('fn generated_context(){')].replace('fn interface_facts(){','fn performance_legacy_facts(){',1)
   source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1).replace('fn agent_begin(','fn product_agent_begin(',1).replace('fn amap_request(','fn product_amap_request(',1).replace('ui.generated.fact_state.set_text(', 'performance_set_facts(')+'\n'+legacy+'\n'+PERFORMANCE_FIXTURE
  if recovery:source=original.replace('fn agent_pump(','fn product_agent_pump(',1).replace('fn agent_tool_result(','fn product_agent_tool_result(',1)+'\n'+RECOVERY_FIXTURE
+ if '--guardian-generated-proposal' in sys.argv:
+  import test_goal_guardian as guardian
+  source=guardian.generated_proposal_source(original)
  if '--guardian-commit-boundaries' in sys.argv:
   import test_goal_guardian as guardian
   source=guardian.commit_boundary_source(original)
@@ -893,7 +896,7 @@ def main():
  try:
   launch('mount');paths=[]
   for _ in range(100):
-   paths=[p for p in (a.HOME_DIR/'apps/.system/os.agentic26-navigation').glob('*/main.splash') if not p.parent.name.endswith('.staging')]
+   paths=[p for p in (a.HOME_DIR/'apps/.system/os.agentic26-navigation').glob('*/main.splash') if '.staging' not in p.parent.name]
    if paths:break
    time.sleep(.1)
   assert len(paths)==1;mount=paths[0].parent;stop();shutil.copytree(ROOT/'bundle',mount,dirs_exist_ok=True)
@@ -917,6 +920,8 @@ def main():
   if '--model-graph-projection' in sys.argv:model_graph_projection.prepare(jail)
   if '--trace-payload' in sys.argv:trace_payload.prepare(jail)
   launch('native');report=None
+  if '--guardian-generated-proposal' in sys.argv:
+   guardian.run_generated_proposal(w,jail,q,original,source);return
   if '--guardian-commit-boundaries' in sys.argv:
    guardian.run_commit_boundaries(w,jail,original,source);return
   if '--trip-snapshot' in sys.argv:

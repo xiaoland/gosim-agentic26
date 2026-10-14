@@ -3169,6 +3169,16 @@ fn guardian_prepare_selected(){
  if route==nil || shell_busy() {return {success:false error:"请先查看本轮核验候选，查询完成后再准备替代提案"}}
  return guardian_propose({route_id:route.id preferences:guardian_goal.preferences risk_acceptance:guardian_goal.risk_acceptance basis:"用户选择本轮当前查看方案；可行性与风险以提案评估为准"})
 }
+fn guardian_prepare_generated(action,block){
+ let result=nil
+ if block==nil || !block.installed || route_get(action,"block_revision")!=block.revision || interface_run!=run_id {result={success:false error:"生成方案页面已失效，请使用本轮当前页面准备提案"}}
+ elif trip_replay {result={success:false error:"历史详情不能准备新提案，请先主动重新核验"}}
+ elif shell_busy() {result={success:false error:"本轮仍在处理，请完成后再准备提案"}}
+ elif !route_get(action,"route_id").is_string() || !route_get(action,"preferences").is_string() || !route_get(action,"risk_acceptance").is_string() || !route_get(action,"basis").is_string() {result={success:false error:"准备提案需要本轮Route、偏好、风险与选择依据"}}
+ else {result=guardian_propose(action)}
+ if !result.success {guardian_error=result.error ui_facts_revision+=1 guardian_refresh()}
+ return result
+}
 fn guardian_confirm(version){
  if trip_replay {guardian_error="历史详情不可确认旧提案，请先主动重新核验" guardian_refresh() return false}
  let pending=guardian_pending
@@ -4466,6 +4476,7 @@ fn map_widget(slot){let block=block_by_id(route_get(slot,"block_id")) if block==
 fn ui_dispatch_action(action){
  let block_id=route_get(action,"block_id") if block_id==nil {block_id="__document"}
  let block=block_by_id(block_id)
+ if action.action=="propose_goal" {trace_emit("local_event",{trip_id:trip_selected_id historical:trip_replay event:action.to_json()},nil) guardian_prepare_generated(action,block) return true}
  if block!=nil && route_get(action,"block_revision")!=nil && action.block_revision!=block.revision {return true}
  if trip_replay && action.action!="rendered" && action.action!="map" && action.action!="map_camera" && action.action!="map_fit" && action.action!="show_block" && action.action!="view_route" && action.action!="runtime_error" {return true}
  trace_emit("local_event",{trip_id:trip_selected_id historical:trip_replay event:action.to_json()},nil)

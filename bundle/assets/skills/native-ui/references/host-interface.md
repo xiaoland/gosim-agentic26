@@ -50,7 +50,7 @@ render_ui 返回本稿真实 diagnostics；installed仅确认源码安装，rend
 
 render_ui的blocks回执逐块返回id、revision、diagnostics、installed、status、notified、complete与visible；container_rect/body_rect只保留在私有渲染诊断，不返回模型。失败块可以单独提交修正版，其它块保留。rendered状态证明本稿已执行并通知，不保证子卡片或按钮可见；尺寸需结合父容器、滚动和隐藏状态判断；widget ID须为本块实际构造的名字，隐藏或离屏控件rect为零不是布局失败证据。自然内容的嵌套View应明确width:Fill height:Fit，不能只写padding和背景而依赖默认尺寸。区块没有删除／重排序接口；新查询清空全部区块。
 
-守护展示事实在snapshot().guardian中，包括goal、proposal、current_check、last_check和remaining_budget_cents。current_check是本轮判定，last_check是历史；页面按事实变化更新，不能静态写“已保存/仍成立”。提案、核验和用户确认的业务规则见journey-guardian。propose_goal/report_goal_check是父Agent工具，不是子VM方法；emit不支持保存确认或费用变更，生成页面只能解释事实。
+守护展示事实在snapshot().guardian中，包括goal、proposal、current_check、last_check和remaining_budget_cents。current_check是本轮判定，last_check是历史；页面按事实变化更新，不能静态写“已保存/仍成立”。提案、核验和用户确认的业务规则见journey-guardian。propose_goal/report_goal_check是父Agent工具，不是子VM方法。查询完成后，生成页面可用`emit({action:"propose_goal",route_id:真实RouteID,preferences:"待确认偏好",risk_acceptance:"待确认风险",basis:"选择依据"})`本地准备目标或替代提案，参数与Agent的propose_goal相同；新风险文字不是用户已接受。父应用复用本轮Route评估，只暂存待确认提案，不续模型循环。snapshot().guardian.proposal与error反映结果；历史、处理中、缺少参数或无效Route的操作失败会显示原因，不覆盖已有合法提案；失效旧稿不能创建新提案。只有父应用真实确认才保存／替换；emit不支持保存确认或费用变更。
 
 出行列表恢复成功原始DSL与保存时的历史facts，不恢复模型会话或未确认提案。snapshot().history.current为false，显示生成时刻；历史facts不重算为当前assessment。历史展示只接阅读、地图和区块切换动作；主动核验由父外壳发起。父侧栏负责新建、选择和删除，index显示所选出行详情。
 
