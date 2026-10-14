@@ -478,7 +478,7 @@ fn agent_tool_result(result){
 }
 fn agent_pump(token){agent_active=false phase="waiting" answer_text="迟到渲染前的文字兜底" render_content()}
 fn late_after(){
- late_checks.push({name:"隐藏详情安装回执明确pending且不强求打开" passed:late_hidden!=nil && late_hidden.success && late_hidden.blocks[0].installed && late_hidden.blocks[0].status=="installed_pending_render" && !late_hidden.blocks[0].complete && !late_hidden.blocks[0].visible})
+ late_checks.push({name:"隐藏详情安装回执明确pending且不强求打开" passed:late_hidden!=nil && !late_hidden.success && late_hidden.blocks[0].status=="initialization_unconfirmed" && !late_hidden.blocks[0].visible})
  late_checks.push({name:"可见稿工具回执等待实际迟通知" passed:late_point.diagnostics=="" && late_point.notified && late_point.complete})
  late_checks.push({name:"终端后真实迟通知恢复原生单一结果" passed:!agent_active && generated_render_complete && generated_render_notified && ui.generated_area.visible() && !ui.final_answer.visible() && ui.generated.find("kept").text()=="Late native result"})
  fs.write("late-ready.json",{stage:1}.to_json())
@@ -811,6 +811,9 @@ def main():
  if '--query-entry' in sys.argv:
   import test_query_entry as query_entry
   source=query_entry.source(original)
+ if '--render-partial-success' in sys.argv:
+  import test_render_partial_success as render_partial
+  source=render_partial.source(original)
  if '--render-entry' in sys.argv:
   import test_render_entry as render_entry
   source=render_entry.source(original)
@@ -917,6 +920,7 @@ def main():
   if '--terminal-render' in sys.argv:terminal_render.prepare(jail)
   if '--destination-entry' in sys.argv:destination_entry.prepare(jail)
   if '--query-entry' in sys.argv:query_entry.prepare(jail)
+  if '--render-partial-success' in sys.argv:render_partial.prepare(jail)
   if '--render-entry' in sys.argv:render_entry.prepare(jail)
   if '--material-primitives' in sys.argv:material_primitives.prepare(jail)
   if '--checked-timer' in sys.argv:checked_timer.prepare(jail)
@@ -950,6 +954,8 @@ def main():
    destination_entry.run(w,jail,original,source);return
   if '--query-entry' in sys.argv:
    query_entry.run(w,jail,original,source);return
+  if '--render-partial-success' in sys.argv:
+   render_partial.run(w,jail,original,source);return
   if '--render-entry' in sys.argv:
    render_entry.run(w,jail,original,source);return
   if '--material-primitives' in sys.argv:

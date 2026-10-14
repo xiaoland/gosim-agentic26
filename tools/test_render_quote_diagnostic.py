@@ -53,6 +53,6 @@ def run(work,jail,original,injected):
         raw=json.loads((jail/f'quote-fixture/case-{i}.json').read_bytes())['source']
         check(f'原稿{seq}真实非法引号诊断和短hint并继续工具链',not reply['success'] and DIAGNOSTIC_MARKER in text and f'fragment:{EXPECTED_SOURCE_LINES[i]}:{EXPECTED_SOURCE_COLUMNS[i]}:' in text and HINT_MARKER in text and '字符串外直接写'+HINT_EXAMPLE+'，' in reply['error'] and result['sources'][i]==raw)
     legal=result['replies'][4]
-    check('合法原生control成功且不附非法引号hint',legal['success'] and legal['notified'] and HINT_MARKER not in json.dumps(legal,ensure_ascii=False) and result['pumps']==5)
+    check('合法原生control成功且不附非法引号hint',legal['success'] and all(b['status']=='initialized' for b in legal['blocks']) and HINT_MARKER not in json.dumps(legal,ensure_ascii=False) and result['pumps']==5)
     report={'checks':checks,'source_sha256':hashlib.sha256(original.encode()).hexdigest(),'observed':result,'native_errors':[l for l in (work/'native.log').read_text().splitlines() if '[E]' in l],'model_requested':False,'provider_requested':False,'boundary':'四真实37 source JSON解码后值未改；仅render_routes生产工具入口，无完整路线图或供应商；合法control明确测试。'}
     (work/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));assert all(x['passed'] for x in checks),str(work/'report.json')

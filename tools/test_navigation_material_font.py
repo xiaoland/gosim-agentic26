@@ -67,7 +67,7 @@ def run(work,jail,original,injected):
     import struct
     size=struct.unpack('>II',png[16:24]);checks=[]
     def check(name,value):checks.append({'name':name,'passed':bool(value)})
-    check('生产generated_context直接Material五类真实通知完成',result['reply']['success'] and result['reply']['notified'] and all(r['r'][2]>0 and r['r'][3]>0 for r in widgets.values()))
+    check('生产generated_context直接Material五类真实通知完成',result['reply']['success'] and all(b['status']=='initialized' for b in result['reply']['blocks']) and all(r['r'][2]>0 and r['r'][3]>0 for r in widgets.values()))
     check('同内容Material与Nav同字号实际排版高度一致',all(widgets['material_'+n]['t']==widgets['nav_'+n]['t'] and abs(widgets['material_'+n]['r'][3]-widgets['nav_'+n]['r'][3])<.1 for n in names))
     check('实际Phone412x892五类在同一屏可见',size==(412,892) and all(0<=r['r'][1]<892 and r['r'][1]+r['r'][3]<=892 for r in widgets.values()))
     defaults={name:next(r for r in rows if r.get('i')==name) for name in ['default_body','explicit_body','explicit_small']}

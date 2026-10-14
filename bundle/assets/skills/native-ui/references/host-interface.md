@@ -16,7 +16,7 @@ render_ui 仍可提交任意额外内容，用 source 替换整稿，也可用 b
 
 数组使用 `for item in items {...}` 遍历、`items[index]` 访问和 `items.len()` 取长度；没有 Array.find 方法。按字段查找记录时使用 for 遍历并比较字段，找到后保存记录或 return；`ui.body.find("name")` 是原生控件句柄的查找方法，与数组不同。
 
-snapshot() 返回当前真实任务事实，包括 viewport、limits、origin、destination、sources、routes、viewed_route_id、原 arrive_by。 routes中每项的显示字段为id、kind_label、price_label、duration_label、arrival_label、currency、reason、reasons、segments；来源是source对象的provider、queried_at、expires_at、warnings，不存在provider_label。departure_ts、estimated_arrival_ts及顶层received_at、arrive_by都是Unix秒；缺失时间保持未知。不能把get_route或其它工具出现的字段假定为snapshot中的同名字段，已声明但为nil的字段保持未知；动态可选键用对象索引（例如route["optional_key"]）取得值后检查nil，不对不存在的命名字段直接使用点号访问。emit(object) 把用户动作写到父应用。NavRegular 是 Navigation 无衬线字体，Label、Button、ButtonFlat、TextInput 已默认使用它。Label 的应用局部默认值是 width:Fill height:Fit flow:Flow.Right{wrap:true}，文字按可用宽度自然换行；可覆盖原生属性。
+snapshot() 返回当前真实任务事实，包括 viewport、limits、origin、destination、sources、routes、viewed_route_id、原 arrive_by。未选路线时 viewed_route_id 为字符串 ""，不是 nil，也不是可查找的 Route ID；已选时为当前查看的真实 Route ID。 routes中每项的显示字段为id、kind_label、price_label、duration_label、arrival_label、currency、reason、reasons、segments；来源是source对象的provider、queried_at、expires_at、warnings，不存在provider_label。departure_ts、estimated_arrival_ts及顶层received_at、arrive_by都是Unix秒；缺失时间保持未知。不能把get_route或其它工具出现的字段假定为snapshot中的同名字段，已声明但为nil的字段保持未知；动态可选键用对象索引（例如route["optional_key"]）取得值后检查nil，不对不存在的命名字段直接使用点号访问。emit(object) 把用户动作写到父应用。NavRegular 是 Navigation 无衬线字体，Label、Button、ButtonFlat、TextInput 已默认使用它。Label 的应用局部默认值是 width:Fill height:Fit flow:Flow.Right{wrap:true}，文字按可用宽度自然换行；可覆盖原生属性。
 
 模型get_route_graph的默认结果是完整范围的精简身份索引与有序线路关系，node_refs可按需取得指定完整节点及其全部关联；它与原生snapshot的完整事实视图不同。get_route(id)读取完整Route，图索引不替代路线详情。
 
@@ -32,23 +32,23 @@ Route.destination_access非nil时，呈现其target_kind、routing_point与未�
 
 路线展示以同一个真实 route id 查找 snapshot().routes，直接使用该记录的 price_label、duration_label、reason 和 segments；事实更新时仍按此 id 重读，不把一次报价或另一条路线的数值静态复制过来。报价替换返回新的派生 Route，derived_from_route_id 指向原路线，原 Route 不变；选择派生方案时，详情文字与地图 target 都使用它的新 id（或对应 geometry_ref）。price_label以短标签呈现已查范围或已知小计，并明确全程费用未知；完整未知原因、计价basis及当前评估仍在cost与assessment中，由同Route详情读取。cost.amount_cents、full_journey_amount_cents、complete及Route.price_cents仅表示请求全程；queried_legs_amount_cents、queried_legs_complete保留已查腿组合报价，known_subtotal_cents保留已知小计。全程金额为nil不是零；不能用已查腿报价齐全称全程总价。到达文案使用arrival_label的范围；端点未核实的queried_endpoint_arrival_label不能改写为到达目的地。
 
-on_facts_changed 是外层已定义的脚本变量，在原生 View 表达式外设置。控件首次安装后会以当前snapshot调用一次，随后只在事实修订变化时调用；初始没有所选Route时应保留占位或已明确绑定的Route。不会自动重建整个界面；Input 编辑内容应保留。不存在外层 on_render、self.snapshot、self.viewport 等变量。
+on_facts_changed 是外层已定义的脚本变量，在原生 View 表达式外设置。控件首次安装后会以当前snapshot调用一次，包括 viewed_route_id 为 "" 的未选状态；随后只在事实修订变化时调用。初始没有所选Route时应保留占位或已明确绑定的Route。不会自动重建整个界面；Input 编辑内容应保留。不存在外层 on_render、self.snapshot、self.viewport 等变量。
 
 任务上下文的presentation_task是普通规划与守护共有的产品交付目标，不是用户偏好。手机列表用于先比较已评估候选：交通组合、费用及覆盖、到达范围和关键未核事项是主要决策信息，关键unknown与价格、时间同等可见。用户再通过本地操作打开同一Route的完整分段、来源和真实地图；不成立的候选同样有查看价值。文案面向用户，使用线路/站点名称和格式化时间，不暴露内部Route/node ID或原始时间戳；本次处理结束后不用“正在处理”标题。布局与信息组织由Agent决定，不套固定模板。
 
 路线查看的交互目标是打开包含所选路线实际地图、分段、费用和限制的独立详情页或浮层；地图无法加载时显示实际原因。关闭／返回后保留原列表的位置和内容；页面样式与结构由生成稿自行组织。
 
-用户动作 emit({action:"view_route" id:真实路线ID或"viewed"}) 只本地切换当前查看路线，随后 snapshot().viewed_route_id 更新；它不会自动创建详情页面。quote.ref不是Route id；未关联报价不能冒充路线详情。无效view_route清除当前选择并关闭由render_route_detail提交的详情；详情show_block在有效选择前等待，支持先show_block再view_route或反向顺序。活跃目标的本轮核验候选被查看后，父应用提供“用当前查看方案准备替代”入口，显示所选候选费用与耗时；查询完成时用户可点击准备提案，再通过父确认控件决定是否替换。该入口不请求模型、不直接保存，也不修改目标约束；历史saved_goal_route不能用作本轮替代。展示候选时提供现有view_route本地动作即可，不要要求用户另发消息才能选择方案。提供查看按钮时，生成稿应通过 on_facts_changed 根据实际当前路线更新自己呈现的选择或路线信息，让用户看见操作结果；不得仅发出事件而保持所有内容不变。父应用只处理本次路线查看和地图加载；不把事件转为第二条用户消息或查询续聊。
+用户动作 emit({action:"view_route" id:真实路线ID或"viewed"}) 采用当前已注册的合法 Route，只本地切换当前查看路线，随后 snapshot().viewed_route_id 更新；它不会自动创建详情页面。quote.ref不是Route id；未关联报价不能冒充路线详情。无效view_route清除当前选择并关闭由render_route_detail提交的详情；由render_route_detail提交的详情，其show_block在有效选择前等待，支持先show_block再view_route或反向顺序。活跃目标的本轮核验候选被查看后，父应用提供“用当前查看方案准备替代”入口，显示所选候选费用与耗时；查询完成时用户可点击准备提案，再通过父确认控件决定是否替换。该入口不请求模型、不直接保存，也不修改目标约束；历史saved_goal_route不能用作本轮替代。展示候选时提供现有view_route本地动作即可，不要要求用户另发消息才能选择方案。提供查看按钮时，生成稿应通过 on_facts_changed 根据实际当前路线更新自己呈现的选择或路线信息，让用户看见操作结果；不得仅发出事件而保持所有内容不变。父应用只处理本次路线查看和地图加载；不把事件转为第二条用户消息或查询续聊。
 
-render_ui 返回本稿真实 diagnostics；installed仅确认源码安装，rendered确认控件安装及当前snapshot的首次on_facts_changed（若有）执行完成，不证明可见布局。工具等待本次修改的全部区块，包括隐藏详情；等待期限内仍未确认时返回success:false、initialization_unconfirmed，installed仍为真实安装状态，这不是语法诊断。success不表示出行内容或交互目标已经完成。错误说明实际变量、语法或原生类型问题，可以根据结果提交下一稿；应用不改写生成源码。工具回执只包含当时已执行路径的诊断；之后按钮回调的错误仍显示在本地反馈并记录诊断。查询结束后不会回填旧render工具结果或自动启动另一条模型循环。
+render_ui 返回本稿真实 diagnostics；status为initialized时确认控件安装及当前snapshot的首次on_facts_changed（若有）执行完成，不证明可见布局。工具等待本次修改的全部区块，包括隐藏详情；等待期限内仍未确认时返回success:false、initialization_unconfirmed，这不是语法诊断。success不表示出行内容或交互目标已经完成。错误说明实际变量、语法或原生类型问题，可以根据结果提交下一稿；应用不改写生成源码。工具回执只包含当时已执行路径的诊断；之后按钮回调的错误仍显示在本地反馈并记录诊断。查询结束后不会回填旧render工具结果或自动启动另一条模型循环。
 
 通用句柄 set_visible(bool)／visible() 可用于页面或自定义浮层。锁定版本 Modal.open/close 与 StackNavigation.push/pop 只有 Rust 接口，当前没有相应 Splash 句柄方法，不能直接写 ui.modal.open()。普通页面切换不销毁隐藏页；不要为打开详情而重建整个列表。
 
 桥接函数签名是`show_block(target_id)`、`hide_self()`和`emit(event)`；其中event是一个对象，不能写`show_block(id:...)`或把事件字段当函数命名实参。普通调用例如`show_block("route_detail")`。
 
-区块之间用 `show_block(target_id)` 打开显式目标，例如 `show_block("route_detail")`；返回按钮用 `hide_self()` 关闭自身，不传目标 ID。target_id 是 render 提交的实际目标区块 id：工具覆盖默认 id 时，打开按钮也使用该实际 id，而不是来源区块名。两个函数复用本地 show_block 事件，不请求模型。底层 `emit({action:"show_block",block:target_id,visible:bool})` 仍可用于其它显式显隐操作。overlay 显示时暂停下层内容区的绘制与交互；关闭后恢复原内容滚动位置。隐藏不销毁该区块或其它列表块。每块 snapshot()/on_facts_changed 接收同一份当前任务事实；父应用每次事实修订只序列化一次，并更新落后区块。事件来源和稿件修订由 emit 内部附加，生成稿无需填写来源元数据；旧稿事件不会操作替换后的新稿。
+区块之间用 `show_block(target_id)` 打开显式目标，例如 `show_block("route_detail")`；返回按钮用 `hide_self()` 关闭自身，不传目标 ID。target_id 是 render 提交的实际目标区块 id：工具覆盖默认 id 时，打开按钮也使用该实际 id，而不是来源区块名。两个函数复用本地 show_block 事件，只改变区块显隐，不选择 Route，也不更新 viewed_route_id；路线选择使用上述 view_route 动作，不请求模型。底层 `emit({action:"show_block",block:target_id,visible:bool})` 仍可用于其它显式显隐操作。overlay 显示时暂停下层内容区的绘制与交互；关闭后恢复原内容滚动位置。隐藏不销毁该区块或其它列表块。每块 snapshot()/on_facts_changed 接收同一份当前任务事实；父应用每次事实修订只序列化一次，并更新落后区块。事件来源和稿件修订由 emit 内部附加，生成稿无需填写来源元数据；旧稿事件不会操作替换后的新稿。
 
-render_ui的blocks回执逐块返回id、revision、diagnostics、installed、status、notified、complete与visible；container_rect/body_rect只保留在私有渲染诊断，不返回模型。失败块可以单独提交修正版，其它块保留。rendered状态证明本稿已执行并通知，不保证子卡片或按钮可见；尺寸需结合父容器、滚动和隐藏状态判断；widget ID须为本块实际构造的名字，隐藏或离屏控件rect为零不是布局失败证据。自然内容的嵌套View应明确width:Fill height:Fit，不能只写padding和背景而依赖默认尺寸。区块没有删除／重排序接口；新查询清空全部区块。
+render_ui的blocks回执逐块返回id、revision、diagnostics、status与visible；container_rect/body_rect只保留在私有渲染诊断，不返回模型。失败块可以单独提交修正版，其它块保留。initialized状态证明本稿已执行并通知，不保证子卡片或按钮可见；尺寸需结合父容器、滚动和隐藏状态判断；widget ID须为本块实际构造的名字，隐藏或离屏控件rect为零不是布局失败证据。自然内容的嵌套View应明确width:Fill height:Fit，不能只写padding和背景而依赖默认尺寸。区块没有删除／重排序接口；新查询清空全部区块。
 
 守护展示事实在snapshot().guardian中，包括goal、proposal、current_check、last_check和remaining_budget_cents。current_check是本轮判定，last_check是历史；页面按事实变化更新，不能静态写“已保存/仍成立”。提案、核验和用户确认的业务规则见journey-guardian。propose_goal/report_goal_check是父Agent工具，不是子VM方法。查询完成后，生成页面可用`emit({action:"propose_goal",route_id:真实RouteID,preferences:"待确认偏好",risk_acceptance:"待确认风险",basis:"选择依据"})`本地准备目标或替代提案，参数与Agent的propose_goal相同；新风险文字不是用户已接受。父应用复用本轮Route评估，只暂存待确认提案，不续模型循环。snapshot().guardian.proposal与error反映结果；历史、处理中、缺少参数或无效Route的操作失败会显示原因，不覆盖已有合法提案；失效旧稿不能创建新提案。只有父应用真实确认才保存／替换；emit不支持保存确认或费用变更。
 
@@ -71,6 +71,6 @@ NavCard{padding:0 cursor:MouseCursor.Hand
 }
 ```
 
-render回执的success／changed_blocks_success只描述本次修改区块；interface_success与unresolved_blocks列出当前界面仍失败或未确认的区块。按真实id用render_ui的blocks更新可修正该块，并保留其它成功块；__document也支持此方式，不必以source替换整稿。不要把某次named工具成功当作所有当前区块都已成功，原诊断仍保留。
+render回执的success只表示本次修改块已初始化；status为initialized、initialization_unconfirmed或error。unresolved_blocks保留全部当前失败或未确认块的具体诊断；current_blocks列出实际库存及地图绑定，不证明内容目标完成。按真实id用render_ui的blocks更新可修正该块，并保留其它成功块；__document也支持此方式，不必以source替换整稿。不要把某次named工具成功当作所有当前区块都已成功，原诊断仍保留。
 
 render入口按本工具声明拒绝未知参数；render_ui的source与blocks互斥，额外item不会安装详情。current_blocks列出实际区块id、修订、安装／通知／显示状态和实际地图事件绑定；没有所需id就不能称其已安装，库存也不证明内容或像素完成。show_block只打开实际已安装目标；可用同一render_ui.blocks入口安装或修正，不要求固定五块或先调用get_route。

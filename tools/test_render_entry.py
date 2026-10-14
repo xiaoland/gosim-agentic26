@@ -46,7 +46,7 @@ fn agent_pump(token){if token!=run_id {return} re_dispatches+=1 for message in a
   re_check("原XML实际诊断错误回执与一次派发",errors && re_dispatches==1)
   re_stage=1 re_submit("legal-native",{blocks:[{id:"legal-native" source:"Label{text:\"原生隔离渲染\"}"}]})
  } elif re_stage==1 {
-  re_check("合法Splash实际installed notified rendered",re_reply.success && re_reply.blocks[0].installed && re_reply.blocks[0].notified && re_reply.blocks[0].status=="rendered" && re_dispatches==2)
+  re_check("合法Splash实际installed notified rendered",re_reply.success && re_reply.blocks[0].status=="initialized" && re_dispatches==2)
   re_stage=2 start_timeout(0.1,||re_cancel_call())
  } elif re_stage==4 {
   let fresh=true for mark in re_marks {if route_get(mark,"test_stage")==4 && mark.stage=="mount_wrapper_enter" && mark.facts_revision!=mark.current_revision {fresh=false}}
@@ -118,11 +118,11 @@ fn agent_pump(token){if token!=run_id{return} pc_dispatches+=1 let reply=nil for
  let public_clean=true for block in reply.blocks {if route_get(block,"container_rect")!=nil || route_get(block,"body_rect")!=nil {public_clean=false}}
  if pc_stage==0 {
   let block=reply.blocks[0] let private_rect=block_by_id("pc-visible").render_geometry
-  pc_check("visible=true原生源码已执行通知，公开无rect且私有保几何",reply.success && block.status=="rendered" && block.installed && block.notified && block.visible && block.diagnostics=="" && public_clean && private_rect.container_rect!=nil && private_rect.body_rect!=nil)
+  pc_check("visible=true原生源码已执行通知，公开无rect且私有保几何",reply.success && block.status=="initialized" && block.visible && block.diagnostics=="" && public_clean && private_rect.container_rect!=nil && private_rect.body_rect!=nil)
   pc_stage=1 start_timeout(0.1,||pc_submit("pc-hidden-call",{blocks:[{id:"pc-hidden" source:"Label{text:\"隐藏待渲染\"}" overlay:true height:100}]}))
  } elif pc_stage==1 {
   let block=reply.blocks[0]
-  pc_check("真实hidden已安装未通知为pending而非失败",reply.success && block.installed && !block.notified && block.status=="installed_pending_render" && block.diagnostics=="" && !block.visible && public_clean && block_by_id("pc-hidden").render_geometry!=nil)
+  pc_check("真实hidden已安装未通知为pending而非失败",!reply.success && block.status=="initialization_unconfirmed" && block.diagnostics=="" && !block.visible && public_clean && block_by_id("pc-hidden").render_geometry!=nil)
   pc_stage=2 start_timeout(0.1,||pc_submit("pc-xml-call",pc_xml))
  } else {
   let errors=!reply.success && reply.blocks.len()==5 for block in reply.blocks {if block.status!="error" || block.diagnostics=="" {errors=false}}

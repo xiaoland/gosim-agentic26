@@ -18,19 +18,25 @@
 
 ## 最新验收及未解决问题
 
-0.16.2的online24完整守护验收未通过。初轮20/20真实响应自然stop，实际父确认保存v1，冷启goal逐值相同、0query／0dispatch、账本不变；固定16:11:18期限、200元、已花0。随后公开mock位置广州南，前台重核真实report_goal_check为unknown，原起点相差15.5km且不推断已登车，约束保持。第二loop26响应后render_ui在block_source源码拼接触发heap allocation limit，113秒无工具回执/新请求，页面停修正；当前已全停，v2未确认。第二loop提案373另选AMap route1_1（新塘南线、小计11），依据却写番禺S4907／58，不能当成小数字差异或确认成功；保留原件，不因未自然结束判为最终语义FAIL。原件归`build/research/journey-guardian/current-online-24/`，失败5块DSL参数、native.log与完整私有state保全，磁盘只代表初轮最后保存快照，不冒称第二loop全内存facts。
+已验收的0.16.3封包固定在`1fb22a7`，source `2dbd68fc`、main `9306ee59`、bundle `73c604e8`、binary `66f3d9ee`，make check/build通过，实测固定身份归 `build/research/journey-guardian/current-online-26/result-safe.json`；build/agent/build.json为会变化的当前构建，不作为旧证据。通用约束原生14/14和必要来源／POI调用者3/3通过，无native错误；6个回执投影函数与已验收0.16.2逐字相同，复用既有证据而非重跑矩阵。online26已自然结束并全停，约束采用切片通过，UI未通过；当前未发布。技能显隐资料的后续补充不属于这份已测封包。
 
-当前内存修复已通过10/10原生机械检查：同128MiB cap下旧30份wrapper在第26次拼接拒绝，新30份共170820B（单份5694B，旧372458B）；原失败5稿逐值保持，完整事实首绑、hidden、刷新保输入、安装延迟修订捕获、整稿及生产冷恢复4稿14Route通过。证据`build/smoke/navigation-harness-zt4g9dey/report.json`及旧负控`navigation-harness-xgtctqhj/report.json`。测试为desktop机械模式，不冒Android布局或第二query完整内存复现，未提高配额。propose_goal.route_id字段另精确为父确认后保存的Route对象ID；原request365仅此字段单变量M3判别已真实运行1次，首响只选extend_route而未作提案绑定，严格记未覆盖，不追加采样；47 calls／3,359,370 tokens为本日账本，旧日账本归档保留。
+**online26通过约束采用切片。** 19/19真实响应自然stop，初始constraints／limits／deadline为空，M3实际采用120分钟／10000分／CNY，basis注明用户时限预算和来自城市的币种推断。期限严格为固定received_at＋7200秒，adopt_destination后约束逐值不变；旧v2目标逐值保持，新出行goal为nil、没有确认。该轮只覆盖相对时限，不覆盖真实模型对绝对“下午”钟面日期的采用、完整规划UI或可行性。原件`build/research/journey-guardian/current-online-26/result-safe.json`，状态`PASS_CONSTRAINT_ADOPTION_SLICE`，严格归`1fb22a7`／source `2dbd68fc`／main `9306ee59`；新增19 calls／986,678 tokens，本日累计78／4,943,131，usage完整、实例全停。
+
+**online26的UI不是PASS。** 生成详情在首次事实回调中用`viewed_route_id != nil`判断选中，将实际空串当作有选择，主动发show_block；没有用户点击或view_route事件，实际浮层自行展开。定点因果和原稿归`current-online-26/ui-side-finding-safe.json`。owner仅补技能中的空串、首次广播及显隐不等于路线选择的合同，不改runtime、不手改生成稿；root查看实际截图后确认错误浮层覆盖主结果，因此限定一次局部UI再生成判别，复用原请求与事实、只更新实际已读合同，不重开交通规划。效果未通过详情交付验证：同次CF自然续接只生成四区块，首卡可选合法Route但详情目标未安装。
+
+**online25通过条件替代保存与冷恢复。** 使用online24已经真实父确认的v1记录作donor，在0.16.2固定源码 `c33bebe8a11d58aa6e8b3886e7a47497ce431fe9`（source `6d628190`、main `62789ef1`、bundle `42fdaaf4`）冷恢复后，以广州南公开mock新位置和新时间戳启动一次新的前台重核；不加载旧模型消息。真实M3／供应商12/12响应后自然stop，渲染语法错误由模型自行修复，实际回调结算且未再触发堆错误。提案与推荐绑定同一条新塘公交Route；父界面展开保留整程费用、目的地到达和可行性unknown，测试读取条件后才确认保存v2。原16:11:18期限、200元预算、已花0、目的地及原用户偏好／风险约定保持；v2磁盘和冷启goal逐值相等，冷启0query／0dispatch、账本不变，root已查看v2冷恢复截图。原件 `build/research/journey-guardian/current-online-25/result-safe.json`，状态 `PASS_CONDITIONAL_REPLACEMENT_SAVE_AND_COLD_RESTORE`；新增12 calls／597,083 tokens，本日累计59／3,956,453，全部自有实例已停。
+
+这是online24前一源码版本的v1＋当前修复版本新重核v2的接续证据，不是一轮、同版从零完整可行性的证明。新Route已查小计11元、已查最早场景约214分钟，整程费用与目的地到达未知；估算性自由文字未经全量认证。摘要曾把原57元估价说成已花／余额143，父权威支出0／余额200及保存值仍正确。原风险约定按既有目标合同保留，不能声称模型的新风险文字静默替换用户同意；没有新个人数据、下单或Android真机验证。online24的堆失败、错误提案绑定与修复负控保留于[验收历史](qualification-history.md)，不被online25通过覆盖。
 
 **online23只通过新鲜手机UI验收。** 空出行、正常挂载入口、真实M3／交通服务，13次请求与13份完整响应后自然stop；首卡内容连续，两条不同Route的详情、真实388×260地图、滚动和返回通过，第一路线首组与末组已实际查看。没有手改生成稿或注入修稿观察；中间地图组未逐图采样，本轮没有滴滴报价结果、未确认目标或下单，不认证细语义、全部候选动作或完整守护。原件 `build/research/journey-guardian/current-online-23/result-safe.json`，发布附件 `qualification-ui.json`。该轮累计229 calls／12,981,059 tokens，全停。
 
-较早online7曾在真实循环完成条件替代、父确认与goal v2保存，期限和预算保持，整程费用／站内衔接未知未被认证。online11另有普通出行自动保存和冷重开的证据。它们证明各自记录版本及条件，不能补足0.16.1完整守护v1／v2尚未覆盖的部分；版本和原件见[验收历史](qualification-history.md)。
+较早online7曾在真实循环完成条件替代、父确认与goal v2保存，期限和预算保持，整程费用／站内衔接未知未被认证。online11另有普通出行自动保存和冷重开的证据。它们证明各自记录版本及条件，与本次online24→25的接续证据分开；版本和原件见[验收历史](qualification-history.md)。
 
 仍须解决或验证：
 
-- 完整守护需实际走完准备方案、父确认保存目标、变化后前台重新核验、替代差异、拒绝或确认、目标版本与持久化恢复。新用例应明确自然守护意图，不指定工具顺序或成功路线；目标期限和预算不能在途中改写。
+- 条件提案→确认v1→位置变化→新前台重核→条件确认v2→冷恢复已获得跨修复版本的实际证据。尚未认证同一最终版本从零完成全部环节、替代拒绝或全部候选动作、真实个人进度及费用；按下一切片影响选择必要验收，不重跑旧矩阵。
 - 模型曾把已查区间小计／时刻提升为整程价格／T3到达及预算期限满足，并虚构票价、误读用时或一票制。机械投影精简已落地，但没有认证这些语义缺陷消失；正确动态详情不能抵消静态卡片或提案错误。详情来源文字也有缺失记录，按当前实际输出核对。
-- 后续独立切片已确定为通用约束采用：现explicit_limits用正则提前裁决自然语言、地点采用也重算预算期限，违反LLM负责解释的分工。先修当前渲染堆阻塞，随后由guardian_interaction移除这套语义真值，让通用set_constraints接受模型解释、harness以received_at换算并保留已确认目标锁定；地点采用独立，期限未设置时为nil。当前只完成调用盘点与取舍，尚未实施，不与live封包并行改源。
+- 通用约束切片已实现并完成机械检查：demo／live的set_constraints接受模型解释，harness校验参数并以固定received_at换算；地点采用独立，初始limits／期限为nil，未设约束仍可读背景，计算型交通工具和提案返回缺项，已确认目标锁定。旧自然语言正则真值与demo票据裁决已移除。原生14项归`build/smoke/navigation-harness-09me1hwv/report.json`，来源／POI调用者3项归`build/smoke/navigation-harness-k_p__hil/report.json`；均0模型／供应商、无native错误。6个投影函数未改的身份归`build/research/constraints-adoption/projection-identity-safe.json`。online26另取得相对时限／中文数词预算采用的真实模型证据；绝对钟面分支仍只有原生对照，不把这一切片扩成任意表达或完整UI通过。
 - harness与验收须区分实际用户可见render、父提案、无tool_calls自然结束内容和诊断reasoning；online16／17曾被错误提前中止，不算用户结果语义FAIL。旧JSON夹具曾掩盖原生标识符键差异，包预检或render success不能代替真实异步回执和可见控件。
 - 新运行先核当前包挂载、source／binary身份、Android样式、空出行与单业务VM；online20隔离状态曾缺Navigation挂载，不能复制旧包制造可用状态。模型恢复、工具取消、跨出行状态及错误后详情身份需按真实触发核对，复用未受影响的既有证据。
 - 布局问题优先区分生成稿使用、工具／技能合同和宿主引擎语义。旧wrap连续Fill与natural根Fill已取得单变量证据；不据旧失败直接改全局布局引擎，不手改模型稿冒充自主修正。
@@ -42,14 +48,16 @@
 | Owner | 当前责任与返回要求 |
 | --- | --- |
 | root | 整合授权、取舍、源码owner与运行槽，采用实际证据；决定必要修复、版本更新及外部交付。 |
-| guardian_interaction | 唯一源码owner；本地propose_goal已交付，当前调查修复block_source重复事实编码/首绑与堆计账，保留生成稿与完整候选，不以配额或裁剪掩盖；下一约束切片暂缓。 |
-| guardian_qualification | online24已保全全停，v1/冷恢复通过而v2未覆盖；修复后限定验证阻塞恢复及必要闭环；先给具体用例、版本身份与范围，区分新鲜规划、隔离回放和历史恢复，失败保留原件并全停自有实例。 |
+| guardian_interaction | 通用约束和UI合同精确化已完成；render模型回执已精简，保留内部执行状态、实际库存与未解决诊断，partial原生5项通过；无新增业务验证或补详情，已全停。 |
+| guardian_qualification | online26约束采用PASS、UI问题原件与账本已导出全停；准备一次局部UI再生成判别，先核合同实际已读，同次CF实际57消息自然续接已结束全停，详情交付FAIL；当前不再启动模型，保留原稿/实际点击/广播证据。 |
 | layout_decision | 只读判断布局／harness问题的因果及最小改动；实现由root指定稳定owner，不将使用约束直接升级为全局引擎变更。 |
-| submission_packet | 仅整理本packet与现有验收历史，本轮不改README、应用源码或Git提交。 |
+| submission_packet | 整合本packet、验收历史、README和architecture的版本／验收／接口说明，准备必要发布材料建议；不改bundle、提交Git或外部Issue。 |
 
-已采纳的下一修复切片是本地`emit action:propose_goal`：直接复用同名Agent工具的`guardian_propose`准备pending，父应用仍须真实确认才保存目标。它不自动选择方案、不续聊，也不为旧`propose_with_id`添加别名兼容。该切片已实现并通过10/10原生定点：真实生成按钮→待确认→父确认保存v1，替代准备不写盘→父确认v2；非法Route/缺参/忙/历史/旧稿明确失败，保留合法pending。旧修订为dispatcher定点，其余合法操作实际点击；0模型/供应商，全停。证据`build/smoke/navigation-harness-q50id3ky/report.json`。smoke临时安装目录过滤的竞态也作窄修。
+已交付的本地`emit action:propose_goal`：直接复用同名Agent工具的`guardian_propose`准备pending，父应用仍须真实确认才保存目标。它不自动选择方案、不续聊，也不为旧`propose_with_id`添加别名兼容。该切片已实现并通过10/10原生定点：真实生成按钮→待确认→父确认保存v1，替代准备不写盘→父确认v2；非法Route/缺参/忙/历史/旧稿明确失败，保留合法pending。旧修订为dispatcher定点，其余合法操作实际点击；0模型/供应商，全停。证据`build/smoke/navigation-harness-q50id3ky/report.json`。smoke临时安装目录过滤的竞态也作窄修。
 
-当前0.16.2内存修复封包check/build通过，source `6d628190`、main `62789ef1`、bundle `42fdaaf4`。online25于11:56:44从已证v1正式记录冷恢复，原16:11:18期限／200元／已花0逐值保持、冷启动0query且账本不变；广州南新观测后真实父前台重核正在自然运行，非恢复旧模型对话。结果前不认证v2或闭环。harness保持机械合同、LLM保留语义权威；修复不影响的协议、保存事务、同窗恢复、浮层与第二consumer检查不重复跑，不为小措辞做统计矩阵，也不提前宣称完整任务成功。
+本轮通用约束实现、机械检查、统一封包及单次相对时限真实模型验收已完成。UI技能资料已补准；同次CF自然续接2响应仅生成routes/suggestions，实际首卡选中route_2_1却没有详情区块，状态FAIL_DETAIL_DELIVERY_MISSING（online26-ui-contract-continuation/result-safe.json）。空选/返回重开未覆盖，原首CF仍UNCOVERED，均不改写。render模型回执已删重复成功标志与宽泛命名，保留真实初始化/库存/旧块诊断，partial原生5项通过，main ff01466a；最终check/build通过，当前source 1298597a、main ff01466a、bundle c59c59c8、binary 1a10ee00（build/agent/build.json）；真实模型约束证据仍归旧1fb22a7，不拼接为最终源码整轮验收。命名修正不被宣称是遗漏根因或UI已修好。下一必要工作是从真实完整呈现中继续定位详情交付遗漏，当前不为字段改名追加CF。本日81 calls／5,192,462 tokens，所有自有实例全停。当前不生产新Release或更新Hub材料，保持0.16.1公开入口不变，避免把未封包源码、online24 donor与online25当前结果混成同一版证明。
+
+当前无需准备外部更新。online25严格归0.16.2／c33bebe固定source，0.16.3的实现与当前单次验收单独记证据；已有Notes offer和GitHub-attested Hub审批缺口仍保留，外部交付由root后续决定。
 
 当前没有新增待用户决定事项。若实施中出现实质范围变化、缺少用户特定资料或外部发布授权，再呈现最小待决定事项；继续改进本身不重复询问。
 

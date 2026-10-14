@@ -254,3 +254,37 @@ online19 在已推送 `d1d80fb` 上以空出行、真实 M3／高德／12306／�
 
 
 早期证据见[验收历史](qualification-history.md)，长期产品与技术归README和docs/architecture.md。历史通过仅证明其记录版本与条件；本packet维护当前冻结恢复点。
+
+## 2026-10-14 online24失败、渲染修复与online25条件确认
+
+以下为修复前后证据，不是继续运行旧失败会话的计划。online24初轮已真实确认v1；其第二loop未自然结束、错误绑定提案未确认，原失败不被后续通过覆盖。
+
+0.16.2的online24完整守护验收未通过。初轮20/20真实响应自然stop，实际父确认保存v1，冷启goal逐值相同、0query／0dispatch、账本不变；固定16:11:18期限、200元、已花0。随后公开mock位置广州南，前台重核真实report_goal_check为unknown，原起点相差15.5km且不推断已登车，约束保持。第二loop26响应后render_ui在block_source源码拼接触发heap allocation limit，113秒无工具回执/新请求，页面停修正；当前已全停，v2未确认。第二loop提案373另选AMap route1_1（新塘南线、小计11），依据却写番禺S4907／58，不能当成小数字差异或确认成功；保留原件，不因未自然结束判为最终语义FAIL。原件归`build/research/journey-guardian/current-online-24/`，失败5块DSL参数、native.log与完整私有state保全，磁盘只代表初轮最后保存快照，不冒称第二loop全内存facts。
+
+当前内存修复已通过10/10原生机械检查：同128MiB cap下旧30份wrapper在第26次拼接拒绝，新30份共170820B（单份5694B，旧372458B）；原失败5稿逐值保持，完整事实首绑、hidden、刷新保输入、安装延迟修订捕获、整稿及生产冷恢复4稿14Route通过。证据`build/smoke/navigation-harness-zt4g9dey/report.json`及旧负控`navigation-harness-xgtctqhj/report.json`。测试为desktop机械模式，不冒Android布局或第二query完整内存复现，未提高配额。propose_goal.route_id字段另精确为父确认后保存的Route对象ID；原request365仅此字段单变量M3判别已真实运行1次，首响只选extend_route而未作提案绑定，严格记未覆盖，不追加采样；47 calls／3,359,370 tokens为本日账本，旧日账本归档保留。
+
+online25以online24真实确认v1作为donor，在0.16.2修复源码c33bebe8a11d58aa6e8b3886e7a47497ce431fe9（source6d628190／main62789ef1／binarybcb6dde4／bundle42fdaaf4）冷恢复；0query、账本不变，不加载旧模型消息。随后广州南公开mock新观测触发一次新的前台重核，12dispatch／12responses自然stop，真实renderer回调结算，一次语法失败由模型自修，无heap错误。提案route_1_1及推荐均指向地铁7／13号线、新塘公交Route，没有S4907占位绑定。
+
+父提案实际展开费用整程unknown、目的地到达unknown、assessmentunknown及原因；测试读条件后才真实确认。v2保存保持原16:11:18期限、200元预算、已花0、目的地和原用户偏好／风险约定，冷重启goal逐值相同、0query／0dispatch、账本不变。root已查看v2冷恢复截图，报告另列guard-top与goal-details图。结果为PASS_CONDITIONAL_REPLACEMENT_SAVE_AND_COLD_RESTORE，原件build/research/journey-guardian/current-online-25/result-safe.json；保存和冷恢复见v2-save-safe.json、v2-cold-safe.json，原trace及提案保留于该忽略目录。新增12calls／597083tokens，当前日累计59／3956453，usage完整，所有自有实例停止。
+
+已查小计11元、约214分钟均仅queried_legs_only，目的地到达与全程费用为nil；原因保留起点未核、目的地末段及T3内部通达未知。自由文字的约65元／15:32与54元票价不作为已核全程值；静态摘要把原57元说成已花、余额143，但权威支出0／余额200及持久化值正确。原风险约定按既有目标合同保留，候选新未知在父评估与生成文字可见，不声称新模型风险静默替换用户同意。此通过只证明跨修复版本的条件替代确认与保存／恢复，不证明单轮完整可行性、自由文本全量准确、准时到达、真实个人进度或Android真机；未读新个人数据或下单。
+
+## 通用约束切片的首批机械验证
+
+通用set_constraints实现已落地，main9306ee59的原生14/14通过、native_errors为空，报告build/smoke/navigation-harness-09me1hwv/report.json。覆盖中文数字原句可启动且首context不猜约束、初始nil下背景读取合法、交通／提案缺项不请求供应商、13:00接收而13:03采用120分钟仍为15:00、demo／live共用setter、地点与约束两顺序、非法数值时间币种／shape不改变已有约束、绝对北京时间与零预算、重核沿用确认目标及函数／工具锁。0模型／供应商调用，不认证真实M3对自然表达的解释。最初失败来自测试替身作用域，已原位修正，不记录为产品失败；其余必要caller检查与新鲜单次验收在任务入口接续。
+
+通用约束的必要caller检查已完成：build/smoke/navigation-harness-k_p__hil/report.json的3/3通过，真实demo背景独立读取不设约束、setter不裁决机票机场文本、本轮POI经生产dispatcher采用且保留约束；0模型／供应商、无native错误。6个回执投影函数与c33bebe逐字相同，身份build/research/constraints-adoption/projection-identity-safe.json；这表示复用既有投影证据，不声称重跑全部函数。root统一封0.16.3，make check/build通过，source2dbd68fc／main9306ee59／bundle73c604e8／binary66f3d9ee，完整身份build/agent/build.json。源码owner全停交回，随后单次真实M3自然表达验收单独取证，不能归入online25的0.16.2结果。
+
+## online26约束采用通过与独立UI缺陷
+
+0.16.3固定提交1fb22a7（source2dbd68fc／main9306ee59／bundle73c604e8／binary66f3d9ee）单次真实自然表达验收19dispatch／19responses自然stop。首请求constraints字段缺席、limits／arrive_by为空，原句逐字一致；此前误点空输入没有query／dispatch，实际应用输入后只启动一个付费loop，未重启追绿。M3实际set_constraints采用120分钟／10000分／CNY，basis保留用户时限预算与城市币种推断来源；received_at1791952824.74961、deadline1791960024.74961，恰好＋7200秒。随后adopt回执约束和期限逐值不变，旧trip-1目标v2／200元／已花0／原deadline逐值不变，新trip-2 goal为nil、无确认。PASS_CONSTRAINT_ADOPTION_SLICE只认证这一相对时限采用，绝对下午钟面由原生对照另证，真实模型分支未覆盖。原件build/research/journey-guardian/current-online-26/result-safe.json；新增19calls／986678tokens，本日78／4943131，usage完整、所有自有实例停，无源代码修改或新目标确认。
+
+同轮UI未通过：render详情原稿on_facts_changed仅以viewed_route_id!=nil判断，实际四次值均为空串；在初始化／后续广播发show_block，事件259／286／301／302令route_detail自行可见，真实view_route事件为0。bulk详情角色为空且默认visiblefalse，但子稿显隐动作改变状态；报告只保留有界因果，不把其它guard假说写成根因。证据ui-side-finding-safe.json、natural-final.png及两份原生成稿。owner仅补技能空串、首次广播、显隐不改变选择事实的说明，不改runtime、不手改原稿、不重跑付费；未认证补充后UI已修复。约束PASS不能抵消这项UI缺陷，也不证明全程费用、到达或完整规划可行性。
+
+## 2026-10-14：局部UI合同判别与回执精简
+
+online26初始UI的实际空串/非nil误判使错误详情覆盖主结果。仅替换原request240第50条实际read_skill正文的单变量首响应生成summary/explanation，严格记UNCOVERED；随后恢复其真实57条消息及两原生区块，自然续2响应只生成routes/suggestions。实际首卡选中route_2_1却未生成目标详情，状态FAIL_DETAIL_DELIVERY_MISSING；空选/返回重开仍未覆盖。原稿未手改，未增加修稿提示或重查交通，事实为本轮保存快照而非原完整堆。原首CF、online26原失败均保留；证据归build/research/journey-guardian/online26-initial-ui-host-contract-cf/与online26-ui-contract-continuation/。本日81 calls／5,192,462 tokens，usage齐、全停。
+
+后续按实际合同歧义精简render模型回执，删除changed_blocks_success、interface_success、重复布尔与长meaning／通用repair；status采用initialized／initialization_unconfirmed／error，保留当前库存、全部未解决块具体diagnostics与地图绑定。内部installed/notified/complete、事件与保存事务不重构。原生partial_success五项通过，原旧document错误不被局部成功掩盖，同ID修正保持siblings。证据build/smoke/navigation-harness-fgx07d61/report.json；同步到达的第二次同边界检查vp_jfv7c也通过，没有新模型或矩阵。最终恢复原未安装诊断初值、不加冗余保护，main为ff01466a。这是独立合同质量修正，不是已证明的详情遗漏根因或UI修复。
+
+最终开发封包仍为未发布0.16.3，source `1298597aec8de6aa728976abc855734628eaec594d937cd418252808ac0e7e9f`、main `ff01466a3c4ea310724cc469862414e32ba20ad9127ab28cc43ffd69a8c56025`、bundle `c59c59c856c11e85f7b3d5964e27c5f1a3496ae539763c393e7e0ec2d12a9a3e`、binary `1a10ee003fd951628c884cb12d87185903f3c137f384f2ea8dfa9bdbda833694`。check/build通过；当前构建身份可变，旧online26与CF原记录各自固定。没有将最终新回执/技能效果标为真实UI通过，没有新Release或修改#116。

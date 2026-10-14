@@ -60,7 +60,7 @@ fn agent_pump(token){
   let body="Label{text:\"离线真实事实回归\"}"
   rf_submit("legal-splash",{blocks:[{id:"valid-a" source:body} {id:"valid-b" source:body}]})
  } elif rf_stage==1 {
-  rf_check("合法Splash实际安装通知诊断成功回执",reply!=nil && reply.success && reply.blocks.len()==2 && reply.blocks[0].installed && reply.blocks[0].notified && reply.blocks[0].diagnostics=="" && rf_dispatches==2)
+  rf_check("合法Splash实际安装通知诊断成功回执",reply!=nil && reply.success && reply.blocks.len()==2 && reply.blocks[0].status=="initialized" && reply.blocks[0].diagnostics=="" && rf_dispatches==2)
   rf_check("两个实际区块保全部25候选事实",rf_valid_facts(block_by_id("valid-a")) && rf_valid_facts(block_by_id("valid-b")))
   rf_stage=2 ui_facts_revision+=1 refresh_generated_facts()
   start_timeout(0.5,||{

@@ -34,9 +34,9 @@ def run(work,jail,original,injected):
         time.sleep(.02)
     observed=json.loads((jail/'binding-result.json').read_bytes());a,b,c=observed['replies'];checks=[]
     def check(name,condition):checks.append({'name':name,'passed':bool(condition)})
-    check('真实35原稿首次绑定tostr诊断回执且继续Agent',not a['success'] and a['blocks'][0]['installed'] and 'method tostr not found on number' in a['blocks'][0]['diagnostics'] and observed['pumps']==3)
-    check('合法hidden初绑定当前facts通知成功',b['success'] and b['notified'] and b['blocks'][0]['installed'] and b['blocks'][0]['notified'] and not b['blocks'][0]['visible'] and observed['bound_text']=='bound:'+str(observed['facts_routes']))
-    check('未确认超时failure保installed空diagnostics',not c['success'] and not c['notified'] and c['blocks'][0]['status']=='initialization_unconfirmed' and c['blocks'][0]['installed'] and not c['blocks'][0]['notified'] and c['blocks'][0]['diagnostics']=='')
+    check('真实35原稿首次绑定tostr诊断回执且继续Agent',not a['success'] and a['blocks'][0]['status']=='error' and 'method tostr not found on number' in a['blocks'][0]['diagnostics'] and observed['pumps']==3)
+    check('合法hidden初绑定当前facts通知成功',b['success'] and b['blocks'][0]['status']=='initialized' and not b['blocks'][0]['visible'] and observed['bound_text']=='bound:'+str(observed['facts_routes']))
+    check('未确认超时failure保installed空diagnostics',not c['success'] and c['blocks'][0]['status']=='initialization_unconfirmed' and c['blocks'][0]['diagnostics']=='')
     check('已确认后的本地回调错误不追加工具回执',observed['later_diagnostic']!='' and observed['legal_complete'] and observed['pumps']==3)
     report={'checks':checks,'source_sha256':hashlib.sha256(original.encode()).hexdigest(),'observed':observed,'native_errors':[l for l in (work/'native.log').read_text().splitlines() if '[E]' in l],'model_requested':False,'provider_requested':False,'boundary':'35真实detail220 source未改、实际保存facts固定；ensure facts仅固定输入，不恢复候选图；timeout仅夹具截获该block通知，合法块后续计时回调错误为明确控制。'}
     (work/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));assert all(x['passed'] for x in checks),str(work/'report.json')

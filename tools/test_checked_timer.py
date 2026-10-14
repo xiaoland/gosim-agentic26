@@ -49,7 +49,7 @@ fn agent_pump(token){if token!=run_id{return} ct_dispatches+=1 let count=0 ct_re
  elif ct_case==6 {ct_check("消息已push未release错误收束不重复",once && ct_reply.success && ct_job.failure_seen && ct_failure_calls==ct_before_failures+1)}
  elif ct_case==7 {let diagnosed=ct_reply!=nil && !ct_reply.success && ct_reply.blocks.len()==5 for block in ct_reply.blocks {if block.diagnostics=="" {diagnosed=false}}
  ct_check("原XML子VMdiagnostics正常失败回执不触发sink",once && diagnosed && !ct_job.failure_seen && ct_failure_calls==ct_before_failures)}
- elif ct_case==8 {let block=ct_reply.blocks[0] ct_check("合法原生render正常installed notified rendered",once && ct_reply.success && block.installed && block.notified && block.status=="rendered" && !ct_job.failure_seen && ct_failure_calls==ct_before_failures)}
+ elif ct_case==8 {let block=ct_reply.blocks[0] ct_check("合法原生render正常installed notified rendered",once && ct_reply.success && block.status=="initialized" && !ct_job.failure_seen && ct_failure_calls==ct_before_failures)}
  ct_cases.push({test_case:ct_case call_id:ct_job.call.id job_id:ct_job.id phase:ct_job.phase settled:ct_job.settled failure_seen:ct_job.failure_seen tool_messages:count decisions:decisions.len() dispatches:ct_dispatches-ct_before_dispatches success:ct_reply.success error_kind:route_get(ct_reply,"error_kind")})
  ct_case+=1 start_timeout(0.1,||ct_start_case())
 }

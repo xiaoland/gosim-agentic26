@@ -3291,7 +3291,7 @@ fn agent_tools(){
  render_block_tool("render_routes","呈现已评估方案列表，用户可点击打开对应候选详情；不成立的候选也可查看")
  render_block_tool("render_suggestions","呈现改进建议")
  render_block_tool("render_route_detail","呈现已评估Route详情与实际地图，包括不成立方案；可按不同id保留详情")
- tool("render_ui","提交当前宿主Makepad/Splash源码，不接受XML/HTML；语法及Navigation事实/事件/地图桥接见read_skill native-ui。时间优先引用arrive_by_label、estimated_arrival_label及明确timezone。source整稿替换；blocks按id追加或替换指定区块，其余区块状态保留。新普通区块默认显示，新overlay默认隐藏；visible显式值优先，已有块未指定时保留显示状态。返回各块真实执行诊断；success不代表内容目标完成。",{source:{type:"string" description:"嵌入View.on_render中的Makepad/Splash脚本与控件表达式；非XML/HTML。实际语法与桥接可读取native-ui资料。"} content_sizing:{type:"string" enum:["natural" "viewport"] description:render_sizing_description} blocks:{type:"array" items:{type:"object" properties:{id:{type:"string"} source:{type:"string" description:"Makepad/Splash脚本与控件表达式；非XML/HTML。"} overlay:{type:"boolean"} visible:{type:"boolean"} height:{type:"number"} content_sizing:{type:"string" enum:["natural" "viewport"] description:render_sizing_description}} required:["id" "source"]}}},[])
+ tool("render_ui","提交当前宿主Makepad/Splash源码，不接受XML/HTML；语法及Navigation事实/事件/地图桥接见read_skill native-ui。时间优先引用arrive_by_label、estimated_arrival_label及明确timezone。source整稿替换；blocks按id追加或替换指定区块，其余区块状态保留。新普通区块默认显示，新overlay默认隐藏；visible显式值优先，已有块未指定时保留显示状态。success表示本次修改块已初始化；各块status与diagnostics反映初始化或错误，unresolved_blocks保留全部未解决块，current_blocks为实际库存；不代表内容目标完成。",{source:{type:"string" description:"嵌入View.on_render中的Makepad/Splash脚本与控件表达式；非XML/HTML。实际语法与桥接可读取native-ui资料。"} content_sizing:{type:"string" enum:["natural" "viewport"] description:render_sizing_description} blocks:{type:"array" items:{type:"object" properties:{id:{type:"string"} source:{type:"string" description:"Makepad/Splash脚本与控件表达式；非XML/HTML。"} overlay:{type:"boolean"} visible:{type:"boolean"} height:{type:"number"} content_sizing:{type:"string" enum:["natural" "viewport"] description:render_sizing_description}} required:["id" "source"]}}},[])
  ]
  if mode=="demo" {
 tools.push(tool("read_calendar","读取本应用明确标注的模拟日历；返回记录和来源。",{},[]))
@@ -4073,11 +4073,16 @@ fn render_parameters_error(name,p){
  }
  return ""
 }
+fn render_block_status(block){
+ if block.error!="" {return "error"}
+ if block.installed && block.notified {return "initialized"}
+ return "initialization_unconfirmed"
+}
 fn render_current_blocks(){
  let current=[]
  for block in ui_blocks {
   let maps=[] for key slot in map_slots {if route_get(slot,"block_id")==block.id {maps.push({widget:slot.widget target:slot.target state:slot.state status:slot.status http_requested:route_get(slot,"http_requested")==true path_indices:route_get(slot,"path_indices")})}}
-  current.push({id:block.id revision:block.revision installed:block.installed notified:block.notified complete:block.complete visible:block_actual_visible(block) overlay:block.overlay document:block.document map_bindings:maps})
+  current.push({id:block.id revision:block.revision status:render_block_status(block) visible:block_actual_visible(block) overlay:block.overlay document:block.document map_bindings:maps})
  }
  return current
 }
@@ -4115,23 +4120,22 @@ fn render_tool_wait(changed,token,call,started){
  start_timeout(0.01,||{if token==run_id {render_content()}})
 }
 fn render_ui_result(changed){
- let results=[] let success=true let initialized=true
+ let results=[] let success=true
  for block in changed {
   let diagnostic="区块尚未安装"
   if block.installed {diagnostic=block_current_handle(block).diagnostics() if diagnostic=="" && block.error!="" {diagnostic=block.error}}
   if diagnostic=="" && block.notified {block.complete=true}
   block.error=diagnostic
   if diagnostic!="" || !block.notified {success=false}
-  if !block.notified {initialized=false}
   let container_rect=nil let body_rect=nil
   try {let handle=block_current_handle(block) container_rect=block.container.rect() body_rect=handle.find("body").rect()} {}
   block.render_geometry={container_rect:container_rect body_rect:body_rect}
-  results.push({id:block.id revision:block.revision diagnostics:diagnostic installed:block.installed status:if diagnostic!="" {"error"} elif block.complete {"rendered"} else {"initialization_unconfirmed"} error:if diagnostic=="" && !block.notified {"源码已安装，但本次首次事实绑定未收到完成通知"} else {nil} notified:block.notified complete:block.complete visible:block_actual_visible(block)})
+  results.push({id:block.id revision:block.revision diagnostics:diagnostic status:render_block_status(block) visible:block_actual_visible(block)})
  }
  sync_block_state()
  let unresolved=[]
- for block in ui_blocks {if block.error!="" || !block.installed || !block.notified {unresolved.push({id:block.id revision:block.revision diagnostics:block.error installed:block.installed notified:block.notified complete:block.complete repair:"render_ui的blocks可按此id更新源码，保留其它区块；__document也可这样修正，不需使用source整稿替换"})}}
- return {success:success changed_blocks_success:success interface_success:unresolved.len()==0 unresolved_blocks:unresolved current_blocks:render_current_blocks() blocks:results diagnostics:interface_error notified:initialized viewport:ui_viewport meaning:"success/changed_blocks_success仅表示本次修改区块初始化成功；interface_success与unresolved_blocks说明其它当前区块是否仍有失败或未确认，不可把局部成功称为全界面成功。current_blocks仅为当前实际库存和地图事件绑定，不证明详情内容已写好或地图像素可见。installed仅确认源码安装；rendered仅确认执行与通知，不证明可见布局或可点击。initialization_unconfirmed表示源码已安装，但本次首次事实绑定在等待期限内未确认，success:false；不是语法诊断。rendered也不保证未来交互无错误；实际语法与运行错误见diagnostics。"}
+ for block in ui_blocks {if block.error!="" || !block.installed || !block.notified {unresolved.push({id:block.id revision:block.revision diagnostics:block.error status:render_block_status(block)})}}
+ return {success:success unresolved_blocks:unresolved current_blocks:render_current_blocks() blocks:results diagnostics:interface_error viewport:ui_viewport}
 }
 fn render_diagnostic_geometry(changed){
  let geometry=[]

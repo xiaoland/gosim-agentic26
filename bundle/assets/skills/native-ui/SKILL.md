@@ -12,7 +12,7 @@ render源码在已存在的View.on_render中执行，接受Makepad/Splash脚本�
 
 展示按同一Route id绑定当前snapshot的price_label、duration_label、arrival_label及assessment依据，保留unknown与原因。不将余量补成总耗时，不把估价写成成交价；未知项存在时不给到达保证。铁路区间耗时不能代替整程耗时，已查段小计不能写成门到门总价。优先使用带日期、时区的真实时间标签；字段、范围与事实更新方式见宿主接口，不从工具字段猜造snapshot接口。守护展示同样绑定当前facts，业务规则见journey-guardian；事实语义见navigation-data。
 
-新稿content_sizing默认natural，根及嵌套内容用width:Fill height:Fit随内容展开，由父容器滚动；height只约束外视口。源码自行管理有限ScrollYView时显式用viewport。当前宿主Android模式中，NavBody、NavMeta和NavSurface默认width:Fill；在Flow.Right{wrap:true}里与其他控件并排时会占满该行，后续内容可能被挤成大空白。短并列项显式用width:Fit；长描述放在flow:Down中保留width:Fill以自然换行。show_block使用实际已安装目标id，hide_self()关闭发起块；新详情overlay初始隐藏，根内容正常可见，更新保留显示状态。rendered只确认首次执行与事实绑定，空diagnostics或success不证明手机内容可见、可点或交付完成。
+新稿content_sizing默认natural，根及嵌套内容用width:Fill height:Fit随内容展开，由父容器滚动；height只约束外视口。源码自行管理有限ScrollYView时显式用viewport。当前宿主Android模式中，NavBody、NavMeta和NavSurface默认width:Fill；在Flow.Right{wrap:true}里与其他控件并排时会占满该行，后续内容可能被挤成大空白。短并列项显式用width:Fit；长描述放在flow:Down中保留width:Fill以自然换行。show_block使用实际已安装目标id，hide_self()关闭发起块；新详情overlay初始隐藏，根内容正常可见，更新保留显示状态。回执initialized只确认首次执行与事实绑定，空diagnostics或success不证明手机内容可见、可点或交付完成。
 
 按需资料直接由read_skill读取，path相对技能根，例如{name:"native-ui",path:"references/host-interface.md"}：
 
