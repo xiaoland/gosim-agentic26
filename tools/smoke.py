@@ -799,6 +799,9 @@ def main():
  if '--map-geometry' in sys.argv:
   import test_map_geometry as geometry
   source=geometry.source(original)
+ if '--render-facts-channel' in sys.argv:
+  import test_render_facts_channel as facts_channel
+  source=facts_channel.source(original)
  if '--render-facts' in sys.argv:
   import test_render_facts as render_facts
   source=render_facts.source(original)
@@ -909,6 +912,7 @@ def main():
   if '--trips' in sys.argv or '--trips-replay' in sys.argv or '--ux-shell' in sys.argv:trips.prepare(jail)
   if '--trip-snapshot' in sys.argv:snapshot.prepare(jail)
   if '--rail-egress' in sys.argv:rail.prepare_egress(jail)
+  if '--render-facts-channel' in sys.argv:facts_channel.prepare(jail)
   if '--render-facts' in sys.argv:render_facts.prepare(jail)
   if '--terminal-render' in sys.argv:terminal_render.prepare(jail)
   if '--destination-entry' in sys.argv:destination_entry.prepare(jail)
@@ -936,6 +940,8 @@ def main():
    extension.run(w,jail,original,source);return
   if '--map-geometry' in sys.argv:
    geometry.run(w,jail,original,source);return
+  if '--render-facts-channel' in sys.argv:
+   facts_channel.run(w,jail,q,stop,launch,original,source);return
   if '--render-facts' in sys.argv:
    render_facts.run(w,jail,original,source);return
   if '--terminal-render' in sys.argv:

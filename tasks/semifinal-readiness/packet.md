@@ -18,6 +18,10 @@
 
 ## 最新验收及未解决问题
 
+0.16.2的online24完整守护验收未通过。初轮20/20真实响应自然stop，实际父确认保存v1，冷启goal逐值相同、0query／0dispatch、账本不变；固定16:11:18期限、200元、已花0。随后公开mock位置广州南，前台重核真实report_goal_check为unknown，原起点相差15.5km且不推断已登车，约束保持。第二loop26响应后render_ui在block_source源码拼接触发heap allocation limit，113秒无工具回执/新请求，页面停修正；当前已全停，v2未确认。第二loop提案373另选AMap route1_1（新塘南线、小计11），依据却写番禺S4907／58，不能当成小数字差异或确认成功；保留原件，不因未自然结束判为最终语义FAIL。原件归`build/research/journey-guardian/current-online-24/`，失败5块DSL参数、native.log与完整私有state保全，磁盘只代表初轮最后保存快照，不冒称第二loop全内存facts。
+
+当前内存修复已通过10/10原生机械检查：同128MiB cap下旧30份wrapper在第26次拼接拒绝，新30份共170820B（单份5694B，旧372458B）；原失败5稿逐值保持，完整事实首绑、hidden、刷新保输入、安装延迟修订捕获、整稿及生产冷恢复4稿14Route通过。证据`build/smoke/navigation-harness-zt4g9dey/report.json`及旧负控`navigation-harness-xgtctqhj/report.json`。测试为desktop机械模式，不冒Android布局或第二query完整内存复现，未提高配额。propose_goal.route_id字段另精确为父确认后保存的Route对象ID；原request365仅此字段单变量M3判别已真实运行1次，首响只选extend_route而未作提案绑定，严格记未覆盖，不追加采样；47 calls／3,359,370 tokens为本日账本，旧日账本归档保留。
+
 **online23只通过新鲜手机UI验收。** 空出行、正常挂载入口、真实M3／交通服务，13次请求与13份完整响应后自然stop；首卡内容连续，两条不同Route的详情、真实388×260地图、滚动和返回通过，第一路线首组与末组已实际查看。没有手改生成稿或注入修稿观察；中间地图组未逐图采样，本轮没有滴滴报价结果、未确认目标或下单，不认证细语义、全部候选动作或完整守护。原件 `build/research/journey-guardian/current-online-23/result-safe.json`，发布附件 `qualification-ui.json`。该轮累计229 calls／12,981,059 tokens，全停。
 
 较早online7曾在真实循环完成条件替代、父确认与goal v2保存，期限和预算保持，整程费用／站内衔接未知未被认证。online11另有普通出行自动保存和冷重开的证据。它们证明各自记录版本及条件，不能补足0.16.1完整守护v1／v2尚未覆盖的部分；版本和原件见[验收历史](qualification-history.md)。
@@ -26,6 +30,7 @@
 
 - 完整守护需实际走完准备方案、父确认保存目标、变化后前台重新核验、替代差异、拒绝或确认、目标版本与持久化恢复。新用例应明确自然守护意图，不指定工具顺序或成功路线；目标期限和预算不能在途中改写。
 - 模型曾把已查区间小计／时刻提升为整程价格／T3到达及预算期限满足，并虚构票价、误读用时或一票制。机械投影精简已落地，但没有认证这些语义缺陷消失；正确动态详情不能抵消静态卡片或提案错误。详情来源文字也有缺失记录，按当前实际输出核对。
+- 后续独立切片已确定为通用约束采用：现explicit_limits用正则提前裁决自然语言、地点采用也重算预算期限，违反LLM负责解释的分工。先修当前渲染堆阻塞，随后由guardian_interaction移除这套语义真值，让通用set_constraints接受模型解释、harness以received_at换算并保留已确认目标锁定；地点采用独立，期限未设置时为nil。当前只完成调用盘点与取舍，尚未实施，不与live封包并行改源。
 - harness与验收须区分实际用户可见render、父提案、无tool_calls自然结束内容和诊断reasoning；online16／17曾被错误提前中止，不算用户结果语义FAIL。旧JSON夹具曾掩盖原生标识符键差异，包预检或render success不能代替真实异步回执和可见控件。
 - 新运行先核当前包挂载、source／binary身份、Android样式、空出行与单业务VM；online20隔离状态曾缺Navigation挂载，不能复制旧包制造可用状态。模型恢复、工具取消、跨出行状态及错误后详情身份需按真实触发核对，复用未受影响的既有证据。
 - 布局问题优先区分生成稿使用、工具／技能合同和宿主引擎语义。旧wrap连续Fill与natural根Fill已取得单变量证据；不据旧失败直接改全局布局引擎，不手改模型稿冒充自主修正。
@@ -37,14 +42,14 @@
 | Owner | 当前责任与返回要求 |
 | --- | --- |
 | root | 整合授权、取舍、源码owner与运行槽，采用实际证据；决定必要修复、版本更新及外部交付。 |
-| guardian_interaction | 唯一修改main及UI／guardian技能，落实本地`emit action:propose_goal`，复用同名Agent工具的`guardian_propose`准备pending；返回必要边界检查与封包前身份。 |
-| guardian_qualification | 待统一封包后，真实验证v1→位置变化→recheck→v2→冷恢复；先给具体用例、版本身份与范围，区分新鲜规划、隔离回放和历史恢复，失败保留原件并全停自有实例。 |
+| guardian_interaction | 唯一源码owner；本地propose_goal已交付，当前调查修复block_source重复事实编码/首绑与堆计账，保留生成稿与完整候选，不以配额或裁剪掩盖；下一约束切片暂缓。 |
+| guardian_qualification | online24已保全全停，v1/冷恢复通过而v2未覆盖；修复后限定验证阻塞恢复及必要闭环；先给具体用例、版本身份与范围，区分新鲜规划、隔离回放和历史恢复，失败保留原件并全停自有实例。 |
 | layout_decision | 只读判断布局／harness问题的因果及最小改动；实现由root指定稳定owner，不将使用约束直接升级为全局引擎变更。 |
 | submission_packet | 仅整理本packet与现有验收历史，本轮不改README、应用源码或Git提交。 |
 
 已采纳的下一修复切片是本地`emit action:propose_goal`：直接复用同名Agent工具的`guardian_propose`准备pending，父应用仍须真实确认才保存目标。它不自动选择方案、不续聊，也不为旧`propose_with_id`添加别名兼容。该切片已实现并通过10/10原生定点：真实生成按钮→待确认→父确认保存v1，替代准备不写盘→父确认v2；非法Route/缺参/忙/历史/旧稿明确失败，保留合法pending。旧修订为dispatcher定点，其余合法操作实际点击；0模型/供应商，全停。证据`build/smoke/navigation-harness-q50id3ky/report.json`。smoke临时安装目录过滤的竞态也作窄修。
 
-root已采用实现并统一0.16.2check/build通过，source `0fbaf642`、main `c00bac0a`、bundle `e8223804`；运行槽交guardian_qualification完成真实v1→位置变化→recheck→v2→冷恢复，本地通过不提前认证真实闭环。harness保持机械合同、LLM保留语义权威；修复不影响的协议、保存事务、同窗恢复、浮层与第二consumer检查不重复跑，不为小措辞做统计矩阵，也不提前宣称完整任务成功。
+当前0.16.2内存修复封包check/build通过，source `6d628190`、main `62789ef1`、bundle `42fdaaf4`。online25于11:56:44从已证v1正式记录冷恢复，原16:11:18期限／200元／已花0逐值保持、冷启动0query且账本不变；广州南新观测后真实父前台重核正在自然运行，非恢复旧模型对话。结果前不认证v2或闭环。harness保持机械合同、LLM保留语义权威；修复不影响的协议、保存事务、同窗恢复、浮层与第二consumer检查不重复跑，不为小措辞做统计矩阵，也不提前宣称完整任务成功。
 
 当前没有新增待用户决定事项。若实施中出现实质范围变化、缺少用户特定资料或外部发布授权，再呈现最小待决定事项；继续改进本身不重复询问。
 

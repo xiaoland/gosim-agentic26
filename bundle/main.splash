@@ -3486,7 +3486,7 @@ fn agent_tools(){
  if agent_tool_schema!=nil {return agent_tool_schema}
  let mode=location_mode()
  let tools = [
- tool("propose_goal","准备本轮route_id的目标/替代提案，无需用户此前确认；只暂存待确认内容，不保存或替换目标。父应用真实确认按钮才保存/生效。已有目标约束锁定；preferences/risk_acceptance为待用户确认文字；basis解释取舍，不认证可行性，到达与预算范围以提案assessment和Route事实为准。可推荐conditional unknown，不能将其称为已满足预算/期限；新提案风险描述不是用户已接受，原risk_acceptance不被覆盖。",{route_id:{type:"string"} preferences:{type:"string"} risk_acceptance:{type:"string"} basis:{type:"string"}},["route_id" "preferences" "risk_acceptance" "basis"])
+ tool("propose_goal","准备本轮route_id的目标/替代提案，无需用户此前确认；只暂存待确认内容，不保存或替换目标。父应用真实确认按钮才保存/生效。已有目标约束锁定；preferences/risk_acceptance为待用户确认文字；basis解释取舍，不认证可行性，到达与预算范围以提案assessment和Route事实为准。可推荐conditional unknown，不能将其称为已满足预算/期限；新提案风险描述不是用户已接受，原risk_acceptance不被覆盖。",{route_id:{type:"string" description:"父确认后完整保存的选定Route对象ID；偏好、风险和basis解释这个对象"} preferences:{type:"string"} risk_acceptance:{type:"string"} basis:{type:"string"}},["route_id" "preferences" "risk_acceptance" "basis"])
  tool("report_goal_check","以本轮新route_id计算并记录原计划valid/invalid/unknown；省略id检查已过期、已超支或缺证据。返回核验与替代差额，不替换路线。",{route_id:{type:"string"}},[])
  tool("read_skill","读取技能目录中的技能。省略path读取SKILL.md；path可读取该技能返回的files中的引用资料。",{name:{type:"string"} path:{type:"string"}},["name"])
  tool("read_location",if mode=="demo" {"读取显式模拟出发位置并核实城市。"} else {"读取当前设备定位并核实城市。"},{},[])
@@ -4258,7 +4258,7 @@ fn native_ui_style_source(){return "// Material-inspired visual primitives; copi
 // END agentic-native-ui
 
 fn generated_context(){
-    return native_ui_style_source()+"let NavRegular = theme.font_regular{font_size:16 font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\n// Navigation局部字体适配；canonical SDK与其它应用主题保持原样。\nlet MaterialTitle = MaterialTitle{draw_text +:{text_style:NavRegular{font_size:22}}}\nlet MaterialBody = MaterialBody{draw_text +:{text_style:NavRegular{font_size:16}}}\nlet MaterialMeta = MaterialMeta{draw_text +:{text_style:NavRegular{font_size:14}}}\nlet MaterialAction = MaterialAction{draw_text +:{text_style:NavRegular{font_size:16}}}\nlet MaterialSecondaryAction = MaterialSecondaryAction{draw_text +:{text_style:NavRegular{font_size:14}}}\n// 通用内容样式；不读取、排序或选择业务路线。\nlet NavSurface = MaterialSurface{draw_bg +:{color:#xf8fbfa border_radius:16}}\nlet NavCard = MaterialCard{draw_bg +:{color:#xf0f5f3 border_radius:12}}\nlet NavTitle = MaterialTitle{draw_text +:{text_style:NavRegular{font_size:22} color:#x162e35}}\nlet NavBody = MaterialBody{draw_text +:{text_style:NavRegular{font_size:16} color:#x162e35}}\nlet NavMeta = MaterialMeta{draw_text +:{text_style:NavRegular{font_size:14} color:#x50666c}}\nlet NavAction = MaterialAction{draw_text +:{text_style:NavRegular{font_size:16} color:#xffffff color_hover:#xffffff color_down:#xffffff color_focus:#xffffff color_disabled:#x52615d} draw_bg +:{color:#x28786f color_hover:#x216b63 color_down:#x195d56 color_focus:#x195d56 color_disabled:#xdbe4e0 border_size:0 border_radius:12}}\nlet NavSecondaryAction = MaterialSecondaryAction{draw_text +:{text_style:NavRegular{font_size:14} color:#x162e35 color_hover:#x162e35 color_down:#x162e35 color_focus:#x162e35 color_disabled:#x52615d} draw_bg +:{color:#xe4eeea color_hover:#xd7e6df color_down:#xc5dbd1 color_focus:#xc5dbd1 color_disabled:#xdbe4e0 border_size:0 border_radius:12}}\n\nlet Label = Label{width: Fill height: Fit flow: Flow.Right{wrap:true} draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nlet mailbox_buffer = \"\"\nfn emit(event){event.block_id=source_block_id event.block_revision=source_block_revision mailbox_buffer += event.to_json() + \"\\n\" ui.mailbox.set_text(mailbox_buffer)}\nfn show_block(target_id){emit({action:\"show_block\" block:target_id visible:true})}\nfn hide_self(){emit({action:\"show_block\" block:source_block_id visible:false})}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(initial){let value = ui.fact_revision.text() if initial || value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} if initial {emit({action:\"rendered\"})} start_timeout(0.1, || refresh(false))}\nstart_timeout(0.02, || {ui.body.render() start_timeout(0.01, || refresh(true))})\n"
+    return native_ui_style_source()+"let NavRegular = theme.font_regular{font_size:16 font_family: FontFamily{latin := FontMember{res: http_resource(\"{{assets}}/assets/fonts/NavigationSans-Regular.otf\") asc: 0.0 desc: 0.0}}}\n// Navigation局部字体适配；canonical SDK与其它应用主题保持原样。\nlet MaterialTitle = MaterialTitle{draw_text +:{text_style:NavRegular{font_size:22}}}\nlet MaterialBody = MaterialBody{draw_text +:{text_style:NavRegular{font_size:16}}}\nlet MaterialMeta = MaterialMeta{draw_text +:{text_style:NavRegular{font_size:14}}}\nlet MaterialAction = MaterialAction{draw_text +:{text_style:NavRegular{font_size:16}}}\nlet MaterialSecondaryAction = MaterialSecondaryAction{draw_text +:{text_style:NavRegular{font_size:14}}}\n// 通用内容样式；不读取、排序或选择业务路线。\nlet NavSurface = MaterialSurface{draw_bg +:{color:#xf8fbfa border_radius:16}}\nlet NavCard = MaterialCard{draw_bg +:{color:#xf0f5f3 border_radius:12}}\nlet NavTitle = MaterialTitle{draw_text +:{text_style:NavRegular{font_size:22} color:#x162e35}}\nlet NavBody = MaterialBody{draw_text +:{text_style:NavRegular{font_size:16} color:#x162e35}}\nlet NavMeta = MaterialMeta{draw_text +:{text_style:NavRegular{font_size:14} color:#x50666c}}\nlet NavAction = MaterialAction{draw_text +:{text_style:NavRegular{font_size:16} color:#xffffff color_hover:#xffffff color_down:#xffffff color_focus:#xffffff color_disabled:#x52615d} draw_bg +:{color:#x28786f color_hover:#x216b63 color_down:#x195d56 color_focus:#x195d56 color_disabled:#xdbe4e0 border_size:0 border_radius:12}}\nlet NavSecondaryAction = MaterialSecondaryAction{draw_text +:{text_style:NavRegular{font_size:14} color:#x162e35 color_hover:#x162e35 color_down:#x162e35 color_focus:#x162e35 color_disabled:#x52615d} draw_bg +:{color:#xe4eeea color_hover:#xd7e6df color_down:#xc5dbd1 color_focus:#xc5dbd1 color_disabled:#xdbe4e0 border_size:0 border_radius:12}}\n\nlet Label = Label{width: Fill height: Fit flow: Flow.Right{wrap:true} draw_text.text_style: NavRegular}\nlet Button = Button{draw_text.text_style: NavRegular}\nlet ButtonFlat = ButtonFlat{draw_text.text_style: NavRegular}\nlet TextInput = TextInput{draw_text.text_style: NavRegular}\nfn snapshot(){return ui.fact_state.text().parse_json()}\nlet mailbox_buffer = \"\"\nfn emit(event){event.block_id=source_block_id event.block_revision=source_block_revision mailbox_buffer += event.to_json() + \"\\n\" ui.mailbox.set_text(mailbox_buffer)}\nfn show_block(target_id){emit({action:\"show_block\" block:target_id visible:true})}\nfn hide_self(){emit({action:\"show_block\" block:source_block_id visible:false})}\nlet last_facts = \"\"\nlet on_facts_changed = nil\nfn refresh(initial){let value = ui.fact_revision.text() if initial || value != last_facts {last_facts = value if on_facts_changed != nil {on_facts_changed(snapshot())}} if initial {emit({action:\"rendered\"})} start_timeout(0.1, || refresh(false))}\nstart_timeout(0.02, || {if ui.fact_revision.text()!=\"\" {ui.body.render() start_timeout(0.01, || refresh(true))}})\n"
 }
 fn facts_json(){
  if ui_facts_cached_revision!=ui_facts_revision {let value=interface_facts() render_probe_mark("serialize_entered") ui_facts_json=value.to_json() render_probe_mark("serialize_returned") ui_facts_cached_revision=ui_facts_revision}
@@ -4268,10 +4268,10 @@ fn block_source(block,body){
  let finite=block.overlay || block.document || block.height!=nil
  let context="let source_block_id="+block.id.to_json()+"\nlet source_block_revision="+block.revision+"\n"+generated_context()
  let height_text=if finite {"Fill"} else {"Fit"}
- let head=context+"\nView{width:Fill height:"+height_text+" flow:Down\nmailbox := Label{visible:false text:\"\"}\nfact_state := Label{visible:false text:"+facts_json().to_json()+"}\nfact_revision := Label{visible:false text:"+(""+ui_facts_revision).to_json()+"}\n"
+ let head=context+"\nView{width:Fill height:"+height_text+" flow:Down\nmailbox := Label{visible:false text:\"\"}\nfact_state := Label{visible:false text:\"\"}\nfact_revision := Label{visible:false text:\"\"}\n"
  if finite {head+="scroll := ScrollYView{width:Fill height:Fill flow:Down clip_x:true clip_y:true\n"}
  let tail=if finite {"}\n}"} else {"}"}
- return head+"body := View{width:Fill height:"+block_content_height(block)+" flow:Down on_render:||{let facts=snapshot()\n"+body+"\n}}\n"+tail
+ return head+"body := View{width:Fill height:"+block_content_height(block)+" flow:Down on_render:||{if ui.fact_revision.text()==\"\" {return true} let facts=snapshot()\n"+body+"\n}}\n"+tail
 }
 // 只校验呈现工具已声明的参数边界；内部恢复调用保持原格式。
 fn render_parameters_error(name,p){
@@ -4392,6 +4392,7 @@ fn mount_ui_blocks(params,token,revision){
   clear_generated()
   ui_facts_object=cached_object ui_facts_object_run=cached_run ui_facts_object_revision=cached_revision ui_facts_json=cached_json ui_facts_cached_revision=cached_json_revision
  }
+ let initial_facts=facts_json() let initial_revision=ui_facts_cached_revision
  let changed=[] interface_run=token interface_inflight=false
  for input in submissions {let existing=block_by_id(input.id) if existing!=nil && route_get(input,"overlay")!=nil && existing.overlay!=(input.overlay==true) {interface_error="已存在区块的overlay位置不变；请使用新id" return nil}}
  for input in submissions {
@@ -4411,7 +4412,7 @@ fn mount_ui_blocks(params,token,revision){
   block.revision+=1 block.notified=false block.complete=false block.error="" block.mailbox_seen="" block.mailbox_lines=0 block.installed=false
   if route_get(input,"route_detail")!=nil {block.route_detail=input.route_detail}
   block.raw_source=input.source
-  block.source=block_source(block,input.source) block.source_revision=ui_facts_revision changed.push(block)
+  block.source=block_source(block,input.source) block.initial_facts=initial_facts block.initial_revision=initial_revision changed.push(block)
  }
  sync_block_state()
  // ScriptReapply retains the unmodified child WidgetRefs and their Splash VMs.
@@ -4427,7 +4428,8 @@ fn install_block_later(block,token,revision,call_id){
   let handle=block_current_handle(block)
   handle.diagnostics()
   block.body=block.source
-  try {handle.set_text(block.source) block.installed=true block.written_revision=block.source_revision set_block_visibility(block)}
+  // 修订号最后提交；首次body和回调只读取与安装同时捕获的完整事实。
+  try {handle.set_text(block.source) handle.find("fact_state").set_text(block.initial_facts) handle.find("fact_revision").set_text(""+block.initial_revision) block.initial_facts=nil block.installed=true block.written_revision=block.initial_revision set_block_visibility(block)}
   {block.error="生成区块执行失败"}
   trace_emit_run("render_source",{block_id:block.id revision:revision source:block.source},call_id,token)
  })
