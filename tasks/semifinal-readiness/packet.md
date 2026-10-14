@@ -8,7 +8,11 @@
 
 保持自主 function-calling loop、渐进技能和自由 Splash DSL；harness 负责机械合同，LLM 保留语义判断。不增加固定业务模板、文本拦截、静默改写生成稿或固定成功路线，不为当前任务扩组件库、后台监听或新能力。真实模型与交通验证使用隔离状态；不读取新个人数据、不下单、不提交上游 PR。用户自行制作视频，本任务不再制作视频。
 
-## 当前已提交版本
+## 当前冻结提交
+
+用户最新授权：“注意冻结代码并更新comment，14:00截止”。应用源码冻结在09c6f9e23b6683cd9ab5ba0b474df915a990730b，标签v0.16.3不可移动，14:00后不继续修改本次冻结代码。Release v0.16.3与既有#116/comment-6151741694已于13:56公开更新；匿名下载ZIP摘要f7feefe8与固定Git42文件核对通过。最终交付归build/submission/final-09c6f9e；仅README/本packet随后同步发布事实，bundle、tools、toolchain保持冻结。旧v0.16.1保持不变，视频继续引用其用户正确资产。
+
+## 此前已提交版本
 
 `0.16.1` 已公开提交：[Release v0.16.1](https://github.com/xiaoland/gosim-agentic26/releases/tag/v0.16.1)与[App Hub #116](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/116)。固定源码为 `c47929b23942e0f61de90e109c1034fab8e06463`；它与 `369cf70` 的 bundle 逐字相同，应用 source SHA256 `409553b9`、bundle BLAKE3 `df5b79e0`。之后的工作不能将这份已发布证据改写为新版本结果。
 
@@ -55,9 +59,9 @@
 
 已交付的本地`emit action:propose_goal`：直接复用同名Agent工具的`guardian_propose`准备pending，父应用仍须真实确认才保存目标。它不自动选择方案、不续聊，也不为旧`propose_with_id`添加别名兼容。该切片已实现并通过10/10原生定点：真实生成按钮→待确认→父确认保存v1，替代准备不写盘→父确认v2；非法Route/缺参/忙/历史/旧稿明确失败，保留合法pending。旧修订为dispatcher定点，其余合法操作实际点击；0模型/供应商，全停。证据`build/smoke/navigation-harness-q50id3ky/report.json`。smoke临时安装目录过滤的竞态也作窄修。
 
-本轮通用约束实现、机械检查、统一封包及单次相对时限真实模型验收已完成。UI技能资料已补准；同次CF自然续接2响应仅生成routes/suggestions，实际首卡选中route_2_1却没有详情区块，状态FAIL_DETAIL_DELIVERY_MISSING（online26-ui-contract-continuation/result-safe.json）。空选/返回重开未覆盖，原首CF仍UNCOVERED，均不改写。render模型回执已删重复成功标志与宽泛命名，保留真实初始化/库存/旧块诊断，partial原生5项通过，main ff01466a；最终check/build通过，当前source 1298597a、main ff01466a、bundle c59c59c8、binary 1a10ee00（build/agent/build.json）；真实模型约束证据仍归旧1fb22a7，不拼接为最终源码整轮验收。命名修正不被宣称是遗漏根因或UI已修好。下一必要工作是从真实完整呈现中继续定位详情交付遗漏，当前不为字段改名追加CF。本日81 calls／5,192,462 tokens，所有自有实例全停。当前不生产新Release或更新Hub材料，保持0.16.1公开入口不变，避免把未封包源码、online24 donor与online25当前结果混成同一版证明。
+本轮通用约束实现、机械检查、统一封包及单次相对时限真实模型验收已完成。UI技能资料已补准；同次CF自然续接2响应仅生成routes/suggestions，实际首卡选中route_2_1却没有详情区块，状态FAIL_DETAIL_DELIVERY_MISSING（online26-ui-contract-continuation/result-safe.json）。空选/返回重开未覆盖，原首CF仍UNCOVERED，均不改写。render模型回执已删重复成功标志与宽泛命名，保留真实初始化/库存/旧块诊断，partial原生5项通过，main ff01466a；最终check/build通过，当前source 1298597a、main ff01466a、bundle c59c59c8、binary 1a10ee00（build/agent/build.json）；真实模型约束证据仍归旧1fb22a7，不拼接为最终源码整轮验收。命名修正不被宣称是遗漏根因或UI已修好。下一必要工作是从真实完整呈现中继续定位详情交付遗漏，当前不为字段改名追加CF。本日81 calls／5,192,462 tokens，所有自有实例全停。已按14:00最新授权发布固定v0.16.3并更新原comment；各轮测试仍分版本，冻结包不是最终整轮UI通过。
 
-当前无需准备外部更新。online25严格归0.16.2／c33bebe固定source，0.16.3的实现与当前单次验收单独记证据；已有Notes offer和GitHub-attested Hub审批缺口仍保留，外部交付由root后续决定。
+本次外部更新已完成，不继续修改冻结源码。online25严格归0.16.2／c33bebe固定source，0.16.3的实现与当前单次验收单独记证据；已有Notes offer和GitHub-attested Hub审批缺口仍保留，外部交付由root后续决定。
 
 当前没有新增待用户决定事项。若实施中出现实质范围变化、缺少用户特定资料或外部发布授权，再呈现最小待决定事项；继续改进本身不重复询问。
 

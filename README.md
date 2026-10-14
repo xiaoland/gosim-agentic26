@@ -2,7 +2,7 @@
 
 “40 分钟内到机场，预算 50，尽量便宜。”
 
-[观看决赛演示视频](https://github.com/xiaoland/gosim-agentic26/releases/download/v0.16.1/final-v1.mp4) · [已提交的决赛材料](https://github.com/xiaoland/gosim-agentic26/releases/tag/v0.16.1)
+[观看决赛演示视频](https://github.com/xiaoland/gosim-agentic26/releases/download/v0.16.1/final-v1.mp4) · [已提交的决赛材料](https://github.com/xiaoland/gosim-agentic26/releases/tag/v0.16.3)
 
 [官方无补丁宿主：30秒降级演示](https://github.com/xiaoland/gosim-agentic26/raw/refs/heads/main/demo/Navigation-stock-demo.mp4) · [补充字幕](demo/Navigation-stock-demo.srt) · [版本与核验记录](demo/Navigation-stock-evidence.json)
 
@@ -93,11 +93,11 @@ Agent可以提出保存目标与选定路线，也可让生成的候选按钮通
 
 ## 决赛交付与验收
 
-决赛材料位于 [Release v0.16.1](https://github.com/xiaoland/gosim-agentic26/releases/tag/v0.16.1)，既有 [App Hub #116](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/116)提供同一版本入口。附件包含精确应用源码、作者制作的[演示视频](https://github.com/xiaoland/gosim-agentic26/releases/download/v0.16.1/final-v1.mp4)、预检与作者自评。视频展示真实运行及剪辑，不代表每次新生成界面都与录像相同。
+决赛冻结源码为 `09c6f9e23b6683cd9ab5ba0b474df915a990730b`，材料位于 [Release v0.16.3](https://github.com/xiaoland/gosim-agentic26/releases/tag/v0.16.3)，既有 [App Hub #116](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/116)提供同一版本入口。附件包含精确应用源码、作者制作的[演示视频](https://github.com/xiaoland/gosim-agentic26/releases/download/v0.16.1/final-v1.mp4)、预检与作者自评。视频展示真实运行及剪辑，不代表每次新生成界面都与录像相同。
 
 真实 M3、高德、12306 和滴滴已在多轮任务中完成查询、候选比较及自主界面生成。0.16.1 最后一次新规划在13次真实响应后自然结束：候选卡正文连续可见，混合铁路与公交两条 Route 的详情、真实地图、滚动及返回通过，首路线首末地图分组也已核对。该轮没有人工改稿或注入修稿提示，也没有确认目标或下单；未生成滴滴报价卡。新生成稿仍可能出现尺寸或语法问题，模型也可能夸大全程费用、到达和未知范围，因此不宣称每轮完整验收均通过。配套宿主包预检通过；标准 Hub 扫描因未提供 Notes 工具而拒绝，尚未上架。版本、原始诊断、定点修复与未覆盖项归[决赛前任务包](tasks/semifinal-readiness/packet.md)。
 
-0.16.3当前为开发验证版本，尚未发布；公开Release及#116仍为0.16.1。约束采用验证通过，但新生成详情仍出现未选路线便自行展开的问题；技能资料补充不等于UI效果已修复。
+0.16.3已冻结发布并更新#116既有提交comment；演示视频复用此前录制的0.16.1材料，不认证最终源码的全部改动。约束采用验证通过，但新生成详情仍出现未选路线便自行展开的问题；技能资料补充不等于UI效果已修复。
 
 ## 初赛交付与复现
 
